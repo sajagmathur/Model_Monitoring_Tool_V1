@@ -1,0 +1,84 @@
+name: deploy-to-dev
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'pipelines/**'
+      - '.github/workflows/deploy-to-dev.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-mlops
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+
+      - name: Build Backend Container
+        run: |
+          docker build -t mlops-backend:${{ github.sha }} backend/
+          docker tag mlops-backend:${{ github.sha }} ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/mlops-backend:${{ github.sha }}
+          docker tag mlops-backend:${{ github.sha }} ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/mlops-backend:latest
+
+      - name: Push to ECR
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/mlops-backend:${{ github.sha }}
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/mlops-backend:latest
+
+      - name: Deploy to ECS Dev
+        run: |
+          aws ecs update-service \
+            --cluster mlops-dev \
+            --service mlops-backend-service \
+            --force-new-deployment \
+            --region us-east-1
+
+      - name: Wait for Deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster mlops-dev \
+            --services mlops-backend-service \
+            --region us-east-1
+
+      - name: Run Smoke Tests
+        run: |
+          sleep 30
+          for i in {1..10}; do
+            if curl -f http://mlops-dev-lb.us-east-1.elb.amazonaws.com/health; then
+              echo "✓ Health check passed"
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "Dev deployment: ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deploy to Dev* - ${{ job.status }}\n*Commit:* ${{ github.sha }}"
+                  }
+                }
+              ]
+            }

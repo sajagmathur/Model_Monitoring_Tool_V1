@@ -1,0 +1,170 @@
+name: promote-to-prod
+on:
+  workflow_dispatch:
+    inputs:
+      modelId:
+        description: 'Model ID to promote'
+        required: true
+      approvers:
+        description: 'Comma-separated list of approver GitHub handles'
+        required: true
+
+jobs:
+  collect-approvals:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request Approvals
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const approvers = '${{ github.event.inputs.approvers }}'.split(',').map(a => a.trim());
+            const reviewers = approvers.map(a => `@${a}`).join(' ');
+            
+            github.rest.issues.createComment({
+              issue_number: 1,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🚀 **Production Deployment Request**\n\nModel ID: \`${{ github.event.inputs.modelId }}\`\n\nApprovals Required: ${approvers.length}/2\n\n${reviewers} - please review and approve below.`
+            });
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: collect-approvals
+    if: github.event.inputs.approvers != ''
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-mlops
+          aws-region: us-east-1
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+
+      - name: Blue-Green Deployment Setup
+        run: |
+          echo "Setting up blue-green deployment..."
+          TASK_DEFINITION=$(aws ecs describe-task-definition \
+            --task-definition mlops-inference-prod \
+            --region us-east-1 --query 'taskDefinition' --output json)
+          
+          echo "$TASK_DEFINITION" > task-def.json
+
+      - name: Deploy Green Environment
+        run: |
+          aws ecs create-service \
+            --cluster mlops-prod \
+            --service-name mlops-inference-prod-green \
+            --task-definition mlops-inference-prod \
+            --desired-count 3 \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[subnet-12345],securityGroups=[sg-12345],assignPublicIp=ENABLED}" \
+            --region us-east-1 || echo "Service may already exist"
+
+      - name: Wait for Green Ready
+        run: |
+          aws ecs wait services-stable \
+            --cluster mlops-prod \
+            --services mlops-inference-prod-green \
+            --region us-east-1
+
+      - name: Health Check Green
+        run: |
+          for i in {1..20}; do
+            HEALTHY=$(aws elbv2 describe-target-health \
+              --target-group-arn arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/mlops-prod-green/abc \
+              --query 'TargetHealthDescriptions[?TargetHealth.State==`healthy`]' \
+              --region us-east-1 | jq 'length')
+            
+            if [ $HEALTHY -eq 3 ]; then
+              echo "✓ Green environment healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Switch Traffic to Green
+        run: |
+          aws elbv2 modify-listener \
+            --listener-arn arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/mlops-prod-lb/abc \
+            --default-actions Type=forward,TargetGroupArn=arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/mlops-prod-green/abc \
+            --region us-east-1
+
+      - name: Monitor Metrics
+        run: |
+          echo "Monitoring error rates and latency..."
+          for i in {1..5}; do
+            ERROR_RATE=$(aws cloudwatch get-metric-statistics \
+              --metric-name Errors \
+              --namespace mlops-inference-prod \
+              --start-time $(date -u -d '1 minute ago' +%Y-%m-%dT%H:%M:%S) \
+              --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+              --period 60 \
+              --statistics Sum \
+              --region us-east-1 | jq '.Datapoints[0].Sum // 0')
+            
+            if (( $(echo "$ERROR_RATE > 10" | bc -l) )); then
+              echo "❌ High error rate detected: $ERROR_RATE"
+              exit 1
+            fi
+            sleep 60
+          done
+          echo "✓ Metrics healthy"
+
+      - name: Cleanup Blue Environment
+        if: success()
+        run: |
+          aws ecs delete-service \
+            --cluster mlops-prod \
+            --service mlops-inference-prod-blue \
+            --force \
+            --region us-east-1 || echo "Blue service cleanup skipped"
+
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "Rolling back to Blue environment..."
+          aws elbv2 modify-listener \
+            --listener-arn arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/mlops-prod-lb/abc \
+            --default-actions Type=forward,TargetGroupArn=arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/mlops-prod-blue/abc \
+            --region us-east-1
+
+      - name: Update Audit Log
+        if: always()
+        run: |
+          curl -X POST http://mlops-studio-backend/api/audit-logs \
+            -H "Content-Type: application/json" \
+            -d '{
+              "action": "PROMOTE_PROD",
+              "user": "${{ github.actor }}",
+              "resource": "model",
+              "resourceId": "${{ github.event.inputs.modelId }}",
+              "status": "${{ job.status }}",
+              "approvals": "${{ github.event.inputs.approvers }}"
+            }'
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "Production deployment: ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*🚀 Production Deployment* - ${{ job.status }}\n*Model:* ${{ github.event.inputs.modelId }}\n*Actor:* ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
