@@ -1464,24 +1464,7 @@ const ModelRepositoryTree: React.FC<{
 
 export default function Projects() {
   const { theme } = useTheme();
-  const { createRegistryModel, registryModels } = useGlobal();
-
-  // Map registry models to ModelVersion format for the tree (global Model Repository)
-  const registryModelsForTree = React.useMemo(() => {
-    return registryModels.map((rm) => ({
-      id: rm.id,
-      name: rm.name,
-      type: rm.modelType.charAt(0).toUpperCase() + rm.modelType.slice(1),
-      tier: 'Medium' as const,
-      status: rm.status === 'active' ? ('Champion' as const) : ('Challenger' as const),
-      version: rm.version.startsWith('v') ? rm.version.slice(1) : rm.version,
-      environment: rm.stage.charAt(0).toUpperCase() + rm.stage.slice(1),
-      owner: '',
-      lastValidation: '',
-      nextReview: '',
-      metrics: rm.metrics,
-    }));
-  }, [registryModels]);
+  const { createRegistryModel } = useGlobal();
   
   // Initialize state from localStorage or empty array
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -1505,7 +1488,6 @@ export default function Projects() {
   
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newProjectForm, setNewProjectForm] = useState({ name: '', description: '' });
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
   // Save projects to localStorage whenever they change
   useEffect(() => {
@@ -1651,7 +1633,7 @@ export default function Projects() {
 
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left Sidebar - Projects & Model Repository */}
+        {/* Left Sidebar - Projects only (Model Repository is in main nav under Model Repository) */}
         <div className="space-y-6">
           {/* Projects Section */}
           <div className="space-y-3">
@@ -1688,27 +1670,6 @@ export default function Projects() {
                 </button>
               </div>
             ))}
-          </div>
-
-          {/* Model Repository Section - global list of imported models */}
-          <div className="space-y-3">
-            <h3 className={`text-sm font-semibold ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-              Model Repository
-            </h3>
-            {registryModelsForTree.length > 0 ? (
-              <ModelRepositoryTree
-                models={registryModelsForTree}
-                expandedFolders={expandedFolders}
-                setExpandedFolders={setExpandedFolders}
-                theme={theme}
-              />
-            ) : (
-              <div className={`p-4 rounded-lg border text-center ${theme === 'dark' ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>
-                  No models yet. Import a model from the workflow to see it here.
-                </p>
-              </div>
-            )}
           </div>
         </div>
 
