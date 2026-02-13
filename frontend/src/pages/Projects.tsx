@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle2, AlertCircle, ChevronRight, Upload, Plus, X, Eye } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useGlobal } from '../contexts/GlobalContext';
 import { Breadcrumb } from '../components/UIPatterns';
 
 interface ModelVersion {
@@ -85,6 +86,12 @@ interface Project {
   description: string;
   createdAt: string;
   workflow: Workflow;
+}
+
+interface ModelTree {
+  [type: string]: {
+    [modelName: string]: ModelVersion[];
+  };
 }
 
 const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void; onModelSelect: (model: ModelVersion) => void; onAddModel: (metadata: ModelMetadata) => void }> = ({ workflow, onComplete, onModelSelect, onAddModel }) => {
@@ -243,16 +250,44 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
       alert('Please upload a model file (PMML/ONNX/Pickle/JSON)');
       return;
     }
-    if (!metadata.modelName || !metadata.modelId) {
-      alert('Please fill in Model Name and Model ID');
-      return;
+
+    // Check if adding version to existing model
+    if (appendToExisting && appendToModelId) {
+      const existingModel = workflow.models?.find((m) => m.id === appendToModelId);
+      if (!existingModel) {
+        alert('Please select a valid model to add version to');
+        return;
+      }
+      if (!metadata.modelVersion) {
+        alert('Please enter a version number');
+        return;
+      }
+
+      // Use existing model's name, type, and tier for grouping
+      const metadataWithExistingInfo = {
+        ...metadata,
+        modelName: existingModel.name,
+        modelId: existingModel.id,
+        type: existingModel.type as any,
+        riskTier: existingModel.tier as any,
+        metrics: Object.keys(metrics).length > 0 ? metrics : undefined,
+      };
+      onAddModel(metadataWithExistingInfo);
+    } else {
+      // Creating new model
+      if (!metadata.modelName || !metadata.modelId) {
+        alert('Please fill in Model Name and Model ID');
+        return;
+      }
+
+      const metadataWithMetrics = {
+        ...metadata,
+        metrics: Object.keys(metrics).length > 0 ? metrics : undefined,
+      };
+      onAddModel(metadataWithMetrics);
     }
-    // Attach metrics to metadata before saving
-    const metadataWithMetrics = {
-      ...metadata,
-      metrics: Object.keys(metrics).length > 0 ? metrics : undefined,
-    };
-    onAddModel(metadataWithMetrics);
+
+    // Reset form
     setMetadata({
       modelId: '',
       modelName: '',
@@ -1292,8 +1327,144 @@ const AlertsStep: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
   );
 };
 
+// Model Repository Tree Component - displays hierarchical folder structure
+const ModelRepositoryTree: React.FC<{
+  models: ModelVersion[];
+  expandedFolders: Set<string>;
+  setExpandedFolders: React.Dispatch<React.SetStateAction<Set<string>>>;
+  theme: string;
+}> = ({ models, expandedFolders, setExpandedFolders, theme }) => {
+  // Organize models by Type -> Model Name -> Versions
+  const organizeModels = () => {
+    const tree: ModelTree = {};
+    models.forEach((model) => {
+      if (!tree[model.type]) {
+        tree[model.type] = {};
+      }
+      if (!tree[model.type][model.name]) {
+        tree[model.type][model.name] = [];
+      }
+      tree[model.type][model.name].push(model);
+    });
+    return tree;
+  };
+
+  const modelTree = organizeModels();
+
+  const toggleFolder = (key: string) => {
+    const newSet = new Set(expandedFolders);
+    if (newSet.has(key)) {
+      newSet.delete(key);
+    } else {
+      newSet.add(key);
+    }
+    setExpandedFolders(newSet);
+  };
+
+  const getStatusColor = (status: string) => {
+    return status === 'Champion'
+      ? theme === 'dark' ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
+      : status === 'Challenger'
+      ? theme === 'dark' ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'
+      : theme === 'dark' ? 'bg-gray-500/20 text-gray-400' : 'bg-gray-100 text-gray-700';
+  };
+
+  return (
+    <div className="space-y-2 text-xs">
+      {Object.entries(modelTree).map(([modelType, modelsByName]) => {
+        const typeKey = `type-${modelType}`;
+        const isTypeExpanded = expandedFolders.has(typeKey);
+
+        return (
+          <div key={typeKey}>
+            {/* Type Folder */}
+            <button
+              onClick={() => toggleFolder(typeKey)}
+              className={`w-full text-left px-2 py-1.5 rounded flex items-center gap-2 transition ${
+                theme === 'dark'
+                  ? 'hover:bg-slate-700/50 text-slate-300'
+                  : 'hover:bg-slate-100 text-slate-700'
+              }`}
+            >
+              <ChevronRight
+                size={14}
+                className={`transition-transform flex-shrink-0 ${isTypeExpanded ? 'rotate-90' : ''}`}
+              />
+              <span className="font-medium">📁 {modelType}</span>
+              <span className={`ml-auto text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-500'}`}>
+                {Object.values(modelsByName).reduce((sum, v) => sum + v.length, 0)}
+              </span>
+            </button>
+
+            {/* Type Expanded Content */}
+            {isTypeExpanded && (
+              <div className="ml-2 border-l border-current border-opacity-20 pl-2 space-y-1">
+                {Object.entries(modelsByName).map(([modelName, versions]) => {
+                  const modelKey = `model-${modelType}-${modelName}`;
+                  const isModelExpanded = expandedFolders.has(modelKey);
+
+                  return (
+                    <div key={modelKey}>
+                      {/* Model Name Folder */}
+                      <button
+                        onClick={() => toggleFolder(modelKey)}
+                        className={`w-full text-left px-2 py-1.5 rounded flex items-center gap-2 transition ${
+                          theme === 'dark'
+                            ? 'hover:bg-slate-700/30 text-slate-400'
+                            : 'hover:bg-slate-50 text-slate-600'
+                        }`}
+                      >
+                        <ChevronRight
+                          size={14}
+                          className={`transition-transform flex-shrink-0 ${isModelExpanded ? 'rotate-90' : ''}`}
+                        />
+                        <span>📦 {modelName}</span>
+                        <span className={`ml-auto text-xs ${theme === 'dark' ? 'text-slate-600' : 'text-slate-500'}`}>
+                          {versions.length}
+                        </span>
+                      </button>
+
+                      {/* Model Versions */}
+                      {isModelExpanded && (
+                        <div className="ml-2 border-l border-current border-opacity-20 pl-2 space-y-1">
+                          {versions.map((version) => (
+                            <div
+                              key={version.id}
+                              className={`p-2 rounded flex items-start gap-2 ${
+                                theme === 'dark'
+                                  ? 'bg-slate-800/30 hover:bg-slate-800/50 text-slate-300'
+                                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700'
+                              } transition cursor-pointer`}
+                            >
+                              <span className="text-xs mt-0.5">📄</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium truncate">v{version.version}</p>
+                                <p className={`text-xs truncate ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>
+                                  {version.environment}
+                                </p>
+                              </div>
+                              <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${getStatusColor(version.status)}`}>
+                                {version.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 export default function Projects() {
   const { theme } = useTheme();
+  const { createRegistryModel } = useGlobal();
   
   // Initialize state from localStorage or empty array
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -1317,6 +1488,7 @@ export default function Projects() {
   
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newProjectForm, setNewProjectForm] = useState({ name: '', description: '' });
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
   // Save projects to localStorage whenever they change
   useEffect(() => {
@@ -1507,43 +1679,12 @@ export default function Projects() {
               Model Repository
             </h3>
             {selectedProject && selectedProject.workflow.models && selectedProject.workflow.models.length > 0 ? (
-              <div className="space-y-2">
-                {selectedProject.workflow.models.map((model) => (
-                  <div
-                    key={model.id}
-                    className={`p-3 rounded-lg border text-left ${
-                      theme === 'dark'
-                        ? 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
-                        : 'bg-white border-slate-200 hover:border-slate-300'
-                    } transition cursor-pointer`}
-                  >
-                    <p className={`text-xs font-medium truncate ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-                      {model.name}
-                    </p>
-                    <div className="grid grid-cols-2 gap-1 mt-2 text-xs">
-                      <div>
-                        <p className={`${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>Version</p>
-                        <p className={theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}>{model.version}</p>
-                      </div>
-                      <div>
-                        <p className={`${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>Type</p>
-                        <p className={theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}>{model.type}</p>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex gap-1">
-                      <span className={`text-xs px-2 py-1 rounded ${
-                        model.status === 'Champion'
-                          ? theme === 'dark' ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
-                          : model.status === 'Challenger'
-                          ? theme === 'dark' ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'
-                          : theme === 'dark' ? 'bg-gray-500/20 text-gray-400' : 'bg-gray-100 text-gray-700'
-                      }`}>
-                        {model.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <ModelRepositoryTree
+                models={selectedProject.workflow.models}
+                expandedFolders={expandedFolders}
+                setExpandedFolders={setExpandedFolders}
+                theme={theme}
+              />
             ) : (
               <div className={`p-4 rounded-lg border text-center ${theme === 'dark' ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                 <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>
@@ -1676,6 +1817,17 @@ export default function Projects() {
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           models: [...(selectedProject.workflow.models || []), newModel],
+                        });
+                        
+                        // Add to global registry
+                        createRegistryModel({
+                          name: metadata.modelName,
+                          version: metadata.modelVersion,
+                          projectId: selectedProject.id,
+                          modelType: metadata.type.toLowerCase() as 'classification' | 'regression' | 'clustering' | 'nlp' | 'custom',
+                          metrics: metadata.metrics,
+                          stage: metadata.environment.toLowerCase() as 'dev' | 'staging' | 'production',
+                          status: 'active',
                         });
                       }}
                     />

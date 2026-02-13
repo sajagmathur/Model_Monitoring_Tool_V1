@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Package,
   ChevronRight,
@@ -9,35 +9,28 @@ import {
   User,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useGlobal } from '../contexts/GlobalContext';
 import { Breadcrumb } from '../components/UIPatterns';
 
-interface ModelVersion {
-  id: string;
-  version: string;
-  status: 'champion' | 'challenger' | 'archive' | 'deprecated';
-  riskTier: 'Low' | 'Medium' | 'High';
-  owner: string;
-  lastValidation: string;
-  metrics: {
-    auc: number;
-    precision: number;
-    recall: number;
-  };
-  validationStatus: 'passed' | 'warning' | 'failed';
-}
-
-interface Model {
+interface DisplayModel {
   id: string;
   name: string;
-  folder: string;
   description: string;
-  modelType: 'Classification' | 'Regression' | 'Clustering';
-  versions: ModelVersion[];
+  modelType: string;
+  versions: any[];
   lineage: string[];
 }
 
-const ModelVersionCard: React.FC<{ version: ModelVersion; modelName: string }> = ({ version, modelName }) => {
+const ModelVersionCard: React.FC<{ version: any; modelName: string }> = ({ version, modelName }) => {
   const { theme } = useTheme();
+
+  // Derive status from stage
+  const statusMap: Record<string, 'champion' | 'challenger' | 'archive' | 'deprecated'> = {
+    production: 'champion',
+    staging: 'challenger',
+    dev: 'archive',
+  };
+  const status = statusMap[version.stage || 'dev'] || 'archive';
 
   const statusColors = {
     champion: {
@@ -62,13 +55,8 @@ const ModelVersionCard: React.FC<{ version: ModelVersion; modelName: string }> =
     },
   };
 
-  const validationIcons = {
-    passed: <CheckCircle2 size={16} className="text-green-500" />,
-    warning: <AlertTriangle size={16} className="text-yellow-500" />,
-    failed: <AlertCircle size={16} className="text-red-500" />,
-  };
-
-  const colors = statusColors[version.status];
+  const colors = statusColors[status];
+  const auc = version.metrics?.auc || 0;
 
   return (
     <div
@@ -83,7 +71,7 @@ const ModelVersionCard: React.FC<{ version: ModelVersion; modelName: string }> =
               v{version.version}
             </p>
             <span className={`text-xs font-medium px-2 py-1 rounded border ${colors.bg} ${colors.text} ${colors.border}`}>
-              {version.status}
+              {status}
             </span>
           </div>
           <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
@@ -91,39 +79,41 @@ const ModelVersionCard: React.FC<{ version: ModelVersion; modelName: string }> =
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {validationIcons[version.validationStatus]}
+          <CheckCircle2 size={16} className="text-green-500" />
         </div>
       </div>
 
       <div className="space-y-2 mb-3">
         <div className="flex items-center justify-between text-xs">
-          <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>Risk Tier:</span>
+          <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>Stage:</span>
           <span
             className={`font-medium ${
-              version.riskTier === 'High'
+              version.stage === 'production'
                 ? 'text-red-500'
-                : version.riskTier === 'Medium'
+                : version.stage === 'staging'
                 ? 'text-yellow-500'
-                : 'text-green-500'
+                : 'text-blue-500'
             }`}
           >
-            {version.riskTier}
+            {version.stage?.charAt(0).toUpperCase() + version.stage?.slice(1)}
           </span>
         </div>
         <div className="flex items-center justify-between text-xs">
           <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>AUC:</span>
-          <span className={theme === 'dark' ? 'text-white' : 'text-slate-900'}>{version.metrics.auc.toFixed(3)}</span>
+          <span className={theme === 'dark' ? 'text-white' : 'text-slate-900'}>{auc.toFixed(3)}</span>
         </div>
       </div>
 
       <div className="flex items-center gap-2 pt-2 border-t pb-2 text-xs">
         <User size={12} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} />
-        <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>{version.owner}</span>
+        <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>Added from Projects</span>
       </div>
 
       <div className="flex items-center gap-2 text-xs">
         <Clock size={12} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} />
-        <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>{version.lastValidation}</span>
+        <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>
+          {new Date(version.createdAt).toLocaleDateString()}
+        </span>
       </div>
     </div>
   );
@@ -131,102 +121,52 @@ const ModelVersionCard: React.FC<{ version: ModelVersion; modelName: string }> =
 
 export default function ModelRegistry() {
   const { theme } = useTheme();
-  const [selectedModelId, setSelectedModelId] = useState<string | null>('credit_risk_v2');
+  const { registryModels } = useGlobal();
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
 
-  const models: Model[] = [
-    {
-      id: 'credit_risk_v2',
-      name: 'Credit Risk Scoring',
-      folder: 'Risk Management / Credit',
-      description: 'Production model for credit risk assessment with real-time monitoring',
-      modelType: 'Classification',
-      lineage: ['version-1.0', 'version-1.5', 'version-2.0', 'version-2.1'],
-      versions: [
-        {
-          id: 'v21',
-          version: '2.1',
-          status: 'champion',
-          riskTier: 'High',
-          owner: 'Risk Team',
-          lastValidation: '2026-02-10',
-          metrics: { auc: 0.857, precision: 0.812, recall: 0.798 },
-          validationStatus: 'passed',
-        },
-        {
-          id: 'v20',
-          version: '2.0',
-          status: 'challenger',
-          riskTier: 'High',
-          owner: 'Risk Team',
-          lastValidation: '2026-02-01',
-          metrics: { auc: 0.842, precision: 0.805, recall: 0.791 },
-          validationStatus: 'passed',
-        },
-        {
-          id: 'v15',
-          version: '1.5',
-          status: 'archive',
-          riskTier: 'High',
-          owner: 'Risk Team',
-          lastValidation: '2026-01-15',
-          metrics: { auc: 0.825, precision: 0.798, recall: 0.785 },
-          validationStatus: 'warning',
-        },
-      ],
-    },
-    {
-      id: 'fraud_detection',
-      name: 'Fraud Detection Engine',
-      folder: 'Risk Management / Fraud',
-      description: 'Real-time fraud detection for transactions and accounts',
-      modelType: 'Classification',
-      lineage: ['version-1.0', 'version-2.0', 'version-3.0'],
-      versions: [
-        {
-          id: 'fv30',
-          version: '3.0',
-          status: 'champion',
-          riskTier: 'High',
-          owner: 'Fraud Analytics',
-          lastValidation: '2026-02-12',
-          metrics: { auc: 0.945, precision: 0.928, recall: 0.911 },
-          validationStatus: 'passed',
-        },
-        {
-          id: 'fv20',
-          version: '2.0',
-          status: 'archive',
-          riskTier: 'High',
-          owner: 'Fraud Analytics',
-          lastValidation: '2026-01-30',
-          metrics: { auc: 0.912, precision: 0.895, recall: 0.878 },
-          validationStatus: 'failed',
-        },
-      ],
-    },
-    {
-      id: 'marketing_prop',
-      name: 'Marketing Propensity',
-      folder: 'Marketing / Campaign Targeting',
-      description: 'Customer propensity models for campaign optimization',
-      modelType: 'Regression',
-      lineage: ['version-1.0', 'version-1.5'],
-      versions: [
-        {
-          id: 'mav15',
-          version: '1.5',
-          status: 'champion',
-          riskTier: 'Low',
-          owner: 'Marketing Analytics',
-          lastValidation: '2026-02-08',
-          metrics: { auc: 0.778, precision: 0.721, recall: 0.695 },
-          validationStatus: 'passed',
-        },
-      ],
-    },
-  ];
+  // Group models by name and organize versions
+  const groupedModels = useMemo(() => {
+    const groups: Record<string, DisplayModel> = {};
 
-  const selectedModel = models.find((m) => m.id === selectedModelId);
+    registryModels.forEach((model) => {
+      if (!groups[model.name]) {
+        groups[model.name] = {
+          id: model.id,
+          name: model.name,
+          description: `${model.modelType} model from project`,
+          modelType: model.modelType.charAt(0).toUpperCase() + model.modelType.slice(1),
+          versions: [],
+          lineage: [],
+        };
+      }
+
+      groups[model.name].versions.push({
+        id: model.id,
+        version: model.version,
+        stage: model.stage,
+        metrics: model.metrics,
+        createdAt: model.createdAt,
+        status: model.status,
+      });
+
+      // Build lineage from versions
+      groups[model.name].lineage = groups[model.name].versions.map((v) => `v${v.version}`);
+    });
+
+    return Object.values(groups);
+  }, [registryModels]);
+
+  // Set first model as selected if available
+  const selectedModel =
+    selectedModelId && groupedModels.find((m) => m.id === selectedModelId)
+      ? groupedModels.find((m) => m.id === selectedModelId)
+      : groupedModels.length > 0
+      ? groupedModels[0]
+      : null;
+
+  if (selectedModel && !selectedModelId) {
+    setSelectedModelId(selectedModel.id);
+  }
 
   return (
     <div className="space-y-6">
@@ -240,7 +180,7 @@ export default function ModelRegistry() {
             Model Repository
           </h1>
           <p className={`mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-            Centralized governance and monitoring of production models
+            Models imported from project workflows
           </p>
         </div>
       </div>
@@ -250,57 +190,57 @@ export default function ModelRegistry() {
         {/* Models List */}
         <div className="lg:col-span-1 space-y-4">
           <h2 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-            Models by Folder
+            All Models ({groupedModels.length})
           </h2>
 
-          {/* Folder Tree */}
-          <div className="space-y-2">
-            {['Risk Management', 'Marketing', 'Operations'].map((folder) => (
-              <div
-                key={folder}
-                className={`rounded-lg border overflow-hidden ${
-                  theme === 'dark' ? 'border-slate-700' : 'border-slate-200'
-                }`}
-              >
-                <div
-                  className={`p-3 font-medium ${
-                    theme === 'dark' ? 'bg-slate-800/50 text-slate-300' : 'bg-slate-100 text-slate-700'
-                  }`}
+          {groupedModels.length === 0 ? (
+            <div
+              className={`p-6 rounded-lg border-2 border-dashed text-center ${
+                theme === 'dark'
+                  ? 'border-slate-600 bg-slate-900/30'
+                  : 'border-slate-300 bg-slate-50'
+              }`}
+            >
+              <Package
+                size={32}
+                className={`mx-auto mb-2 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-400'}`}
+              />
+              <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                No models yet
+              </p>
+              <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                Import models from Projects to see them here
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {groupedModels.map((model) => (
+                <button
+                  key={model.id}
+                  onClick={() => setSelectedModelId(model.id)}
+                  className={`w-full text-left p-3 rounded-lg transition ${
+                    selectedModelId === model.id
+                      ? theme === 'dark'
+                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50'
+                        : 'bg-blue-50 text-blue-600 border border-blue-300'
+                      : theme === 'dark'
+                      ? 'text-slate-300 hover:bg-slate-700/30 border border-slate-700'
+                      : 'text-slate-700 hover:bg-slate-50 border border-slate-200'
+                  } border`}
                 >
-                  📁 {folder}
-                </div>
-                <div className={`divide-y ${theme === 'dark' ? 'divide-slate-700' : 'divide-slate-200'}`}>
-                  {models
-                    .filter((m) => m.folder.startsWith(folder))
-                    .map((model) => (
-                      <button
-                        key={model.id}
-                        onClick={() => setSelectedModelId(model.id)}
-                        className={`w-full text-left p-3 transition ${
-                          selectedModelId === model.id
-                            ? theme === 'dark'
-                              ? 'bg-blue-600/20 text-blue-400'
-                              : 'bg-blue-50 text-blue-600'
-                            : theme === 'dark'
-                            ? 'text-slate-300 hover:bg-slate-700/30'
-                            : 'text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        <p className="text-sm font-medium">{model.name}</p>
-                        <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                          {model.versions.length} versions
-                        </p>
-                      </button>
-                    ))}
-                </div>
-              </div>
-            ))}
-          </div>
+                  <p className="text-sm font-medium">{model.name}</p>
+                  <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                    {model.versions.length} version{model.versions.length !== 1 ? 's' : ''}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Model Details */}
         <div className="lg:col-span-2">
-          {selectedModel ? (
+          {selectedModel && groupedModels.length > 0 ? (
             <div className="space-y-6">
               {/* Model Overview */}
               <div
@@ -316,14 +256,10 @@ export default function ModelRegistry() {
                       {selectedModel.name}
                     </h2>
                     <p className={`mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                      {selectedModel.folder}
+                      {selectedModel.description}
                     </p>
                   </div>
                 </div>
-
-                <p className={`mb-4 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                  {selectedModel.description}
-                </p>
 
                 <div className="grid grid-cols-3 gap-4">
                   <div>
@@ -444,7 +380,7 @@ export default function ModelRegistry() {
                     <div className="flex items-center gap-2">
                       <CheckCircle2 size={16} className="text-green-500" />
                       <span className={theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}>
-                        Approved for Production
+                        Active in Repository
                       </span>
                     </div>
                   </div>
@@ -461,8 +397,11 @@ export default function ModelRegistry() {
                 size={48}
                 className={`mx-auto mb-4 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-400'}`}
               />
-              <p className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>
-                Select a model to view details
+              <p className={`text-lg font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                Model Repository is Empty
+              </p>
+              <p className={`mt-2 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                Import models from Projects workflow to populate the repository
               </p>
             </div>
           )}
