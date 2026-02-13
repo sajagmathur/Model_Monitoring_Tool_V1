@@ -14,7 +14,7 @@ const SendFeedback: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     // In a real app, this would send to a backend API
-    const mailtoLink = `mailto:feedback@mlops.studio?subject=MLOps%20Studio%20${feedbackType}%20Report&body=${encodeURIComponent(
+    const mailtoLink = `mailto:feedback@mlmonitoring.com?subject=Model%20Monitoring%20${feedbackType}%20Report&body=${encodeURIComponent(
       `Type: ${feedbackType}\nFrom: ${email || 'Anonymous'}\n\n${feedbackText}`
     )}`;
     window.location.href = mailtoLink;
@@ -32,7 +32,7 @@ const SendFeedback: React.FC = () => {
     <div className="space-y-8">
       <div>
         <h1 className={`text-4xl font-bold ${themeClasses.textPrimary(theme)} mb-2`}>Send Feedback</h1>
-        <p className={themeClasses.textSecondary(theme)}>Help us improve MLOps Studio with your valuable feedback</p>
+        <p className={themeClasses.textSecondary(theme)}>Help us improve Model Monitoring Studio with your valuable feedback</p>
       </div>
 
       <div className="grid gap-6 max-w-2xl">
@@ -180,14 +180,14 @@ const SendFeedback: React.FC = () => {
           <div className={`space-y-3 ${themeClasses.textSecondary(theme)}`}>
             <p>
               <strong className={themeClasses.textPrimary(theme)}>Email:</strong>{' '}
-              <a href="mailto:feedback@mlops.studio" className="underline hover:opacity-80">
-                feedback@mlops.studio
+              <a href="mailto:feedback@mlmonitoring.com" className="underline hover:opacity-80">
+                feedback@mlmonitoring.com
               </a>
             </p>
             <p>
               <strong className={themeClasses.textPrimary(theme)}>Support:</strong>{' '}
-              <a href="mailto:support@mlops.studio" className="underline hover:opacity-80">
-                support@mlops.studio
+              <a href="mailto:support@mlmonitoring.com" className="underline hover:opacity-80">
+                support@mlmonitoring.com
               </a>
             </p>
             <p>

@@ -398,10 +398,10 @@ const TopBarEnhanced: React.FC = () => {
                 <button onClick={() => { navigate('/training'); setShowSupport(false); }} className={`block w-full text-left px-4 py-2 hover:${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-100'}`}>
                   🎓 Training
                 </button>
-                <button onClick={() => { navigate('/support-contacts'); setShowSupport(false); }} className={`block w-full text-left px-4 py-2 hover:${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-100'}`}>
+                <button onClick={() => { navigate('/support'); setShowSupport(false); }} className={`block w-full text-left px-4 py-2 hover:${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-100'}`}>
                   💬 Support Contacts
                 </button>
-                <button onClick={() => { navigate('/send-feedback'); setShowSupport(false); }} className={`block w-full text-left px-4 py-2 hover:${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-100'}`}>
+                <button onClick={() => { navigate('/feedback'); setShowSupport(false); }} className={`block w-full text-left px-4 py-2 hover:${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-100'}`}>
                   📧 Send Feedback
                 </button>
               </div>

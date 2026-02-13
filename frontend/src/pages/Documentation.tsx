@@ -9,7 +9,7 @@ const Documentation: React.FC = () => {
     <div className="space-y-8">
       <div>
         <h1 className={`text-4xl font-bold ${themeClasses.textPrimary(theme)} mb-2`}>Documentation</h1>
-        <p className={themeClasses.textSecondary(theme)}>Complete guide to MLOps Studio features and workflows</p>
+        <p className={themeClasses.textSecondary(theme)}>Complete guide to Model Monitoring Studio features and workflows</p>
       </div>
 
       <div className="grid gap-6">

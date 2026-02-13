@@ -77,7 +77,7 @@ const LeftNavigation: React.FC = () => {
       }`}>
         <div className="flex items-center gap-3">
           <Logo size="md" />
-          {!isCollapsed && <span className={`text-sm font-bold hidden md:block ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>MLOps</span>}
+          {!isCollapsed && <span className={`text-sm font-bold hidden md:block ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>ML Monitoring</span>}
         </div>
         {/* Collapse button (desktop only) */}
         <button

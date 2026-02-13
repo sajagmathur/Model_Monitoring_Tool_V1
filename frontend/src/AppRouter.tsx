@@ -17,6 +17,9 @@ import Profile from './pages/Profile';
 import TopBarEnhanced from './components/TopBarEnhanced';
 import LeftNavigation from './components/LeftNavigation';
 import Documentation from './pages/Documentation';
+import Training from './pages/Training';
+import SupportContacts from './pages/SupportContacts';
+import SendFeedback from './pages/SendFeedback';
 
 /**
  * Session Warning Banner Component
@@ -94,11 +97,11 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center md:text-left">
             <div>
-              <p className={`${textColorClass} font-bold transition-colors`}>MLOps Studio v1.0</p>
-              <p className={`${secondaryTextClass} text-sm transition-colors`}>Production ML Operations</p>
+              <p className={`${textColorClass} font-bold transition-colors`}>Model Monitoring Studio v1.0</p>
+              <p className={`${secondaryTextClass} text-sm transition-colors`}>Enterprise Model Governance & Oversight</p>
             </div>
             <div>
-              <p className={`${secondaryTextClass} text-sm transition-colors`}>© 2026 ML Ops team. All rights reserved.</p>
+              <p className={`${secondaryTextClass} text-sm transition-colors`}>© 2026 Model Monitoring Team. All rights reserved.</p>
             </div>
           </div>
         </div>
@@ -148,6 +151,9 @@ const AppRoutes: React.FC = () => {
         <Route path="/admin" element={<Admin />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/documentation" element={<Documentation />} />
+        <Route path="/training" element={<Training />} />
+        <Route path="/support" element={<SupportContacts />} />
+        <Route path="/feedback" element={<SendFeedback />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </MainLayout>

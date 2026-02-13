@@ -19,8 +19,8 @@ const SupportContacts: React.FC = () => {
           <div className={`space-y-3 ${themeClasses.textSecondary(theme)}`}>
             <div>
               <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Email Support</p>
-              <a href="mailto:support@mlops.studio" className={`underline hover:opacity-80`}>
-                support@mlops.studio
+              <a href="mailto:support@mlmonitoring.com" className={`underline hover:opacity-80`}>
+                support@mlmonitoring.com
               </a>
               <p className="mt-2 text-sm">Response time: Within 2 business hours</p>
             </div>
@@ -33,7 +33,7 @@ const SupportContacts: React.FC = () => {
           <div className={`space-y-4 ${themeClasses.textSecondary(theme)}`}>
             <div>
               <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Email</p>
-              <p className="text-sm">support@mlops.studio - For general questions and bug reports</p>
+              <p className="text-sm">support@mlmonitoring.com - For general questions and model monitoring issues</p>
               <p className="text-xs opacity-75">Response time: 2 business hours</p>
             </div>
             <div>
@@ -49,7 +49,7 @@ const SupportContacts: React.FC = () => {
             <div>
               <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Community Forum</p>
               <p className="text-sm">Connect with other users and share solutions</p>
-              <p className="text-xs opacity-75">Visit: community.mlops.studio</p>
+              <p className="text-xs opacity-75">Visit: community.mlmonitoring.com</p>
             </div>
           </div>
         </div>
@@ -98,18 +98,18 @@ const SupportContacts: React.FC = () => {
             </div>
             <div>
               <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Training & Onboarding</p>
-              <p className="text-sm">training@mlops.studio</p>
+              <p className="text-sm">training@mlmonitoring.com</p>
               <p className="text-xs opacity-75">For training sessions, demos, and platform onboarding</p>
             </div>
             <div>
               <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Sales & Licensing</p>
-              <p className="text-sm">sales@mlops.studio</p>
+              <p className="text-sm">sales@mlmonitoring.com</p>
               <p className="text-xs opacity-75">For pricing, licensing questions, and enterprise inquiries</p>
             </div>
             <div>
-              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Infrastructure & DevOps</p>
-              <p className="text-sm">devops@mlops.studio</p>
-              <p className="text-xs opacity-75">For deployment, Docker, Kubernetes, and infrastructure support</p>
+              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Model Governance</p>
+              <p className="text-sm">governance@mlmonitoring.com</p>
+              <p className="text-xs opacity-75">For model governance, compliance, and risk management support</p>
             </div>
           </div>
         </div>
@@ -119,20 +119,20 @@ const SupportContacts: React.FC = () => {
           <h2 className={`text-2xl font-bold ${themeClasses.textPrimary(theme)} mb-4`}>❓ Quick Help for Common Issues</h2>
           <div className={`space-y-3 ${themeClasses.textSecondary(theme)}`}>
             <div>
-              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Pipeline won't execute?</p>
-              <p className="text-sm ml-2">Check project selection and job configuration. View logs for error details.</p>
+              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Model Monitoring Issues?</p>
+              <p className="text-sm ml-2">Check model registry for version tracking and governance requirements. Review monitoring dashboard for drift detection.</p>
             </div>
             <div>
-              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Model deployment failed?</p>
-              <p className="text-sm ml-2">Verify target environment is available. Check model compatibility and resource limits.</p>
+              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Compliance & Audit?</p>
+              <p className="text-sm ml-2">Review audit logs and fairness metrics. Check approval workflows for model promotion.</p>
             </div>
             <div>
-              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Data import errors?</p>
-              <p className="text-sm ml-2">Validate CSV format, column names, and data types match expectations.</p>
+              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Data drift detected?</p>
+              <p className="text-sm ml-2">Verify data quality metrics and PSI values. Contact Data Engineering team for investigation.</p>
             </div>
             <div>
-              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Performance issues?</p>
-              <p className="text-sm ml-2">Clear browser cache, check available memory, verify internet connection stability.</p>
+              <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Performance degradation?</p>
+              <p className="text-sm ml-2">Check model performance metrics and retraining triggers. Review production environment stability.</p>
             </div>
             <div className={`mt-4 p-3 rounded ${theme === 'dark' ? 'bg-blue-900/30' : 'bg-blue-100'}`}>
               <p className="text-sm">💡 <strong>Tip:</strong> Check the Documentation tab for comprehensive guides before contacting support.</p>

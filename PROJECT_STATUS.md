@@ -1,4 +1,4 @@
-# MLOps Studio - Complete Prototype
+# Model Monitoring Studio - Complete Prototype
 
 ## 📦 Project Overview
 

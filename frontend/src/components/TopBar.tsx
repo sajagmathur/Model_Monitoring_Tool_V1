@@ -319,19 +319,19 @@ const TopBar: React.FC = () => {
             {/* Support Menu */}
             {showSupport && (
               <div className="absolute right-0 top-16 w-48 bg-slate-900 rounded-lg border border-white/20 shadow-2xl z-50">
-                <button className="w-full text-left px-4 py-3 hover:bg-white/10 transition text-sm text-white flex items-center gap-2 border-b border-white/10">
+                <button onClick={() => { window.location.href = '/documentation'; setShowSupport(false); }} className="w-full text-left px-4 py-3 hover:bg-white/10 transition text-sm text-white flex items-center gap-2 border-b border-white/10">
                   <HelpCircle size={16} />
                   Documentation
                 </button>
-                <button className="w-full text-left px-4 py-3 hover:bg-white/10 transition text-sm text-white flex items-center gap-2 border-b border-white/10">
+                <button onClick={() => { window.location.href = '/training'; setShowSupport(false); }} className="w-full text-left px-4 py-3 hover:bg-white/10 transition text-sm text-white flex items-center gap-2 border-b border-white/10">
                   <User size={16} />
                   Training & Tutorials
                 </button>
-                <button className="w-full text-left px-4 py-3 hover:bg-white/10 transition text-sm text-white flex items-center gap-2 border-b border-white/10">
+                <button onClick={() => { window.location.href = '/support'; setShowSupport(false); }} className="w-full text-left px-4 py-3 hover:bg-white/10 transition text-sm text-white flex items-center gap-2 border-b border-white/10">
                   <AlertCircle size={16} />
                   Support Contacts
                 </button>
-                <button className="w-full text-left px-4 py-3 hover:bg-white/10 transition text-sm text-white flex items-center gap-2">
+                <button onClick={() => { window.location.href = '/feedback'; setShowSupport(false); }} className="w-full text-left px-4 py-3 hover:bg-white/10 transition text-sm text-white flex items-center gap-2">
                   <Send size={16} />
                   Send Feedback
                 </button>

@@ -32,7 +32,7 @@ const StatCard = ({ icon, label, value }: StatCardProps) => (
   </div>
 );
 
-export default function MLOpsStudio() {
+export default function ModelMonitoringApp() {
   // State Management
   const [view, setView] = useState<'workflow' | 'documentation'>('workflow');
   const [currentStep, setCurrentStep] = useState('ingestion');
@@ -365,8 +365,8 @@ export default function MLOpsStudio() {
                 </div>
               </div>
               <div>
-                <h1 className="text-3xl font-black text-white">MLOps Studio</h1>
-                <p className="text-blue-100 text-sm font-medium">Production ML Workflow</p>
+                <h1 className="text-3xl font-black text-white">Model Monitoring Studio</h1>
+                <p className="text-blue-100 text-sm font-medium">Enterprise Model Governance</p>
               </div>
             </div>
             <div className="flex items-center gap-3">

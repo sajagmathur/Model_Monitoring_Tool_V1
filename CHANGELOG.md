@@ -6,15 +6,15 @@
     {
       "type": "feat",
       "scope": "platform",
-      "description": "Initial MLOps Studio release",
+      "description": "Initial Model Monitoring Studio release",
       "details": [
-        "Pipeline-first architecture with 8 canonical stages",
+        "Monitoring-first architecture with 6 canonical governance stages",
         "AWS-managed compute (ECS Fargate, no Kubernetes)",
         "GitHub-native CI/CD with approval workflows",
-        "Model registry with MLflow integration",
+        "Model registry with version control and governance",
         "Comprehensive drift detection and monitoring",
         "Full RBAC with audit logging",
-        "Blue-green deployments with auto-rollback"
+        "Compliance and fairness tracking"
       ]
     },
     {
@@ -22,13 +22,13 @@
       "scope": "frontend",
       "description": "React UI with all core pages",
       "details": [
-        "Dashboard with KPIs and alerts",
-        "Projects management",
-        "Visual pipeline DAG builder",
+        "Dashboard with KPI monitoring and alerts",
+        "Projects governance workflow",
+        "Model repository with version control",
         "Monitoring & drift detection views",
-        "CI/CD pipeline history",
-        "GitHub integrations",
-        "Admin panel for RBAC"
+        "Model deployment and tracking",
+        "Integration management",
+        "Admin panel for RBAC and governance"
       ]
     },
     {
