@@ -234,12 +234,16 @@ const initialState: {
 export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, setState] = useState(initialState);
 
-  // Load from localStorage on mount
+  // Load from localStorage on mount (registryModels always starts blank - not restored)
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try {
-        setState(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        setState({
+          ...parsed,
+          registryModels: [], // Model Repository starts blank each session
+        });
       } catch (err) {
         console.error('Failed to load state from localStorage:', err);
       }
