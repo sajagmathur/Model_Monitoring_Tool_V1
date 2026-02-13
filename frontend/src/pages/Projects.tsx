@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckCircle2, AlertCircle, ChevronRight, Upload, Plus, X, Eye } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { Breadcrumb } from '../components/UIPatterns';
@@ -1145,49 +1145,38 @@ const AlertsStep: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
 
 export default function Projects() {
   const { theme } = useTheme();
-  const [projects, setProjects] = useState<Project[]>([
-    {
-      id: '1',
-      name: 'Credit Risk Model v2.1',
-      description: 'Model monitoring workflow for credit risk assessment',
-      createdAt: '2026-02-10',
-      workflow: {
-        id: 'wf-1',
-        name: 'Credit Risk Model v2.1',
-        description: 'Model monitoring workflow for credit risk assessment',
-        status: 'in-progress',
-        currentStep: 0,
-        createdAt: '2026-02-10',
-        owner: 'Risk Team',
-        models: [
-          {
-            id: 'model-1',
-            name: 'Credit Risk Classifier v2.0',
-            type: 'Classification',
-            tier: 'High',
-            status: 'Champion',
-            version: 'v2.0',
-            environment: 'Production',
-            owner: 'Risk Team',
-            lastValidation: '2026-02-10',
-            nextReview: '2026-03-10',
-          },
-        ],
-        steps: [
-          { id: 0, name: 'Model Import', status: 'in-progress' },
-          { id: 1, name: 'Data Ingestion', status: 'not-started', locked: true },
-          { id: 2, name: 'Data Quality', status: 'not-started', locked: true },
-          { id: 3, name: 'Performance', status: 'not-started', locked: true },
-          { id: 4, name: 'Reports', status: 'not-started', locked: true },
-          { id: 5, name: 'Alerts', status: 'not-started', locked: true },
-        ],
-      },
-    },
-  ]);
+  
+  // Initialize state from localStorage or empty array
+  const [projects, setProjects] = useState<Project[]>(() => {
+    try {
+      const saved = localStorage.getItem('mlmonitoring_projects');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('1');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('mlmonitoring_projects');
+      const projects = saved ? JSON.parse(saved) : [];
+      return projects.length > 0 ? projects[0].id : '';
+    } catch {
+      return '';
+    }
+  });
+  
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newProjectForm, setNewProjectForm] = useState({ name: '', description: '' });
+
+  // Save projects to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('mlmonitoring_projects', JSON.stringify(projects));
+    // Update selectedProjectId if it doesn't exist in projects
+    if (projects.length > 0 && !projects.find((p) => p.id === selectedProjectId)) {
+      setSelectedProjectId(projects[0].id);
+    }
+  }, [projects]);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
