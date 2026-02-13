@@ -1464,7 +1464,24 @@ const ModelRepositoryTree: React.FC<{
 
 export default function Projects() {
   const { theme } = useTheme();
-  const { createRegistryModel } = useGlobal();
+  const { createRegistryModel, registryModels } = useGlobal();
+
+  // Map registry models to ModelVersion format for the tree (global Model Repository)
+  const registryModelsForTree = React.useMemo(() => {
+    return registryModels.map((rm) => ({
+      id: rm.id,
+      name: rm.name,
+      type: rm.modelType.charAt(0).toUpperCase() + rm.modelType.slice(1),
+      tier: 'Medium' as const,
+      status: rm.status === 'active' ? ('Champion' as const) : ('Challenger' as const),
+      version: rm.version.startsWith('v') ? rm.version.slice(1) : rm.version,
+      environment: rm.stage.charAt(0).toUpperCase() + rm.stage.slice(1),
+      owner: '',
+      lastValidation: '',
+      nextReview: '',
+      metrics: rm.metrics,
+    }));
+  }, [registryModels]);
   
   // Initialize state from localStorage or empty array
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -1673,14 +1690,14 @@ export default function Projects() {
             ))}
           </div>
 
-          {/* Model Repository Section */}
+          {/* Model Repository Section - global list of imported models */}
           <div className="space-y-3">
             <h3 className={`text-sm font-semibold ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
               Model Repository
             </h3>
-            {selectedProject && selectedProject.workflow.models && selectedProject.workflow.models.length > 0 ? (
+            {registryModelsForTree.length > 0 ? (
               <ModelRepositoryTree
-                models={selectedProject.workflow.models}
+                models={registryModelsForTree}
                 expandedFolders={expandedFolders}
                 setExpandedFolders={setExpandedFolders}
                 theme={theme}
@@ -1688,7 +1705,7 @@ export default function Projects() {
             ) : (
               <div className={`p-4 rounded-lg border text-center ${theme === 'dark' ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                 <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>
-                  {selectedProject ? 'No models imported yet' : 'Select a project to view models'}
+                  No models yet. Import a model from the workflow to see it here.
                 </p>
               </div>
             )}
