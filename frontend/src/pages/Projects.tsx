@@ -253,6 +253,8 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
     setModelFileFormat('PMML');
     setAppendToExisting(false);
     setAppendToModelId('');
+    // Move to next step (Data Ingestion)
+    onComplete();
   };
 
   return (
@@ -337,35 +339,7 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                 </button>
               </div>
 
-              {/* Metadata File Upload Section */}
-              <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-blue-50 border-blue-200'}`}>
-                <p className={`text-sm font-medium mb-3 ${theme === 'dark' ? 'text-slate-300' : 'text-blue-900'}`}>
-                  Quick Option: Upload Metadata File (Excel or JSON)
-                </p>
-                <label className={`cursor-pointer flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-dashed transition ${
-                  theme === 'dark' ? 'border-blue-600 hover:bg-blue-900/20' : 'border-blue-300 hover:bg-blue-100'
-                }`}>
-                  <Upload size={16} className={theme === 'dark' ? 'text-blue-400' : 'text-blue-600'} />
-                  <span className={`text-xs ${theme === 'dark' ? 'text-blue-300' : 'text-blue-700'}`}>
-                    {metadataFile ? `${metadataFile.name} - Loaded ✓` : 'Upload Excel or JSON to auto-fill fields'}
-                  </span>
-                  <input
-                    type="file"
-                    accept=".json,.xlsx,.xls,.csv"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleMetadataFileUpload(file);
-                    }}
-                    className="hidden"
-                  />
-                </label>
-                {metadataFile && (
-                  <div className={`text-xs mt-2 ${theme === 'dark' ? 'text-green-400' : 'text-green-600'}`}>
-                    <p>✓ Metadata auto-filled from file</p>
-                    <p className="text-xs mt-1">You can edit any field manually below</p>
-                  </div>
-                )}
-              </div>
+
 
               {/* Model File Upload Section */}
               <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
@@ -484,6 +458,30 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                 <p className={`text-sm font-medium mb-3 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                   Step 3: Model Metadata
                 </p>
+
+                {/* Upload Metadata File Option */}
+                <div className={`p-3 rounded-lg border mb-4 ${theme === 'dark' ? 'bg-blue-900/20 border-blue-600' : 'bg-blue-50 border-blue-200'}`}>
+                  <p className={`text-xs font-medium mb-2 ${theme === 'dark' ? 'text-blue-300' : 'text-blue-800'}`}>
+                    Upload Metadata (Excel or JSON) to auto-fill fields:
+                  </p>
+                  <label className={`cursor-pointer flex items-center justify-center gap-2 py-2 rounded border-2 border-dashed transition ${
+                    theme === 'dark' ? 'border-blue-600 hover:bg-blue-900/30' : 'border-blue-300 hover:bg-blue-100'
+                  }`}>
+                    <Upload size={14} className={theme === 'dark' ? 'text-blue-400' : 'text-blue-600'} />
+                    <span className={`text-xs ${theme === 'dark' ? 'text-blue-300' : 'text-blue-700'}`}>
+                      {metadataFile ? `${metadataFile.name} ✓` : 'Click to upload or drag'}
+                    </span>
+                    <input
+                      type="file"
+                      accept=".json,.xlsx,.xls,.csv"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleMetadataFileUpload(file);
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
 
                 {/* Tabs */}
                 <div className="flex gap-2 border-b mb-4" style={{ borderColor: theme === 'dark' ? '#374151' : '#e5e7eb' }}>
@@ -1380,41 +1378,96 @@ export default function Projects() {
 
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left Sidebar - Projects List */}
-        <div className="space-y-3">
-          <h3 className={`text-sm font-semibold ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-            Your Projects
-          </h3>
-          {projects.map((project) => (
-            <div key={project.id} className="flex items-center gap-2">
-              <button
-                onClick={() => setSelectedProjectId(project.id)}
-                className={`flex-1 text-left p-3 rounded-lg border transition ${
-                  selectedProjectId === project.id
-                    ? theme === 'dark'
-                      ? 'bg-blue-600/20 border-blue-500'
-                      : 'bg-blue-50 border-blue-500'
-                    : theme === 'dark'
-                    ? 'bg-slate-800/50 border-slate-700 hover:bg-slate-800/70'
-                    : 'bg-white border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                <p className={`text-sm font-medium truncate ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-                  {project.name}
+        {/* Left Sidebar - Projects & Model Repository */}
+        <div className="space-y-6">
+          {/* Projects Section */}
+          <div className="space-y-3">
+            <h3 className={`text-sm font-semibold ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+              Your Projects
+            </h3>
+            {projects.map((project) => (
+              <div key={project.id} className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedProjectId(project.id)}
+                  className={`flex-1 text-left p-3 rounded-lg border transition ${
+                    selectedProjectId === project.id
+                      ? theme === 'dark'
+                        ? 'bg-blue-600/20 border-blue-500'
+                        : 'bg-blue-50 border-blue-500'
+                      : theme === 'dark'
+                      ? 'bg-slate-800/50 border-slate-700 hover:bg-slate-800/70'
+                      : 'bg-white border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <p className={`text-sm font-medium truncate ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                    {project.name}
+                  </p>
+                  <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                    {project.createdAt}
+                  </p>
+                </button>
+                <button
+                  onClick={() => deleteProject(project.id)}
+                  className="p-2 rounded hover:bg-red-500/20 text-red-500 transition"
+                  title="Delete project"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Model Repository Section */}
+          <div className="space-y-3">
+            <h3 className={`text-sm font-semibold ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+              Model Repository
+            </h3>
+            {selectedProject && selectedProject.workflow.models && selectedProject.workflow.models.length > 0 ? (
+              <div className="space-y-2">
+                {selectedProject.workflow.models.map((model) => (
+                  <div
+                    key={model.id}
+                    className={`p-3 rounded-lg border text-left ${
+                      theme === 'dark'
+                        ? 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    } transition cursor-pointer`}
+                  >
+                    <p className={`text-xs font-medium truncate ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                      {model.name}
+                    </p>
+                    <div className="grid grid-cols-2 gap-1 mt-2 text-xs">
+                      <div>
+                        <p className={`${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>Version</p>
+                        <p className={theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}>{model.version}</p>
+                      </div>
+                      <div>
+                        <p className={`${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>Type</p>
+                        <p className={theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}>{model.type}</p>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex gap-1">
+                      <span className={`text-xs px-2 py-1 rounded ${
+                        model.status === 'Champion'
+                          ? theme === 'dark' ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
+                          : model.status === 'Challenger'
+                          ? theme === 'dark' ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'
+                          : theme === 'dark' ? 'bg-gray-500/20 text-gray-400' : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {model.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className={`p-4 rounded-lg border text-center ${theme === 'dark' ? 'bg-slate-900/30 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>
+                  {selectedProject ? 'No models imported yet' : 'Select a project to view models'}
                 </p>
-                <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                  {project.createdAt}
-                </p>
-              </button>
-              <button
-                onClick={() => deleteProject(project.id)}
-                className="p-2 rounded hover:bg-red-500/20 text-red-500 transition"
-                title="Delete project"
-              >
-                <X size={18} />
-              </button>
-            </div>
-          ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Content - Workflow */}
