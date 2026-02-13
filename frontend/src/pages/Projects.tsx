@@ -14,6 +14,14 @@ interface ModelVersion {
   owner: string;
   lastValidation: string;
   nextReview: string;
+  metrics?: {
+    auc?: number;
+    precision?: number;
+    recall?: number;
+    f1_score?: number;
+    accuracy?: number;
+    [key: string]: any;
+  };
 }
 
 interface ModelMetadata {
@@ -46,6 +54,9 @@ interface ModelMetadata {
   featurePipelines: string;
   downstreamSystems: string;
   dependencies: string;
+
+  // Metrics
+  metrics?: { [key: string]: number };
 }
 
 interface WorkflowStep {
@@ -86,6 +97,8 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
   const [appendToExisting, setAppendToExisting] = useState(false);
   const [appendToModelId, setAppendToModelId] = useState('');
   const [metadataFile, setMetadataFile] = useState<File | null>(null);
+  const [metricsFile, setMetricsFile] = useState<File | null>(null);
+  const [metrics, setMetrics] = useState<{ [key: string]: number }>({});
   const [metadata, setMetadata] = useState<ModelMetadata>({
     modelId: '',
     modelName: '',
@@ -110,6 +123,18 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
     downstreamSystems: '',
     dependencies: '',
   });
+
+  const handleMetricsFileUpload = async (file: File) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      setMetrics(data);
+      setMetricsFile(file);
+      alert(`✓ Metrics loaded from ${file.name}`);
+    } catch (error) {
+      alert('Failed to parse metrics file. Please ensure it\'s valid JSON.');
+    }
+  };
 
   const handleMetadataFileUpload = async (file: File) => {
     try {
@@ -222,7 +247,12 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
       alert('Please fill in Model Name and Model ID');
       return;
     }
-    onAddModel(metadata);
+    // Attach metrics to metadata before saving
+    const metadataWithMetrics = {
+      ...metadata,
+      metrics: Object.keys(metrics).length > 0 ? metrics : undefined,
+    };
+    onAddModel(metadataWithMetrics);
     setMetadata({
       modelId: '',
       modelName: '',
@@ -250,6 +280,8 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
     setShowForm(false);
     setUploadedFile(null);
     setMetadataFile(null);
+    setMetricsFile(null);
+    setMetrics({});
     setModelFileFormat('PMML');
     setAppendToExisting(false);
     setAppendToModelId('');
@@ -339,12 +371,91 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                 </button>
               </div>
 
+              {/* Step 1: Model Version Selection */}
+              <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
+                <p className={`text-sm font-medium mb-4 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                  Step 1: Model Version
+                </p>
+                <div className="space-y-3">
+                  {/* Create New Model Option */}
+                  <label className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition ${
+                    !appendToExisting
+                      ? theme === 'dark'
+                        ? 'bg-blue-600/20 border-blue-500'
+                        : 'bg-blue-50 border-blue-500'
+                      : theme === 'dark'
+                      ? 'bg-slate-800/50 border-slate-600 hover:bg-slate-800/70'
+                      : 'bg-white border-slate-300 hover:bg-slate-50'
+                  }`}>
+                    <input
+                      type="radio"
+                      checked={!appendToExisting}
+                      onChange={() => setAppendToExisting(false)}
+                      className="flex-shrink-0"
+                    />
+                    <span className={`text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                      Create New Model
+                    </span>
+                  </label>
 
+                  {/* Add Version to Existing Model Option */}
+                  <div className={`rounded-lg border transition ${
+                    appendToExisting
+                      ? theme === 'dark'
+                        ? 'bg-blue-600/20 border-blue-500'
+                        : 'bg-blue-50 border-blue-500'
+                      : theme === 'dark'
+                      ? 'bg-slate-800/50 border-slate-600 hover:bg-slate-800/70'
+                      : 'bg-white border-slate-300 hover:bg-slate-50'
+                  }`}>
+                    <label className="flex items-center gap-3 p-4 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={appendToExisting}
+                        onChange={() => setAppendToExisting(true)}
+                        className="flex-shrink-0"
+                      />
+                      <span className={`text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                        Add New Version to Existing Model
+                      </span>
+                    </label>
 
-              {/* Model File Upload Section */}
+                    {/* Dropdown Section - appears when "Add Version" is selected */}
+                    {appendToExisting && (
+                      <div className="px-4 pb-4 mt-2 border-t border-current border-opacity-20">
+                        {workflow.models && workflow.models.length > 0 ? (
+                          <>
+                            <label className={`block text-xs font-medium mb-2 mt-3 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                              Select Model to Update
+                            </label>
+                            <select
+                              value={appendToModelId}
+                              onChange={(e) => setAppendToModelId(e.target.value)}
+                              className={`w-full px-3 py-2 rounded border text-sm ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                            >
+                              <option value="">-- Select a model --</option>
+                              {workflow.models.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.name} ({m.version})
+                                </option>
+                              ))}
+                            </select>
+                          </>
+                        ) : (
+                          <div className={`text-xs p-3 rounded mb-2 mt-3 ${theme === 'dark' ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                            No Models in Repository
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 2: Upload Model File */}
               <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
                 <p className={`text-sm font-medium mb-3 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Step 1: Upload Model File
+                  Step 2: Upload Model File
                 </p>
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   {(['PMML', 'ONNX', 'Pickle', 'JSON'] as const).map((format) => (
@@ -387,73 +498,7 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                 </label>
               </div>
 
-              {/* Append to Existing Model Option */}
-              <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
-                <p className={`text-sm font-medium mb-3 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Step 2: Model Version
-                </p>
-                <div className="space-y-3">
-                  <label className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition min-h-14 ${
-                    !appendToExisting
-                      ? theme === 'dark'
-                        ? 'bg-blue-600/20 border-blue-500'
-                        : 'bg-blue-50 border-blue-500'
-                      : theme === 'dark'
-                      ? 'bg-slate-800/50 border-slate-600 hover:bg-slate-800/70'
-                      : 'bg-white border-slate-300 hover:bg-slate-50'
-                  }`}>
-                    <input
-                      type="radio"
-                      checked={!appendToExisting}
-                      onChange={() => setAppendToExisting(false)}
-                      className="mt-1 flex-shrink-0"
-                    />
-                    <span className={`text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                      Create New Model
-                    </span>
-                  </label>
-
-                  <label className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition min-h-14 ${
-                    appendToExisting
-                      ? theme === 'dark'
-                        ? 'bg-blue-600/20 border-blue-500'
-                        : 'bg-blue-50 border-blue-500'
-                      : theme === 'dark'
-                      ? 'bg-slate-800/50 border-slate-600 hover:bg-slate-800/70'
-                      : 'bg-white border-slate-300 hover:bg-slate-50'
-                  }`}>
-                    <input
-                      type="radio"
-                      checked={appendToExisting}
-                      onChange={() => setAppendToExisting(true)}
-                      className="mt-1 flex-shrink-0"
-                    />
-                    <span className={`text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                      Add New Version to Existing Model
-                    </span>
-                  </label>
-
-                  {appendToExisting && workflow.models && workflow.models.length > 0 && (
-                    <div className="ml-4 mt-3">
-                      <label className="block text-xs font-medium mb-2">Select Model</label>
-                      <select
-                        value={appendToModelId}
-                        onChange={(e) => setAppendToModelId(e.target.value)}
-                        className={`w-full px-3 py-2 rounded border text-sm ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                      >
-                        <option value="">-- Select a model --</option>
-                        {workflow.models.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name} ({m.version})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Metadata Form Tabs */}
+              {/* Step 3: Metadata Form Tabs */}
               <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
                 <p className={`text-sm font-medium mb-3 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                   Step 3: Model Metadata
@@ -772,6 +817,45 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                     </>
                   )}
                 </div>
+              </div>
+
+              {/* Step 4: Upload Metrics */}
+              <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
+                <p className={`text-sm font-medium mb-3 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                  Step 4: Model Metrics (Optional)
+                </p>
+                <p className={`text-xs mb-3 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                  Upload metrics.json to include model performance metrics
+                </p>
+                <label className={`cursor-pointer flex items-center justify-center gap-2 py-4 rounded-lg border-2 border-dashed transition ${
+                  theme === 'dark' ? 'border-slate-600 hover:bg-slate-800/50' : 'border-slate-300 hover:bg-slate-100'
+                }`}>
+                  <Upload size={20} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} />
+                  <div className="text-center">
+                    <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                      {metricsFile ? metricsFile.name : 'Upload metrics.json'}
+                    </p>
+                    <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-500'}`}>
+                      {metricsFile ? 'Click to replace' : 'Click to select file'}
+                    </p>
+                  </div>
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleMetricsFileUpload(file);
+                    }}
+                    className="hidden"
+                  />
+                </label>
+                {metricsFile && Object.keys(metrics).length > 0 && (
+                  <div className={`mt-3 p-3 rounded-lg ${theme === 'dark' ? 'bg-green-900/20 border border-green-600' : 'bg-green-50 border border-green-200'}`}>
+                    <p className={`text-xs font-medium ${theme === 'dark' ? 'text-green-400' : 'text-green-700'}`}>
+                      ✓ Metrics loaded: {Object.keys(metrics).join(', ')}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-2">
@@ -1587,6 +1671,7 @@ export default function Projects() {
                           owner: metadata.owner,
                           lastValidation: metadata.lastValidationDate,
                           nextReview: metadata.nextReviewDue,
+                          metrics: metadata.metrics,
                         };
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
