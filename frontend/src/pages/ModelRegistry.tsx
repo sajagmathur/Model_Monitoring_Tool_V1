@@ -7,6 +7,7 @@ import {
   AlertCircle,
   Clock,
   User,
+  Trash2,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlobal } from '../contexts/GlobalContext';
@@ -121,8 +122,16 @@ const ModelVersionCard: React.FC<{ version: any; modelName: string }> = ({ versi
 
 export default function ModelRegistry() {
   const { theme } = useTheme();
-  const { registryModels } = useGlobal();
+  const { registryModels, clearRegistryModels } = useGlobal();
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+
+  const handleClearAll = () => {
+    if (registryModels.length === 0) return;
+    if (confirm(`Are you sure you want to remove all ${registryModels.length} model(s) from the repository? This cannot be undone.`)) {
+      clearRegistryModels();
+      setSelectedModelId(null);
+    }
+  };
 
   // Group models by name and organize versions
   const groupedModels = useMemo(() => {
@@ -183,6 +192,20 @@ export default function ModelRegistry() {
             Models imported from project workflows
           </p>
         </div>
+        {registryModels.length > 0 && (
+          <button
+            onClick={handleClearAll}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition font-medium ${
+              theme === 'dark'
+                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/50'
+                : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
+            }`}
+            title="Remove all models from repository"
+          >
+            <Trash2 size={18} />
+            Clear All Models
+          </button>
+        )}
       </div>
 
       {/* Two-Column Layout */}

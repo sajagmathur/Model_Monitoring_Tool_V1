@@ -175,6 +175,7 @@ interface GlobalContextType {
   createRegistryModel: (model: Omit<RegistryModel, 'id' | 'createdAt'>) => RegistryModel;
   updateRegistryModel: (id: string, updates: Partial<RegistryModel>) => void;
   deleteRegistryModel: (id: string) => void;
+  clearRegistryModels: () => void;
   getRegistryModel: (id: string) => RegistryModel | undefined;
 
   // Deployment Jobs
@@ -417,6 +418,13 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
+  const clearRegistryModels = () => {
+    setState(prev => ({
+      ...prev,
+      registryModels: [],
+    }));
+  };
+
   const getRegistryModel = (id: string) => state.registryModels.find(m => m.id === id);
 
   // Deployment Jobs
@@ -566,6 +574,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     createRegistryModel,
     updateRegistryModel,
     deleteRegistryModel,
+    clearRegistryModels,
     getRegistryModel,
     deploymentJobs: state.deploymentJobs,
     createDeploymentJob,
