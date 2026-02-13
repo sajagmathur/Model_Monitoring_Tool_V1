@@ -1,4 +1,4 @@
-# MLOps Studio Frontend - Quick Start Guide
+# ML Monitoring Frontend - Quick Start Guide
 
 ## Prerequisites
 
@@ -26,8 +26,8 @@ The frontend will start on **http://localhost:3000**
 ## Login Credentials
 
 **Demo Credentials (Works without backend):**
-- Email: `admin@mlops.com`
-- Password: `password`
+- Email: `demo@mlmonitoring.com`
+- Password: `demo123`
 
 ## Features Accessible
 
@@ -62,6 +62,7 @@ Once logged in, you can access:
 - Automatic JWT token injection in all requests
 - Error handling with user-friendly messages
 - Demo mode works without backend
+- Demo credentials: demo@mlmonitoring.com / demo123
 
 ## Troubleshooting
 
@@ -76,7 +77,7 @@ Run: `npm install`
 
 ### API calls failing
 - Backend must be running on port 5000
-- Or use demo credentials (admin@mlops.com / password) which don't require backend
+- Or use demo credentials (demo@mlmonitoring.com / demo123) which don't require backend
 - Check `.env` file for correct API_URL
 
 ### Page not navigating

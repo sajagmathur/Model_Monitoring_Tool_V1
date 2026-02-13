@@ -2,11 +2,16 @@ import React, { useState } from 'react';
 import {
   Package,
   ChevronRight,
-  CheckCircle2,
-  AlertTriangle,
-  AlertCircle,
+  FileJson,
+  GitBranch,
   Clock,
   User,
+  AlertCircle,
+  Layers,
+  TrendingUp,
+  Lock,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { Breadcrumb } from '../components/UIPatterns';
@@ -41,7 +46,7 @@ const ModelVersionCard: React.FC<{ version: ModelVersion; modelName: string }> =
 
   const statusColors = {
     champion: {
-      bg: theme === 'dark' ? 'bg-yellow-500/20' : 'bg-yellow-100',
+      bg: theme === 'dark' ? 'bg-gold-500/20' : 'bg-yellow-100',
       text: theme === 'dark' ? 'text-yellow-400' : 'text-yellow-700',
       border: 'border-yellow-500/30',
     },
@@ -124,6 +129,63 @@ const ModelVersionCard: React.FC<{ version: ModelVersion; modelName: string }> =
       <div className="flex items-center gap-2 text-xs">
         <Clock size={12} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} />
         <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>{version.lastValidation}</span>
+      </div>
+    </div>
+  );
+};
+
+const ModelCard: React.FC<{ model: Model; onSelect: () => void }> = ({ model, onSelect }) => {
+  const { theme } = useTheme();
+  const currentVersion = model.versions[0];
+
+  return (
+    <div
+      onClick={onSelect}
+      className={`p-4 rounded-lg border cursor-pointer transition-all hover:shadow-lg ${
+        theme === 'dark' ? 'bg-slate-800/50 border-slate-700 hover:bg-slate-800/70' : 'bg-white border-slate-200 hover:bg-slate-50'
+      }`}
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <Package size={20} className={theme === 'dark' ? 'text-blue-400' : 'text-blue-600'} />
+          <div>
+            <p className={`font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+              {model.name}
+            </p>
+            <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+              {model.modelType}
+            </p>
+          </div>
+        </div>
+        <ChevronRight size={20} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} />
+      </div>
+
+      <p className={`text-sm mb-3 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>{model.description}</p>
+
+      <div className="space-y-2 mb-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>Versions:</span>
+          <span className={`font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+            {model.versions.length}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-xs">
+          <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>Current:</span>
+          <span className={theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}>v{currentVersion.version}</span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {model.versions.slice(0, 3).map((v) => (
+          <span
+            key={v.id}
+            className={`text-xs px-2 py-1 rounded ${
+              theme === 'dark' ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-700'
+            }`}
+          >
+            {v.status === 'champion' ? '⭐' : v.status === 'challenger' ? '🔄' : '📦'} v{v.version}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -256,17 +318,10 @@ export default function ModelRegistry() {
           {/* Folder Tree */}
           <div className="space-y-2">
             {['Risk Management', 'Marketing', 'Operations'].map((folder) => (
-              <div
-                key={folder}
-                className={`rounded-lg border overflow-hidden ${
-                  theme === 'dark' ? 'border-slate-700' : 'border-slate-200'
-                }`}
-              >
-                <div
-                  className={`p-3 font-medium ${
-                    theme === 'dark' ? 'bg-slate-800/50 text-slate-300' : 'bg-slate-100 text-slate-700'
-                  }`}
-                >
+              <div key={folder} className={`rounded-lg border overflow-hidden ${
+                theme === 'dark' ? 'border-slate-700' : 'border-slate-200'
+              }`}>
+                <div className={`p-3 font-medium ${theme === 'dark' ? 'bg-slate-800/50 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>
                   📁 {folder}
                 </div>
                 <div className={`divide-y ${theme === 'dark' ? 'divide-slate-700' : 'divide-slate-200'}`}>
@@ -310,9 +365,7 @@ export default function ModelRegistry() {
               >
                 <div className="flex items-start justify-between mb-4">
                   <div>
-                    <h2
-                      className={`text-2xl font-bold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}
-                    >
+                    <h2 className={`text-2xl font-bold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
                       {selectedModel.name}
                     </h2>
                     <p className={`mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
@@ -330,11 +383,7 @@ export default function ModelRegistry() {
                     <p className={`text-sm ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
                       Model Type
                     </p>
-                    <p
-                      className={`text-lg font-semibold ${
-                        theme === 'dark' ? 'text-white' : 'text-slate-900'
-                      }`}
-                    >
+                    <p className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
                       {selectedModel.modelType}
                     </p>
                   </div>
@@ -342,11 +391,7 @@ export default function ModelRegistry() {
                     <p className={`text-sm ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
                       Total Versions
                     </p>
-                    <p
-                      className={`text-lg font-semibold ${
-                        theme === 'dark' ? 'text-white' : 'text-slate-900'
-                      }`}
-                    >
+                    <p className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
                       {selectedModel.versions.length}
                     </p>
                   </div>
@@ -354,11 +399,7 @@ export default function ModelRegistry() {
                     <p className={`text-sm ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
                       Lineage Steps
                     </p>
-                    <p
-                      className={`text-lg font-semibold ${
-                        theme === 'dark' ? 'text-white' : 'text-slate-900'
-                      }`}
-                    >
+                    <p className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
                       {selectedModel.lineage.length}
                     </p>
                   </div>
@@ -367,20 +408,12 @@ export default function ModelRegistry() {
 
               {/* Versions */}
               <div>
-                <h3
-                  className={`text-lg font-semibold mb-4 ${
-                    theme === 'dark' ? 'text-white' : 'text-slate-900'
-                  }`}
-                >
+                <h3 className={`text-lg font-semibold mb-4 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
                   Model Versions
                 </h3>
                 <div className="grid grid-cols-1 gap-4">
                   {selectedModel.versions.map((version) => (
-                    <ModelVersionCard
-                      key={version.id}
-                      version={version}
-                      modelName={selectedModel.name}
-                    />
+                    <ModelVersionCard key={version.id} version={version} modelName={selectedModel.name} />
                   ))}
                 </div>
               </div>
@@ -391,42 +424,27 @@ export default function ModelRegistry() {
                   theme === 'dark' ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'
                 }`}
               >
-                <h3
-                  className={`text-lg font-semibold mb-4 ${
-                    theme === 'dark' ? 'text-white' : 'text-slate-900'
-                  }`}
-                >
+                <h3 className={`text-lg font-semibold mb-4 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
                   Governance & Lineage
                 </h3>
 
                 <div className="space-y-3">
                   <div>
-                    <p
-                      className={`text-sm font-medium mb-2 ${
-                        theme === 'dark' ? 'text-slate-300' : 'text-slate-700'
-                      }`}
-                    >
+                    <p className={`text-sm font-medium mb-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                       Version Lineage
                     </p>
                     <div className="flex items-center gap-1 flex-wrap">
                       {selectedModel.lineage.map((v, idx) => (
                         <React.Fragment key={v}>
-                          <span
-                            className={`px-3 py-1 rounded text-xs font-medium ${
-                              theme === 'dark'
-                                ? 'bg-blue-600/20 text-blue-400'
-                                : 'bg-blue-50 text-blue-700'
-                            }`}
-                          >
+                          <span className={`px-3 py-1 rounded text-xs font-medium ${
+                            theme === 'dark'
+                              ? 'bg-blue-600/20 text-blue-400'
+                              : 'bg-blue-50 text-blue-700'
+                          }`}>
                             {v}
                           </span>
                           {idx < selectedModel.lineage.length - 1 && (
-                            <ChevronRight
-                              size={16}
-                              className={
-                                theme === 'dark' ? 'text-slate-400' : 'text-slate-600'
-                              }
-                            />
+                            <ChevronRight size={16} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} />
                           )}
                         </React.Fragment>
                       ))}
@@ -434,11 +452,7 @@ export default function ModelRegistry() {
                   </div>
 
                   <div>
-                    <p
-                      className={`text-sm font-medium mb-2 ${
-                        theme === 'dark' ? 'text-slate-300' : 'text-slate-700'
-                      }`}
-                    >
+                    <p className={`text-sm font-medium mb-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                       Governance Status
                     </p>
                     <div className="flex items-center gap-2">
@@ -457,10 +471,7 @@ export default function ModelRegistry() {
                 theme === 'dark' ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'
               }`}
             >
-              <Package
-                size={48}
-                className={`mx-auto mb-4 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-400'}`}
-              />
+              <Package size={48} className={`mx-auto mb-4 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-400'}`} />
               <p className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>
                 Select a model to view details
               </p>

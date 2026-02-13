@@ -1,4 +1,4 @@
-# MLOps Studio - Installation & Setup Guide
+# ML Monitoring - Installation & Setup Guide
 
 Complete step-by-step guide to set up MLOps Studio locally or on AWS.
 

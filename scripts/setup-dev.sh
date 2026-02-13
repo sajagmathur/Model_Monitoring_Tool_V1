@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# MLOps Studio - Local Development Setup Script
+# ML Monitoring - Local Development Setup Script
 
 set -e
 
-echo "🚀 Starting MLOps Studio development environment..."
+echo "🚀 Starting ML Monitoring development environment..."
 
 # Check prerequisites
 check_requirements() {
@@ -123,7 +123,7 @@ EOF
 # Display summary
 show_summary() {
     echo ""
-    echo "✅ MLOps Studio development environment is ready!"
+    echo "✅ ML Monitoring development environment is ready!"
     echo ""
     echo "📱 Frontend: http://localhost:3000"
     echo "🔧 Backend API: http://localhost:5000"

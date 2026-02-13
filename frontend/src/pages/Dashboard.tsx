@@ -1,344 +1,422 @@
-import React, { useEffect, useState } from 'react';
-import { BarChart3, TrendingUp, Package, GitBranch, AlertCircle, RefreshCw, Database, Play, Sparkles } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import React, { useState } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
-import { useGlobal } from '../contexts/GlobalContext';
-import { APIClient } from '../services/APIClient';
-import { useNotification } from '../hooks/useNotification';
-import { Breadcrumb, SkeletonLoader } from '../components/UIPatterns';
-import { themeClasses } from '../utils/themeClasses';
+import { ChevronRight, Download, Filter } from 'lucide-react';
 
-interface DashboardStats {
-  projectCount: number;
-  pipelineCount: number;
-  deploymentCount: number;
-  alertCount: number;
+interface KPIMetric {
+  name: string;
+  value: string | number;
+  unit: string;
+  baseline: string | number;
+  delta: number;
+  status: 'good' | 'warning' | 'critical';
 }
 
-export default function Dashboard() {
+interface Alert {
+  id: string;
+  model: string;
+  metric: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  age: string;
+  status: 'active' | 'acknowledged' | 'resolved';
+}
+
+const StatusBadge: React.FC<{ status: 'good' | 'warning' | 'critical' }> = ({ status }) => {
+  const colors = {
+    good: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100',
+    warning: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100',
+    critical: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100',
+  };
+
+  const labels = {
+    good: '🟢 Healthy',
+    warning: '🟡 Warning',
+    critical: '🔴 Critical',
+  };
+
+  return (
+    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${colors[status]}`}>
+      {labels[status]}
+    </span>
+  );
+};
+
+const KPICard: React.FC<{ metric: KPIMetric }> = ({ metric }) => {
   const { theme } = useTheme();
-  const global = useGlobal();
-  const { showNotification } = useNotification();
-  const [stats, setStats] = useState<DashboardStats>({
-    projectCount: 0,
-    pipelineCount: 0,
-    deploymentCount: 0,
-    alertCount: 0
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [demoRunning, setDemoRunning] = useState(false);
+  const isDark = theme === 'dark';
 
-  const loadDashboardData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // Use GlobalContext data instead of API
-      setStats({
-        projectCount: global.projects.length,
-        pipelineCount: global.pipelineJobs.length,
-        deploymentCount: global.deploymentJobs.length,
-        alertCount: global.monitoringJobs.filter(m => m.metrics?.dataDrift && m.metrics.dataDrift > 0.25).length,
-      });
-    } catch (err) {
-      console.warn('Failed to load dashboard data:', err);
-      setStats({
-        projectCount: global.projects.length,
-        pipelineCount: 0,
-        deploymentCount: 0,
-        alertCount: 0
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleStartDemo = async () => {
-    setDemoRunning(true);
-    showNotification('Starting quick demo...', 'info');
-
-    try {
-      console.log('🚀 Starting demo creation...');
-      // Step 1: Create sample project
-      const project = global.createProject({
-        name: 'Boston Housing Model',
-        description: 'Predict house prices using ML',
-        environment: 'dev',
-        status: 'active',
-        code: [],
-      });
-
-      console.log('✅ Project created:', project);
-      console.log('   Project ID:', project.id);
-      showNotification('Created sample project', 'success');
-
-      // Step 2: Create data ingestion job
-      const ingestionJob = global.createIngestionJob({
-        name: 'Load Boston Housing Data',
-        projectId: project.id,
-        dataSource: 'csv',
-        status: 'completed',
-        outputPath: '/data/boston_housing.csv',
-        outputShape: { rows: 506, columns: 13 },
-        outputColumns: ['CRIM', 'ZN', 'INDUS', 'CHAS', 'NOX', 'RM', 'AGE', 'DIS', 'RAD', 'TAX', 'PTRATIO', 'B', 'LSTAT'],
-        lastRun: new Date().toISOString(),
-      });
-
-      console.log('✅ Ingestion job created:', ingestionJob);
-      console.log('   Ingestion projectId:', ingestionJob.projectId);
-      showNotification('Data ingestion job created', 'success');
-
-      // Step 3: Create data preparation job
-      const prepJob = global.createPreparationJob({
-        name: 'Prepare Features',
-        projectId: project.id,
-        ingestionJobId: ingestionJob.id,
-        status: 'completed',
-        outputPath: '/data/prepared_features.csv',
-        outputShape: { rows: 506, columns: 13 },
-        outputColumns: ['CRIM', 'ZN', 'INDUS', 'CHAS', 'NOX', 'RM', 'AGE', 'DIS', 'RAD', 'TAX', 'PTRATIO', 'B', 'PRICE'],
-        lastRun: new Date().toISOString(),
-      });
-
-      console.log('✅ Preparation job created:', prepJob);
-      showNotification('Data preparation job created', 'success');
-
-      // Step 4: Register model
-      const model = global.createRegistryModel({
-        name: 'Boston Price Predictor',
-        version: '1.0.0',
-        projectId: project.id,
-        modelType: 'regression',
-        stage: 'production',
-        status: 'active',
-        metrics: {
-          accuracy: 0.73,
-          precision: 0.72,
-          recall: 0.74,
-        },
-      });
-
-      showNotification('Model registered in registry', 'success');
-
-      console.log('✅ Deployment job creating...');
-      const deploymentJob = global.createDeploymentJob({
-        name: 'Deploy to Production',
-        projectId: project.id,
-        modelId: model.id,
-        environment: 'prod',
-        containerName: 'boston-model-prod',
-        status: 'active',
-        lastDeployed: new Date().toISOString(),
-      });
-
-      showNotification('Model deployed successfully', 'success');
-
-      console.log('✅ Deployment job created:', deploymentJob);
-
-      // Step 6: Create inferencing job
-      const inferencingJob = global.createInferencingJob({
-        name: 'Weekly Price Predictions',
-        projectId: project.id,
-        modelId: model.id,
-        inputDatasetId: prepJob.id,
-        status: 'completed',
-        outputPath: '/results/predictions.csv',
-        predictions: Array.from({ length: 100 }, () => ({
-          prediction: Math.random() * 50 + 10,
-          confidence: Math.random() * 0.3 + 0.75,
-        })),
-        lastRun: new Date().toISOString(),
-      });
-
-      showNotification('Inferencing job created', 'success');
-
-      // Step 7: Create monitoring job
-      const monitoringJob = global.createMonitoringJob({
-        name: 'Production Model Monitor',
-        projectId: project.id,
-        modelId: model.id,
-        inputDatasetId: prepJob.id,
-        metrics: {
-          dataDrift: 0.08,
-          modelDrift: 0.05,
-          performanceDegradation: 0.03,
-          lastChecked: new Date().toISOString(),
-        },
-        status: 'completed',
-        lastRun: new Date().toISOString(),
-      });
-
-      showNotification('Monitoring job created', 'success');
-
-      // Wait a moment for state to fully propagate
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Final verification - check localStorage directly
-      const storedState = JSON.parse(localStorage.getItem('mlops_studio_state') || '{}');
-      console.log('\n🎉 DEMO COMPLETE! Checking stored state:');
-      console.log('Project:', project.id, project.name);
-      console.log('Stored ingestion jobs:', storedState.ingestionJobs?.length || 0, storedState.ingestionJobs);
-      console.log('Stored preparation jobs:', storedState.preparationJobs?.length || 0, storedState.preparationJobs);
-      console.log('Stored registry models:', storedState.registryModels?.length || 0, storedState.registryModels);
-      console.log('Stored deployment jobs:', storedState.deploymentJobs?.length || 0, storedState.deploymentJobs);
-      console.log('Stored inferencing jobs:', storedState.inferencingJobs?.length || 0, storedState.inferencingJobs);
-      console.log('Stored monitoring jobs:', storedState.monitoringJobs?.length || 0, storedState.monitoringJobs);
-
-      // Reload stats
-      await loadDashboardData();
-
-      showNotification('Demo completed! Explore the created pipeline in all sections.', 'success');
-    } catch (err) {
-      console.error('Demo error:', err);
-      showNotification('Error creating demo: ' + (err as any).message, 'error');
-    } finally {
-      setDemoRunning(false);
-    }
-  };
-
-  useEffect(() => {
-    loadDashboardData();
-    const interval = setInterval(loadDashboardData, 30000);
-    return () => clearInterval(interval);
-  }, [global.projects.length, global.deploymentJobs.length, global.pipelineJobs.length]);
-
-  const StatCard = ({ icon: Icon, label, value, unit = '' }: { icon: any; label: string; value: number | string; unit?: string }) => (
-    <div className={themeClasses.card(theme)}>
-      <div className="flex items-start justify-between">
-        <div>
-          <p className={`${themeClasses.textSecondary(theme)} text-sm mb-2`}>{label}</p>
-          <p className={`text-3xl font-bold ${themeClasses.textPrimary(theme)}`}>{value}{unit}</p>
+  return (
+    <div
+      className={`p-4 rounded-lg border ${
+        isDark
+          ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
+          : 'bg-white border-slate-200 hover:border-slate-300'
+      } transition-all hover:shadow-md`}
+    >
+      <div className="flex justify-between items-start mb-3">
+        <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+          {metric.name}
+        </p>
+        <StatusBadge status={metric.status} />
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-baseline gap-2">
+          <span className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+            {metric.value}
+          </span>
+          <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            {metric.unit}
+          </span>
         </div>
-        <Icon size={32} className={themeClasses.iconDefault(theme)} />
+        <div className="flex justify-between items-center pt-2 border-t border-slate-700 dark:border-slate-600">
+          <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+            Baseline: {metric.baseline}{metric.unit}
+          </span>
+          <span
+            className={`text-sm font-semibold ${
+              metric.delta >= 0
+                ? 'text-green-500'
+                : 'text-red-500'
+            }`}
+          >
+            {metric.delta >= 0 ? '+' : ''}{metric.delta}%
+          </span>
+        </div>
       </div>
     </div>
   );
+};
+
+const FilterBar: React.FC = () => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const [filters, setFilters] = useState({
+    portfolio: 'All',
+    businessLine: 'All',
+    modelType: 'All',
+    model: 'All',
+    timeWindow: 'Last 30 Days',
+    segment: 'All',
+  });
+
+  const filterOptions = {
+    portfolio: ['All', 'Risk Management', 'Marketing', 'Operations'],
+    businessLine: ['All', 'Retail', 'Commercial', 'Digital'],
+    modelType: ['All', 'Classification', 'Regression', 'Ranking'],
+    model: ['All', 'Credit Risk Scoring', 'Fraud Detection', 'Marketing Propensity'],
+    timeWindow: ['Last 7 Days', 'Last 30 Days', 'Last 90 Days', 'Year to Date'],
+    segment: ['All', 'Prime', 'Non-Prime', 'Subprime'],
+  };
 
   return (
-    <div className="space-y-8">
-      {/* Breadcrumb */}
-      <Breadcrumb items={[{ label: 'Dashboard' }]} />
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className={`text-4xl font-bold ${themeClasses.textPrimary(theme)} mb-2`}>Dashboard</h1>
-          <p className={themeClasses.textSecondary(theme)}>Welcome to MLOps Studio - Monitor your ML operations</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={handleStartDemo}
-            disabled={demoRunning}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition font-semibold ${
-              demoRunning
-                ? `${theme === 'dark' ? 'bg-purple-900 text-purple-300' : 'bg-purple-100 text-purple-700'}`
-                : `${theme === 'dark' ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700' : 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600'} text-white`
+    <div className={`p-4 rounded-lg border mb-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <div className="flex items-center gap-2 mb-4">
+        <Filter size={18} className={isDark ? 'text-slate-400' : 'text-slate-600'} />
+        <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Global Filters</h3>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {Object.entries(filterOptions).map(([key, options]) => (
+          <select
+            key={key}
+            value={filters[key as keyof typeof filters]}
+            onChange={(e) =>
+              setFilters({ ...filters, [key]: e.target.value })
+            }
+            className={`px-3 py-2 rounded border text-sm ${
+              isDark
+                ? 'bg-slate-700 border-slate-600 text-white'
+                : 'bg-white border-slate-300 text-slate-900'
             }`}
-            title="Creates sample project with complete ML pipeline"
           >
-            <Sparkles size={18} className={demoRunning ? 'animate-spin' : ''} />
-            {demoRunning ? 'Setting up...' : 'Start Demo'}
-          </button>
-          <button
-            onClick={loadDashboardData}
-            disabled={loading}
-            className={`flex items-center gap-2 ${themeClasses.buttonPrimary(theme)}`}
-          >
-            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+            {options.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const AlertGrid: React.FC = () => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
+  const alerts: Alert[] = [
+    {
+      id: '1',
+      model: 'Credit Risk Scoring v2.1',
+      metric: 'AUC Score',
+      severity: 'high',
+      age: '2 hours ago',
+      status: 'active',
+    },
+    {
+      id: '2',
+      model: 'Fraud Detection v3.0',
+      metric: 'PSI Drift',
+      severity: 'critical',
+      age: '1 hour ago',
+      status: 'active',
+    },
+    {
+      id: '3',
+      model: 'Marketing Propensity v1.5',
+      metric: 'Feature Drift',
+      severity: 'medium',
+      age: '30 minutes ago',
+      status: 'acknowledged',
+    },
+    {
+      id: '4',
+      model: 'Credit Risk Scoring v2.1',
+      metric: 'Demographic Parity',
+      severity: 'high',
+      age: '15 minutes ago',
+      status: 'active',
+    },
+    {
+      id: '5',
+      model: 'Fraud Detection v3.0',
+      metric: 'Missing Rate',
+      severity: 'low',
+      age: '5 minutes ago',
+      status: 'resolved',
+    },
+  ];
+
+  const getSeverityColor = (severity: string) => {
+    const colors: Record<string, string> = {
+      low: isDark ? 'bg-blue-900 text-blue-100' : 'bg-blue-100 text-blue-800',
+      medium: isDark ? 'bg-yellow-900 text-yellow-100' : 'bg-yellow-100 text-yellow-800',
+      high: isDark ? 'bg-orange-900 text-orange-100' : 'bg-orange-100 text-orange-800',
+      critical: isDark ? 'bg-red-900 text-red-100' : 'bg-red-100 text-red-800',
+    };
+    return colors[severity] || colors.low;
+  };
+
+  const getStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      active: isDark ? 'text-red-400' : 'text-red-600',
+      acknowledged: isDark ? 'text-yellow-400' : 'text-yellow-600',
+      resolved: isDark ? 'text-green-400' : 'text-green-600',
+    };
+    return colors[status] || colors.active;
+  };
+
+  return (
+    <div className={`rounded-lg border overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className={`border-b ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+              <th className={`px-6 py-3 text-left text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                Model
+              </th>
+              <th className={`px-6 py-3 text-left text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                Metric
+              </th>
+              <th className={`px-6 py-3 text-left text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                Severity
+              </th>
+              <th className={`px-6 py-3 text-left text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                Age
+              </th>
+              <th className={`px-6 py-3 text-left text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                Status
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {alerts.map((alert) => (
+              <tr
+                key={alert.id}
+                className={`border-b transition-colors ${
+                  isDark
+                    ? 'border-slate-700 hover:bg-slate-700'
+                    : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <td className={`px-6 py-3 text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  {alert.model}
+                </td>
+                <td className={`px-6 py-3 text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {alert.metric}
+                </td>
+                <td className="px-6 py-3 text-sm">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(alert.severity)}`}>
+                    {alert.severity.charAt(0).toUpperCase() + alert.severity.slice(1)}
+                  </span>
+                </td>
+                <td className={`px-6 py-3 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {alert.age}
+                </td>
+                <td className={`px-6 py-3 text-sm font-medium ${getStatusColor(alert.status)}`}>
+                  {alert.status.charAt(0).toUpperCase() + alert.status.slice(1)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const Dashboard: React.FC = () => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
+  // KPI Data - organized by category
+  const performanceMetrics: KPIMetric[] = [
+    { name: 'AUC Score', value: 0.857, unit: '', baseline: 0.85, delta: 0.8, status: 'good' },
+    { name: 'Gini Coefficient', value: 0.714, unit: '', baseline: 0.70, delta: 1.2, status: 'good' },
+    { name: 'KS Statistic', value: 0.625, unit: '', baseline: 0.62, delta: 0.5, status: 'good' },
+  ];
+
+  const stabilityMetrics: KPIMetric[] = [
+    { name: 'Population Stability Index', value: 0.042, unit: '', baseline: 0.025, delta: -68.0, status: 'warning' },
+    { name: 'Characteristic Stability', value: 0.031, unit: '', baseline: 0.020, delta: -55.0, status: 'warning' },
+    { name: 'JS Divergence', value: 0.018, unit: '', baseline: 0.015, delta: -20.0, status: 'good' },
+  ];
+
+  const featureMetrics: KPIMetric[] = [
+    { name: 'Information Value', value: 0.385, unit: '', baseline: 0.40, delta: 3.8, status: 'good' },
+    { name: 'Feature Drift Rate', value: '12.5%', unit: '', baseline: '8%', delta: -56.3, status: 'warning' },
+    { name: 'Missing Rate', value: '2.3%', unit: '', baseline: '1.5%', delta: -53.3, status: 'warning' },
+  ];
+
+  const fairnessMetrics: KPIMetric[] = [
+    { name: 'Demographic Parity', value: 0.92, unit: '', baseline: 0.95, delta: 3.2, status: 'warning' },
+    { name: 'Equal Opportunity', value: 0.88, unit: '', baseline: 0.90, delta: 2.2, status: 'good' },
+    { name: 'Adverse Impact Ratio', value: 0.81, unit: '', baseline: 0.80, delta: -1.2, status: 'good' },
+  ];
+
+  const businessMetrics: KPIMetric[] = [
+    { name: 'Approval Rate', value: '68.5%', unit: '', baseline: '65%', delta: 5.4, status: 'good' },
+    { name: 'Loss Rate', value: '2.1%', unit: '', baseline: '2.5%', delta: 16.0, status: 'good' },
+    { name: 'ROI', value: '24.3%', unit: '', baseline: '20%', delta: 21.5, status: 'good' },
+  ];
+
+  return (
+    <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+      {/* Header */}
+      <div className={`border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className="max-w-7xl mx-auto px-6 py-6">
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-2 mb-4">
+            <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Home</span>
+            <ChevronRight size={16} className={isDark ? 'text-slate-500' : 'text-slate-400'} />
+            <span className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              Dashboard
+            </span>
+          </div>
+
+          {/* Title and Actions */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className={`text-3xl font-bold mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Model Monitoring Dashboard
+              </h1>
+              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Real-time health metrics and risk indicators across your model portfolio
+              </p>
+            </div>
+            <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+              <Download size={18} />
+              Export Report
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Demo Info */}
-      <div className={`rounded-lg border backdrop-blur-sm p-4 ${
-        theme === 'dark'
-          ? 'bg-gradient-to-r from-purple-900/20 to-pink-900/20 border-purple-500/30'
-          : 'bg-gradient-to-r from-purple-50 to-pink-50 border-purple-300'
-      }`}>
-        <div className="flex items-start gap-3">
-          <Sparkles className={`flex-shrink-0 mt-0.5 ${theme === 'dark' ? 'text-purple-400' : 'text-purple-600'}`} />
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Filters */}
+        <FilterBar />
+
+        {/* KPI Sections */}
+        <div className="space-y-8">
+          {/* Performance & Accuracy */}
           <div>
-            <p className={`font-semibold ${themeClasses.textPrimary(theme)}`}>Quick Demo Available</p>
-            <p className={`text-sm ${themeClasses.textSecondary(theme)} mt-1`}>
-              Click "Start Demo" to automatically create a complete ML pipeline with Boston Housing dataset, including data ingestion, preparation, model registry, deployment, inferencing, and monitoring jobs.
+            <h2 className={`text-xl font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              📊 Performance & Accuracy
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {performanceMetrics.map((metric) => (
+                <KPICard key={metric.name} metric={metric} />
+              ))}
+            </div>
+          </div>
+
+          {/* Stability */}
+          <div>
+            <h2 className={`text-xl font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              ⚡ Stability & Drift
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {stabilityMetrics.map((metric) => (
+                <KPICard key={metric.name} metric={metric} />
+              ))}
+            </div>
+          </div>
+
+          {/* Feature Quality */}
+          <div>
+            <h2 className={`text-xl font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              🔬 Feature Quality
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {featureMetrics.map((metric) => (
+                <KPICard key={metric.name} metric={metric} />
+              ))}
+            </div>
+          </div>
+
+          {/* Fairness */}
+          <div>
+            <h2 className={`text-xl font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              ⚖️ Fairness & Compliance
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {fairnessMetrics.map((metric) => (
+                <KPICard key={metric.name} metric={metric} />
+              ))}
+            </div>
+          </div>
+
+          {/* Business Impact */}
+          <div>
+            <h2 className={`text-xl font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              💼 Business Impact
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {businessMetrics.map((metric) => (
+                <KPICard key={metric.name} metric={metric} />
+              ))}
+            </div>
+          </div>
+
+          {/* Alerts Section */}
+          <div>
+            <h2 className={`text-xl font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              🚨 Active Alerts
+            </h2>
+            <AlertGrid />
+          </div>
+
+          {/* Trends & Anomalies Placeholder */}
+          <div className={`p-8 rounded-lg border text-center ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>
+              📈 Trends & Anomalies visualization coming soon
             </p>
           </div>
         </div>
       </div>
-
-      {/* Error State */}
-      {error && (
-        <div className={`p-4 ${themeClasses.alertError(theme)} rounded-lg flex items-start gap-3`}>
-          <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
-          <div>
-            <p className={`${themeClasses.textPrimary(theme)} font-medium`}>Error Loading Dashboard</p>
-            <p className={`${themeClasses.textSecondary(theme)} text-sm mt-1`}>{error}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Loading State */}
-      {loading && (
-        <>
-          <SkeletonLoader count={4} variant="card" />
-          <SkeletonLoader count={1} variant="card" />
-        </>
-      )}
-
-      {/* Stats Grid */}
-      {!loading && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <StatCard icon={Database} label="Active Projects" value={stats.projectCount} />
-            <StatCard icon={GitBranch} label="Pipelines" value={stats.pipelineCount} />
-            <StatCard icon={Package} label="Deployments" value={stats.deploymentCount} />
-            <StatCard icon={AlertCircle} label="Active Alerts" value={stats.alertCount} />
-          </div>
-
-          {/* Quick Actions */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Link
-              to="/projects"
-              className={`p-6 rounded-xl transition-all cursor-pointer group focus:outline-none focus:ring-2 focus:ring-blue-400 ${
-                theme === 'dark'
-                  ? 'bg-gradient-to-br from-blue-600/20 to-blue-400/10 hover:from-blue-600/30 hover:to-blue-400/20 border border-blue-400/30'
-                  : 'bg-gradient-to-br from-blue-50 to-blue-100/50 hover:from-blue-100 hover:to-blue-100 border border-blue-300 shadow-sm'
-              }`}
-            >
-              <Database size={24} className={`mb-2 group-hover:translate-x-1 transition-transform ${themeClasses.iconDefault(theme)}`} />
-              <h3 className={`${themeClasses.textPrimary(theme)} font-bold mb-1`}>Manage Projects</h3>
-              <p className={themeClasses.textSecondary(theme)}>Create and manage ML projects</p>
-            </Link>
-
-            <Link
-              to="/pipelines"
-              className={`p-6 rounded-xl transition-all cursor-pointer group focus:outline-none focus:ring-2 focus:ring-purple-400 ${
-                theme === 'dark'
-                  ? 'bg-gradient-to-br from-purple-600/20 to-purple-400/10 hover:from-purple-600/30 hover:to-purple-400/20 border border-purple-400/30'
-                  : 'bg-gradient-to-br from-purple-50 to-purple-100/50 hover:from-purple-100 hover:to-purple-100 border border-purple-300 shadow-sm'
-              }`}
-            >
-              <GitBranch size={24} className={`mb-2 group-hover:translate-x-1 transition-transform ${theme === 'dark' ? 'text-purple-400' : 'text-purple-600'}`} />
-              <h3 className={`${themeClasses.textPrimary(theme)} font-bold mb-1`}>View Pipelines</h3>
-              <p className={themeClasses.textSecondary(theme)}>Monitor pipeline execution and DAG</p>
-            </Link>
-
-            <Link
-              to="/monitoring"
-              className={`p-6 rounded-xl transition-all cursor-pointer group focus:outline-none focus:ring-2 focus:ring-green-400 ${
-                theme === 'dark'
-                  ? 'bg-gradient-to-br from-green-600/20 to-green-400/10 hover:from-green-600/30 hover:to-green-400/20 border border-green-400/30'
-                  : 'bg-gradient-to-br from-green-50 to-green-100/50 hover:from-green-100 hover:to-green-100 border border-green-300 shadow-sm'
-              }`}
-            >
-              <BarChart3 size={24} className={`mb-2 group-hover:translate-x-1 transition-transform ${theme === 'dark' ? 'text-green-400' : 'text-green-600'}`} />
-              <h3 className={`${themeClasses.textPrimary(theme)} font-bold mb-1`}>Monitoring</h3>
-              <p className={themeClasses.textSecondary(theme)}>View metrics and drift detection</p>
-            </Link>
-          </div>
-        </>
-      )}
     </div>
   );
-}
+};
+
+export default Dashboard;
+

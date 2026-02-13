@@ -1,7 +1,7 @@
-# MLOps Studio - Quick Start Without Dependencies
+# ML Monitoring - Quick Start Without Dependencies
 # No npm install needed - just launches the web app!
 
-Write-Host "🚀 MLOps Studio - Quick Start (No Setup Required)" -ForegroundColor Green
+Write-Host "🚀 ML Monitoring - Quick Start (No Setup Required)" -ForegroundColor Green
 Write-Host "=================================================" -ForegroundColor Green
 Write-Host ""
 
@@ -80,7 +80,7 @@ $frontendHtml = @'
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MLOps Studio</title>
+  <title>ML Monitoring</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #111; color: #fff; }
@@ -123,7 +123,7 @@ $frontendHtml = @'
     </div>
     <div class="main">
       <div class="header">
-        <h1>MLOps Studio</h1>
+        <h1>ML Monitoring</h1>
         <div style="color: #0ea5e9;">Live Demo</div>
       </div>
       <div class="content">

@@ -1,10 +1,10 @@
-# MLOps Studio
+# ML Monitoring
 
 **Enterprise-Grade, AWS-Backed, GitHub-Native Model Operations Platform**
 
 ## Overview
 
-MLOps Studio is a pipeline-first MLOps platform designed for production ML operations. It focuses on deployment, CI/CD, monitoring, and governance of pre-trained models without requiring in-house Kubernetes or Docker infrastructure.
+ML Monitoring is a monitoring-first enterprise platform designed for production ML governance and oversight. It focuses on model monitoring, drift detection, performance tracking, and compliance governance of production models without requiring complex infrastructure.
 
 ### Key Capabilities
 
@@ -104,7 +104,7 @@ Each pipeline consists of 8 stages (nodes), each with versioned outputs and GitH
 ## Project Structure
 
 ```
-mlops-studio/
+ml-monitoring/
 ├── frontend/                    # React UI application
 │   ├── src/
 │   │   ├── components/         # Reusable UI components
@@ -222,7 +222,7 @@ mlops-studio/
 ```bash
 # Clone the repository
 git clone <repo-url>
-cd mlops-studio
+cd ml-monitoring
 
 # Install dependencies
 npm run install-all

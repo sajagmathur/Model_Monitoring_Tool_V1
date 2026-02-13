@@ -1,4 +1,4 @@
-# MLOps Studio - Examples Directory
+# ML Monitoring - Examples Directory
 
 Complete, working examples for using the MLOps Studio platform.
 
@@ -91,10 +91,10 @@ curl -X POST http://localhost:5000/api/models/model-id/promote \
 
 ## 🚀 Quick Start with Examples
 
-### Step 1: Start MLOps Studio
+### Step 1: Start ML Monitoring
 
 ```bash
-cd mlops-studio
+cd ml-monitoring
 
 # Option A: Using Docker Compose
 docker-compose up -d

@@ -143,7 +143,7 @@ export default function Login() {
                 EXL Studio
               </h1>
               <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                ML Operations
+                ML Monitoring
               </p>
             </div>
           </div>
@@ -336,7 +336,7 @@ export default function Login() {
                 : 'bg-blue-50 border-blue-200'
             }`}>
               <p className={`text-xs font-semibold mb-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>Demo Credentials:</p>
-              <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Email: demo@mlops.com</p>
+              <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Email: demo@mlmonitoring.com</p>
               <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Password: demo123</p>
             </div>
           )}

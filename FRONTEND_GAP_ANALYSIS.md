@@ -31,7 +31,7 @@ The **frontend is now 85% COMPLETE and FULLY FUNCTIONAL**! The major infrastruct
 ### 2. **Authentication System** ✨ NEW
 - ✅ AuthContext with full state management
 - ✅ Login/Logout functionality
-- ✅ Demo credentials: admin@mlops.com / password
+- ✅ Demo credentials: demo@mlmonitoring.com / demo123
 - ✅ JWT token storage in localStorage
 - ✅ Token injection in API requests (Authorization header)
 - ✅ User role display and management

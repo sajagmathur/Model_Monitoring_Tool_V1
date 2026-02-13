@@ -164,13 +164,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(true);
       
       // Demo mode - allow login with demo credentials without backend
-      if (email === 'admin@mlops.com' && password === 'password') {
+      if (email === 'demo@mlmonitoring.com' && password === 'demo123') {
         const demoUser: User = {
           id: '1',
-          email: 'admin@mlops.com',
+          email: 'demo@mlmonitoring.com',
           name: 'Admin User',
           role: 'admin',
-          teams: ['MLOps'],
+          teams: ['ML Monitoring'],
           createdAt: new Date().toISOString(),
         };
         const demoToken = 'demo-token-' + Date.now();
@@ -184,25 +184,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Demo users for testing different roles
       const demoUsers: Record<string, User> = {
-        'alice@org.com': {
+        'alice@mlmonitoring.com': {
           id: '2',
-          email: 'alice@org.com',
+          email: 'alice@mlmonitoring.com',
           name: 'Alice Johnson',
           role: 'ml-engineer',
           teams: ['Data', 'Models'],
           createdAt: new Date().toISOString(),
         },
-        'bob@org.com': {
+        'bob@mlmonitoring.com': {
           id: '3',
-          email: 'bob@org.com',
+          email: 'bob@mlmonitoring.com',
           name: 'Bob Smith',
           role: 'data-engineer',
           teams: ['Data'],
           createdAt: new Date().toISOString(),
         },
-        'carol@org.com': {
+        'carol@mlmonitoring.com': {
           id: '4',
-          email: 'carol@org.com',
+          email: 'carol@mlmonitoring.com',
           name: 'Carol Davis',
           role: 'model-sponsor',
           teams: ['Stakeholders'],
@@ -211,7 +211,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       // Check if it's a demo user
-      if (demoUsers[email] && password === 'password') {
+      if (demoUsers[email] && password === 'demo123') {
         const user = demoUsers[email];
         const token = 'demo-token-' + Date.now();
         localStorage.setItem('token', token);

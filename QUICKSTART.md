@@ -1,6 +1,6 @@
-# MLOps Studio - Quick Start Guide
+# ML Monitoring - Quick Start Guide
 
-Get MLOps Studio up and running in 5 minutes!
+Get ML Monitoring up and running in 5 minutes!
 
 ## 🚀 Local Development Setup
 
@@ -8,7 +8,7 @@ Get MLOps Studio up and running in 5 minutes!
 
 ```bash
 # Clone and enter the directory
-cd mlops-studio
+cd ml-monitoring
 
 # Run setup script
 bash scripts/setup-dev.sh
@@ -130,7 +130,7 @@ docker-compose logs -f mlflow
 ### Database Access
 ```bash
 # Connect to database
-docker-compose exec db psql -U postgres -d mlopsdb
+docker-compose exec db psql -U postgres -d mlmonitordb
 
 # Useful queries:
 # List projects: SELECT * FROM projects;
@@ -235,8 +235,8 @@ See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed AWS setup.
 
 ## 📞 Support
 
-- **Slack**: #mlops-studio
-- **Email**: mlops-team@org.com
+- **Slack**: #ml-monitoring
+- **Email**: ml-monitoring@mlmonitoring.com
 - **Issues**: GitHub Issues
 - **Docs**: Full documentation in `/docs`
 
@@ -249,4 +249,4 @@ See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed AWS setup.
 5. Monitor model performance
 6. Check drift detection metrics
 
-Happy MLOps! 🎉
+Happy Monitoring! 🎉

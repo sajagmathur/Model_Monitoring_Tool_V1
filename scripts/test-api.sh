@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# MLOps Studio - API Testing Guide
+# ML Monitoring - API Testing Guide
 # Quick reference for testing all major endpoints
 
 BASE_URL="http://localhost:5000"
@@ -9,7 +9,7 @@ PIPELINE_ID=""
 MODEL_ID=""
 DEPLOYMENT_ID=""
 
-echo "🧪 MLOps Studio API Testing Guide"
+echo "🧪 ML Monitoring API Testing Guide"
 echo "Base URL: $BASE_URL"
 echo ""
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# MLOps Studio - Database Schema Initialization
+# ML Monitoring - Database Schema Initialization
 
 set -e
 
@@ -10,7 +10,7 @@ DB_NAME=${3:-mlopsdb}
 DB_USER=${4:-postgres}
 DB_PASSWORD=${5:-password}
 
-echo "🗄️  Initializing MLOps Studio database schema..."
+echo "🗄️  Initializing ML Monitoring database schema..."
 
 # Function to run SQL
 run_sql() {

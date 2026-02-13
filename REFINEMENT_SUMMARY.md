@@ -1,7 +1,7 @@
-# MLOps Studio Frontend - Refinement Pass Summary
+# ML Monitoring Frontend - Refinement Pass Summary
 
 ## Overview
-This document summarizes the major enhancements made to the MLOps Studio frontend during the incremental refinement pass. All changes follow enterprise-grade standards with focus on functionality, user experience, and code maintainability.
+This document summarizes the major enhancements made to the ML Monitoring frontend during the incremental refinement pass. All changes follow enterprise-grade standards with focus on functionality, user experience, and code maintainability.
 
 ## Major Changes Completed
 

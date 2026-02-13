@@ -11,25 +11,12 @@ import { Clock, RefreshCw } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Projects from './pages/Projects';
-import DataIngestion from './pages/DataIngestion';
-import DataPreparation from './pages/DataPreparation';
 import ModelRegistry from './pages/ModelRegistry';
-import Deployment from './pages/Deployment';
-import Inferencing from './pages/Inferencing';
-import ManualApprovals from './pages/ManualApprovals';
-import Pipeline from './pages/Pipeline';
-// import Pipelines from './pages/Pipelines';
-import Monitoring from './pages/Monitoring';
-import Integrations from './pages/Integrations';
 import Admin from './pages/Admin';
 import Profile from './pages/Profile';
-import Workflow from './App';
 import TopBarEnhanced from './components/TopBarEnhanced';
 import LeftNavigation from './components/LeftNavigation';
 import Documentation from './pages/Documentation';
-import Training from './pages/Training';
-import SupportContacts from './pages/SupportContacts';
-import SendFeedback from './pages/SendFeedback';
 
 /**
  * Session Warning Banner Component
@@ -157,22 +144,10 @@ const AppRoutes: React.FC = () => {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/projects" element={<Projects />} />
-        <Route path="/data-ingestion" element={<DataIngestion />} />
-        <Route path="/data-preparation" element={<DataPreparation />} />
-        <Route path="/model-registry" element={<ModelRegistry />} />
-        <Route path="/deployment" element={<Deployment />} />
-        <Route path="/inferencing" element={<Inferencing />} />
-        <Route path="/monitoring" element={<Monitoring />} />
-        <Route path="/pipelines" element={<Pipeline />} />
-        <Route path="/manual-approvals" element={<ManualApprovals />} />
-        <Route path="/integrations" element={<Integrations />} />
+        <Route path="/model-repository" element={<ModelRegistry />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="/profile" element={<Profile />} />
-        <Route path="/workflow" element={<Workflow />} />
         <Route path="/documentation" element={<Documentation />} />
-        <Route path="/training" element={<Training />} />
-        <Route path="/support-contacts" element={<SupportContacts />} />
-        <Route path="/send-feedback" element={<SendFeedback />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </MainLayout>
