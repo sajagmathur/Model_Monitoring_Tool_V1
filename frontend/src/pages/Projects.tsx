@@ -1668,6 +1668,7 @@ export default function Projects() {
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           models: [...(selectedProject.workflow.models || []), newModel],
+                          selectedModel: newModel.id,
                         });
                         
                         // Add to global registry

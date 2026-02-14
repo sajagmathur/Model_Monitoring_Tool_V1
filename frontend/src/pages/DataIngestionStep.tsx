@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileText, Database, Settings, X, Link2 } from 'lucide-react';
+import { Upload, FileText, Database, Settings, X, Link2, Trash2 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 export type DataTrack = 'Development' | 'OOT' | 'Monitoring' | 'Recent';
@@ -294,7 +294,10 @@ export const DataIngestionStepComponent: React.FC<{
   const [configDatasetId, setConfigDatasetId] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
-  const selectedModel = workflow.selectedModel ? workflow.models?.find((m) => m.id === workflow.selectedModel) : null;
+  const selectedModel =
+    workflow.selectedModel
+      ? workflow.models?.find((m) => m.id === workflow.selectedModel)
+      : (workflow.models && workflow.models.length > 0 ? workflow.models[workflow.models.length - 1] : null);
 
   const getInitialConfig = (ds: UploadedDataset): DatasetConfig => {
     const existing = datasetConfigs[ds.id];
@@ -347,6 +350,22 @@ export const DataIngestionStepComponent: React.FC<{
   const saveConfig = (config: DatasetConfig) => {
     setDatasetConfigs((prev) => ({ ...prev, [config.datasetId]: config }));
     setConfigDrawerOpen(false);
+  };
+
+  const removeDataset = (datasetId: string, track: DataTrack) => {
+    setTrackDatasets((prev) => ({
+      ...prev,
+      [track]: (prev[track] || []).filter((d) => d.id !== datasetId),
+    }));
+    setDatasetConfigs((prev) => {
+      const next = { ...prev };
+      delete next[datasetId];
+      return next;
+    });
+    if (configDatasetId === datasetId) {
+      setConfigDrawerOpen(false);
+      setConfigDatasetId(null);
+    }
   };
 
   const allDatasets = Object.values(trackDatasets).flat();
@@ -464,13 +483,23 @@ export const DataIngestionStepComponent: React.FC<{
                       {ds.rows} rows · {ds.columns} columns · {ds.track} · {new Date(ds.uploadedAt).toLocaleString()}
                     </p>
                   </div>
-                  <button
-                    onClick={() => openConfigDrawer(ds.id)}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm ${cfg ? 'bg-green-500/20 text-green-600' : 'bg-blue-500/20 text-blue-600'}`}
-                  >
-                    <Settings size={14} />
-                    {cfg ? 'Edit Config' : 'Configure'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => openConfigDrawer(ds.id)}
+                      className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm ${cfg ? 'bg-green-500/20 text-green-600' : 'bg-blue-500/20 text-blue-600'}`}
+                    >
+                      <Settings size={14} />
+                      {cfg ? 'Edit Config' : 'Configure'}
+                    </button>
+                    <button
+                      onClick={() => removeDataset(ds.id, ds.track)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-red-500/20 text-red-600 hover:bg-red-500/30 transition"
+                      title="Remove dataset"
+                    >
+                      <Trash2 size={14} />
+                      Remove
+                    </button>
+                  </div>
                 </div>
               );
             })}
