@@ -3,6 +3,7 @@ import { CheckCircle2, AlertCircle, ChevronRight, Upload, Plus, X, Eye } from 'l
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlobal } from '../contexts/GlobalContext';
 import { Breadcrumb } from '../components/UIPatterns';
+import { DataIngestionStepComponent, DataIngestionConfig } from './DataIngestionStep';
 
 interface ModelVersion {
   id: string;
@@ -78,6 +79,7 @@ interface Workflow {
   owner: string;
   selectedModel?: string;
   models?: ModelVersion[];
+  dataIngestionConfig?: DataIngestionConfig;
 }
 
 interface Project {
@@ -991,79 +993,6 @@ const StepIndicator: React.FC<{ steps: WorkflowStep[]; currentStep: number }> = 
   );
 };
 
-const DataIngestionStep: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
-  const { theme } = useTheme();
-  const [selectedDatasets, setSelectedDatasets] = useState<string[]>(['Development']);
-  const [targetVar, setTargetVar] = useState('default_flag');
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-          Select Training Datasets
-        </h3>
-        <div className="grid grid-cols-2 gap-3">
-          {['Development', 'Reference', 'OOT', 'Production', 'Actuals'].map((dataset) => (
-            <label
-              key={dataset}
-              className={`p-3 rounded-lg border cursor-pointer transition ${
-                selectedDatasets.includes(dataset)
-                  ? theme === 'dark'
-                    ? 'bg-blue-600/20 border-blue-500'
-                    : 'bg-blue-50 border-blue-500'
-                  : theme === 'dark'
-                  ? 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
-                  : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={selectedDatasets.includes(dataset)}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setSelectedDatasets([...selectedDatasets, dataset]);
-                  } else {
-                    setSelectedDatasets(selectedDatasets.filter((d) => d !== dataset));
-                  }
-                }}
-                className="mr-2"
-              />
-              <span className={theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}>{dataset}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <label
-          className={`block text-sm font-medium mb-2 ${
-            theme === 'dark' ? 'text-slate-300' : 'text-slate-700'
-          }`}
-        >
-          Target Variable
-        </label>
-        <input
-          type="text"
-          value={targetVar}
-          onChange={(e) => setTargetVar(e.target.value)}
-          className={`w-full px-3 py-2 rounded-lg border ${
-            theme === 'dark'
-              ? 'bg-slate-800 border-slate-700 text-white'
-              : 'bg-white border-slate-300 text-slate-900'
-          } focus:outline-none focus:border-blue-500`}
-        />
-      </div>
-
-      <button
-        onClick={onComplete}
-        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-      >
-        Data Ingestion Complete
-      </button>
-    </div>
-  );
-};
-
 const DataQualityStep: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
   const { theme } = useTheme();
 
@@ -1272,61 +1201,6 @@ const ReportsStep: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
   );
 };
 
-const AlertsStep: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
-  const { theme } = useTheme();
-  const [alerts, setAlerts] = useState([
-    { id: 1, message: 'AUC drops below threshold', severity: 'critical', checked: false },
-    { id: 2, message: 'Data drift detected', severity: 'warning', checked: false },
-    { id: 3, message: 'Fairness metric degradation', severity: 'warning', checked: false },
-  ]);
-
-  return (
-    <div className="space-y-6">
-      <h3 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-        Configure Alerts
-      </h3>
-      <div className="space-y-3">
-        {alerts.map((alert) => (
-          <label
-            key={alert.id}
-            className={`p-4 rounded-lg border flex items-center cursor-pointer ${
-              theme === 'dark' ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'
-            }`}
-          >
-            <input
-              type="checkbox"
-              checked={alert.checked}
-              onChange={(e) => {
-                setAlerts(alerts.map((a) => (a.id === alert.id ? { ...a, checked: e.target.checked } : a)));
-              }}
-              className="mr-3"
-            />
-            <span className={`flex-1 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-              {alert.message}
-            </span>
-            <span
-              className={`text-xs px-2 py-1 rounded ${
-                alert.severity === 'critical'
-                  ? 'bg-red-500/20 text-red-400'
-                  : 'bg-yellow-500/20 text-yellow-400'
-              }`}
-            >
-              {alert.severity}
-            </span>
-          </label>
-        ))}
-      </div>
-
-      <button
-        onClick={onComplete}
-        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-      >
-        Setup Alerts
-      </button>
-    </div>
-  );
-};
-
 // Model Repository Tree Component - displays hierarchical folder structure
 const ModelRepositoryTree: React.FC<{
   models: ModelVersion[];
@@ -1522,11 +1396,10 @@ export default function Projects() {
         models: [],
         steps: [
           { id: 0, name: 'Model Import', status: 'not-started' },
-          { id: 1, name: 'Data Ingestion', status: 'not-started', locked: true },
+          { id: 1, name: 'Data Ingestion & Dataset Config', status: 'not-started', locked: true },
           { id: 2, name: 'Data Quality', status: 'not-started', locked: true },
           { id: 3, name: 'Performance', status: 'not-started', locked: true },
           { id: 4, name: 'Reports', status: 'not-started', locked: true },
-          { id: 5, name: 'Alerts', status: 'not-started', locked: true },
         ],
       },
     };
@@ -1811,8 +1684,9 @@ export default function Projects() {
                     />
                   )}
                   {selectedProject.workflow.currentStep === 1 && (
-                    <DataIngestionStep
-                      onComplete={() => {
+                    <DataIngestionStepComponent
+                      workflow={selectedProject.workflow}
+                      onComplete={(config: DataIngestionConfig) => {
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
                           if (idx === selectedProject.workflow.currentStep) {
                             return { ...s, status: 'completed' as const };
@@ -1830,6 +1704,7 @@ export default function Projects() {
                           ...selectedProject.workflow,
                           steps: newSteps,
                           currentStep: newCurrentStep,
+                          dataIngestionConfig: config,
                         });
                       }}
                     />
@@ -1894,6 +1769,7 @@ export default function Projects() {
                           }
                           return s;
                         });
+                        const isLastStep = selectedProject.workflow.currentStep === 4; // Reports is final step in MIDAS workflow
                         const newCurrentStep = Math.min(
                           selectedProject.workflow.currentStep + 1,
                           selectedProject.workflow.steps.length - 1
@@ -1902,24 +1778,7 @@ export default function Projects() {
                           ...selectedProject.workflow,
                           steps: newSteps,
                           currentStep: newCurrentStep,
-                        });
-                      }}
-                    />
-                  )}
-                  {selectedProject.workflow.currentStep === 5 && (
-                    <AlertsStep
-                      onComplete={() => {
-                        const newSteps = selectedProject.workflow.steps.map((s, idx) => {
-                          if (idx === selectedProject.workflow.currentStep) {
-                            return { ...s, status: 'completed' as const };
-                          }
-                          return s;
-                        });
-                        updateProjectWorkflow(selectedProject.id, {
-                          ...selectedProject.workflow,
-                          steps: newSteps,
-                          currentStep: selectedProject.workflow.currentStep,
-                          status: 'completed' as const,
+                          status: isLastStep ? ('completed' as const) : selectedProject.workflow.status,
                         });
                       }}
                     />
