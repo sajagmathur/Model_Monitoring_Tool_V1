@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Upload, FileText, Database, Settings, X, Link2, Trash2 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useGlobal } from '../contexts/GlobalContext';
 
 export type DataTrack = 'Development' | 'OOT' | 'Monitoring' | 'Recent';
 
@@ -19,6 +20,8 @@ export interface DatasetConfig {
   datasetId: string;
   name: string;
   type: DataTrack;
+  datasetType?: 'baseline' | 'reference' | 'monitoring' | 'development';
+  refreshLocation?: string;
   performanceMode: 'Early Warning' | 'Full Performance';
   target?: string;
   targets?: string[];
@@ -93,6 +96,41 @@ const DatasetConfigDrawer: React.FC<{
           </div>
 
           <div className="space-y-4">
+            {/* Dataset Type for Reporting */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Dataset Type (for Reporting)</label>
+              <select
+                value={cfg.datasetType || 'development'}
+                onChange={(e) =>
+                  setCfg({ ...cfg, datasetType: e.target.value as 'baseline' | 'reference' | 'monitoring' | 'development' })
+                }
+                className={`w-full px-3 py-2 rounded border ${theme === 'dark' ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-300'}`}
+              >
+                <option value="development">Development</option>
+                <option value="baseline">Baseline (Reference for comparison)</option>
+                <option value="reference">Reference (Current production)</option>
+                <option value="monitoring">Monitoring (Ongoing tracking)</option>
+              </select>
+              <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                Baseline and Reference datasets will be available in Report Configuration
+              </p>
+            </div>
+
+            {/* Refresh Location */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Refresh Location (Optional)</label>
+              <input
+                type="text"
+                value={cfg.refreshLocation || ''}
+                onChange={(e) => setCfg({ ...cfg, refreshLocation: e.target.value })}
+                placeholder="e.g., s3://bucket/path, /data/refresh/dataset.csv"
+                className={`w-full px-3 py-2 rounded border ${theme === 'dark' ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-300'}`}
+              />
+              <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                Location from where this dataset should be refreshed for scheduled reports
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium mb-1">4.1 Performance Mode</label>
               <select
@@ -281,6 +319,7 @@ export const DataIngestionStepComponent: React.FC<{
   onComplete: (config: DataIngestionConfig) => void;
 }> = ({ workflow, onComplete }) => {
   const { theme } = useTheme();
+  const { registryModels } = useGlobal();
   const tracks: DataTrack[] = ['Development', 'OOT', 'Monitoring', 'Recent'];
   const [activeTrack, setActiveTrack] = useState<DataTrack>('Development');
   const [trackDatasets, setTrackDatasets] = useState<Record<DataTrack, UploadedDataset[]>>({
@@ -293,11 +332,27 @@ export const DataIngestionStepComponent: React.FC<{
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [configDatasetId, setConfigDatasetId] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string | undefined>(workflow.selectedModel);
 
-  const selectedModel =
-    workflow.selectedModel
-      ? workflow.models?.find((m) => m.id === workflow.selectedModel)
-      : (workflow.models && workflow.models.length > 0 ? workflow.models[workflow.models.length - 1] : null);
+  // Sync selectedModelId with workflow.selectedModel when it changes
+  useEffect(() => {
+    if (workflow.selectedModel && workflow.selectedModel !== selectedModelId) {
+      setSelectedModelId(workflow.selectedModel);
+    }
+  }, [workflow.selectedModel]);
+
+  // Pull models from GlobalContext instead of workflow
+  const availableModels = registryModels.map(model => ({
+    id: model.id,
+    name: `${model.name} v${model.version}`,
+    type: model.modelType,
+    version: model.version,
+    stage: model.stage,
+  }));
+
+  const selectedModel = selectedModelId
+    ? availableModels.find((m) => m.id === selectedModelId)
+    : null;
 
   const getInitialConfig = (ds: UploadedDataset): DatasetConfig => {
     const existing = datasetConfigs[ds.id];
@@ -408,10 +463,63 @@ export const DataIngestionStepComponent: React.FC<{
       <h3 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
         Data Ingestion & Dataset Configuration
       </h3>
+
+      {/* Model Selector */}
+      <div className={`p-6 rounded-lg border ${theme === 'dark' ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className="flex items-center gap-3 mb-3">
+          <Link2 size={20} className={theme === 'dark' ? 'text-blue-400' : 'text-blue-600'} />
+          <h4 className={`text-sm font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+            Select Target Model
+          </h4>
+        </div>
+        <p className={`text-xs mb-3 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+          All datasets will be tagged to this model. The model type determines available metrics later.
+        </p>
+        {availableModels.length > 0 ? (
+          <div className="space-y-3">
+            <select
+              value={selectedModelId || ''}
+              onChange={(e) => setSelectedModelId(e.target.value)}
+              className={`w-full px-4 py-3 rounded-lg border ${
+                theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'
+              }`}
+            >
+              <option value="">-- Select a Model --</option>
+              {availableModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} | {model.type} | {model.stage}
+                </option>
+              ))}
+            </select>
+            {availableModels.length > 0 && (
+              <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>
+                {availableModels.length} model{availableModels.length !== 1 ? 's' : ''} available from Model Registry
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className={`p-4 rounded-lg border ${theme === 'dark' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50 border-amber-200'}`}>
+            <p className={`text-sm ${theme === 'dark' ? 'text-amber-300' : 'text-amber-800'}`}>
+              No models available. Please import a model in the Model Registry first.
+            </p>
+          </div>
+        )}
+        {selectedModel && (
+          <div className={`mt-3 p-3 rounded-lg ${theme === 'dark' ? 'bg-blue-500/10' : 'bg-blue-50'}`}>
+            <p className={`text-sm font-medium ${theme === 'dark' ? 'text-blue-400' : 'text-blue-700'}`}>
+              ✓ Selected: {selectedModel.name}
+            </p>
+            <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-blue-300' : 'text-blue-600'}`}>
+              Type: {selectedModel.type} | Stage: {selectedModel.stage}
+            </p>
+          </div>
+        )}
+      </div>
+
       {!selectedModel && (
         <div className={`p-4 rounded-lg border ${theme === 'dark' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50 border-amber-200'}`}>
           <p className={`text-sm ${theme === 'dark' ? 'text-amber-300' : 'text-amber-800'}`}>
-            Please complete Model Import step and select a model first.
+            Please select a model above to continue with data ingestion.
           </p>
         </div>
       )}

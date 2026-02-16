@@ -17,27 +17,52 @@ export interface Project {
   status: 'active' | 'inactive';
   code: ProjectCode[];
   createdAt: string;
+  activeModelId?: string; // The currently selected model for this project
 }
 
 export interface IngestionJob {
   id: string;
   name: string;
   projectId: string;
+  modelId?: string; // Link to the model this dataset is for
   codeId?: string;
   dataSource: 'csv' | 'database' | 'api' | 'cloud' | 'desktop';
+  source?: 'csv' | 'database' | 'cloud' | 'treated'; // Simplified source type
   sourceConfig?: Record<string, any>;
+  datasetType?: 'baseline' | 'reference' | 'monitoring' | 'development'; // Dataset classification for reporting
+  refreshLocation?: string; // Location/path for dataset refresh
   uploadedFile?: {
     name: string;
     path: string;
     size: number;
     type: string;
   };
-  status: 'created' | 'running' | 'completed' | 'failed';
+  status: 'created' | 'running' | 'completed' | 'failed' | 'active' | 'processing';
   outputPath?: string;
   outputShape?: { rows: number; columns: number };
   outputColumns?: string[];
+  rows?: number; // Number of rows
+  columns?: number; // Number of columns
+  schema?: Array<{ name: string; type: string }>; // Column schema
+  uploadedAt?: string; // Upload timestamp
   createdAt: string;
   lastRun?: string;
+  treatmentMetadata?: {
+    originalDatasetId: string;
+    treatments: Array<{
+      variable: string;
+      method: string;
+      appliedAt: string;
+    }>;
+    treatedBy: string;
+    treatedAt: string;
+  };
+  // Dataset lineage for versioning and resolution tracking
+  parentDatasetId?: string; // Links to original dataset if this is resolved
+  isResolved?: boolean; // Marks this as a resolved dataset
+  resolutionTimestamp?: string; // When resolution occurred
+  resolutionSummary?: string; // Summary of treatments applied
+  resolvedIssuesCount?: number; // Number of issues resolved
 }
 
 export interface PreparationJob {
@@ -141,6 +166,165 @@ export interface PipelineJob {
   lastRun?: string;
 }
 
+export interface ReportConfiguration {
+  id: string;
+  name: string;
+  type?: 'data_quality' | 'stability' | 'performance' | 'drift' | 'explainability' | 'general'; // Type-lock configurations
+  modelId: string;
+  modelName: string;
+  modelType: 'classification' | 'regression' | 'timeseries';
+  baselineDatasetId: string;
+  baselineDatasetName: string;
+  referenceDatasetId: string;
+  referenceDatasetName: string;
+  metricsToMonitor: string[];
+  driftMetrics: string[];
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface GeneratedReport {
+  id: string;
+  name: string;
+  type: 'stability' | 'performance' | 'explainability' | 'feature_analytics' | 'segmented_analysis' | 'drift_analysis' | 'data_quality';
+  modelId: string;
+  modelName: string;
+  datasetId?: string;
+  datasetName?: string;
+  configurationId?: string;
+  generatedAt: string;
+  generatedBy: string;
+  status: 'draft' | 'final' | 'archived';
+  healthScore?: number;
+  fileSize: string;
+  filePath?: string;
+  tags: string[];
+  // Report artifact storage for immutability
+  reportArtifact?: {
+    pdfContent: string;
+    metadata: any;
+  };
+  baselineDatasetIds?: string[]; // Original datasets used
+  resolvedDatasetIds?: string[]; // Resolved datasets generated
+  immutable?: boolean; // Report is frozen, never regenerate
+}
+
+export interface DataQualityReport {
+  id: string;
+  name: string;
+  datasetId: string;
+  datasetName: string;
+  modelId?: string;
+  qualityScore: number;
+  totalRecords: number;
+  recordsAfterExclusion: number;
+  issues: Array<{
+    variable: string;
+    issue: string;
+    severity: 'high' | 'medium' | 'low';
+    suggestedTreatment?: string;
+  }>;
+  generatedAt: string;
+  filePath?: string;
+  // Report artifact storage for immutability
+  reportArtifact?: {
+    pdfContent: string;
+    metadata: any;
+  };
+  baselineDatasetIds?: string[]; // Original datasets used
+  resolvedDatasetIds?: string[]; // Resolved datasets generated
+  immutable?: boolean; // Report is frozen, never regenerate
+}
+
+export interface SchedulingJob {
+  id: string;
+  name: string;
+  type?: 'report_generation' | 'data_ingestion' | 'data_quality';
+  reportType?: 'stability' | 'performance' | 'explainability' | 'feature_analytics' | 'segmented_analysis' | 'drift_analysis' | 'data_quality';
+  reportTypes?: string[]; // For combined/multiple report generation in one job
+  configurationId?: string;
+  configurationName?: string;
+  modelId?: string;
+  modelName: string;
+  scheduleType: 'one-time' | 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+  scheduleTime?: string; // Format: 'HH:MM' (24-hour format)
+  
+  // One-time scheduling
+  oneTimeDate?: string; // Format: 'YYYY-MM-DD'
+  oneTimeTime?: string; // Format: 'HH:MM'
+  
+  // Daily scheduling (uses scheduleTime)
+  
+  // Weekly scheduling
+  weekdays?: number[]; // Array of weekday numbers (0=Sunday, 1=Monday, etc.)
+  
+  // Monthly scheduling
+  dayOfMonth?: number; // 1-31, or -1 for last day of month
+  monthlyType?: 'day' | 'weekday'; // 'day' for specific date, 'weekday' for nth weekday
+  weekOfMonth?: number; // 1-4 for first/second/third/fourth week, -1 for last week
+  monthlyWeekday?: number; // 0-6 for Sunday-Saturday when using weekday type
+  
+  // Quarterly scheduling (every 3 months)
+  quarterMonth?: 1 | 2 | 3; // Which month of quarter (1=Jan/Apr/Jul/Oct, 2=Feb/May/Aug/Nov, 3=Mar/Jun/Sep/Dec)
+  
+  // Yearly scheduling
+  yearMonth?: number; // 1-12 for January-December
+  yearDay?: number; // 1-31 for day of month
+  
+  enabled: boolean;
+  lastRun?: string;
+  nextRun?: string;
+  lastStatus?: 'success' | 'failed' | 'running';
+  runCount?: number;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface WorkflowState {
+  selectedModelId?: string;
+  selectedModelName?: string;
+  selectedDatasetId?: string;
+  selectedDatasetName?: string;
+  dataQualityCompleted?: boolean;
+  dataQualityMetrics?: any;
+  reportConfigCompleted?: boolean;
+  reportConfig?: {
+    modelType?: 'classification' | 'regression' | 'timeseries';
+    selectedMetrics?: string[];
+    segmentationVariable?: string;
+  };
+  selectedMetrics?: any[];
+  thresholds?: any;
+  selectedSegments?: string[];
+  generatedReportId?: string;
+  generatedReports?: any[];
+  aiInsights?: any[];
+  modelHealth?: number;
+  reportGenerationCompleted?: boolean;
+}
+
+export interface WorkflowLog {
+  id: string;
+  projectId: string;
+  projectName: string;
+  workflowType: 'model_monitoring' | 'data_pipeline' | 'report_generation';
+  summary: string;
+  steps: Array<{
+    stepName: string;
+    status: 'completed' | 'skipped' | 'failed';
+    details: string;
+    timestamp: string;
+  }>;
+  scheduledJobs: Array<{
+    jobName: string;
+    reportTypes: string[];
+    scheduleType: string;
+    scheduleDetails: string;
+  }>;
+  createdAt: string;
+  completedAt: string;
+}
+
 interface GlobalContextType {
   // Projects
   projects: Project[];
@@ -148,6 +332,33 @@ interface GlobalContextType {
   updateProject: (id: string, updates: Partial<Project>) => void;
   deleteProject: (id: string) => void;
   getProject: (id: string) => Project | undefined;
+
+  // Report Configurations
+  reportConfigurations: ReportConfiguration[];
+  createReportConfiguration: (config: Omit<ReportConfiguration, 'id' | 'createdAt' | 'createdBy'>) => ReportConfiguration;
+  updateReportConfiguration: (id: string, updates: Partial<ReportConfiguration>) => void;
+  deleteReportConfiguration: (id: string) => void;
+  getReportConfiguration: (id: string) => ReportConfiguration | undefined;
+
+  // Generated Reports
+  generatedReports: GeneratedReport[];
+  createGeneratedReport: (report: Omit<GeneratedReport, 'id' | 'generatedAt' | 'generatedBy'>) => GeneratedReport;
+  deleteGeneratedReport: (id: string) => void;
+  getGeneratedReport: (id: string) => GeneratedReport | undefined;
+
+  // Data Quality Reports
+  dataQualityReports: DataQualityReport[];
+  createDataQualityReport: (report: Omit<DataQualityReport, 'id' | 'generatedAt'>) => DataQualityReport;
+  deleteDataQualityReport: (id: string) => void;
+  getDataQualityReport: (id: string) => DataQualityReport | undefined;
+
+  // Scheduling Jobs
+  schedulingJobs: SchedulingJob[];
+  createSchedulingJob: (job: Omit<SchedulingJob, 'id' | 'createdAt' | 'createdBy'>) => SchedulingJob;
+  updateSchedulingJob: (id: string, updates: Partial<SchedulingJob>) => void;
+  deleteSchedulingJob: (id: string) => void;
+  getSchedulingJob: (id: string) => SchedulingJob | undefined;
+  runSchedulingJob: (id: string, action?: 'run' | 'toggle' | 'delete') => void;
 
   // Project Code
   addProjectCode: (projectId: string, code: Omit<ProjectCode, 'id' | 'createdAt'>) => ProjectCode;
@@ -159,9 +370,16 @@ interface GlobalContextType {
   // Ingestion Jobs
   ingestionJobs: IngestionJob[];
   createIngestionJob: (job: Omit<IngestionJob, 'id' | 'createdAt'>) => IngestionJob;
+  addIngestionJob: (job: Omit<IngestionJob, 'id' | 'createdAt'>) => IngestionJob; // Alias for createIngestionJob
   updateIngestionJob: (id: string, updates: Partial<IngestionJob>) => void;
   deleteIngestionJob: (id: string) => void;
   getIngestionJob: (id: string) => IngestionJob | undefined;
+  
+  // Dataset Cloning and Lineage
+  cloneDatasetAsResolved: (originalId: string, resolutionSummary: string, resolvedIssuesCount: number, timestamp?: string) => IngestionJob | null;
+  getResolvedDatasetsForParent: (parentId: string) => IngestionJob[];
+  getReportsForDataset: (datasetId: string) => (GeneratedReport | DataQualityReport)[];
+  getConfigurationsForModel: (modelId: string) => ReportConfiguration[];
 
   // Preparation Jobs
   preparationJobs: PreparationJob[];
@@ -206,6 +424,17 @@ interface GlobalContextType {
   deletePipelineJob: (id: string) => void;
   getPipelineJob: (id: string) => PipelineJob | undefined;
   getPipelinesByProject: (projectId: string) => PipelineJob[];
+
+  // Workflow Logs
+  workflowLogs: WorkflowLog[];
+  createWorkflowLog: (log: Omit<WorkflowLog, 'id' | 'createdAt'>) => WorkflowLog;
+  deleteWorkflowLog: (id: string) => void;
+  getWorkflowLog: (id: string) => WorkflowLog | undefined;
+  getWorkflowLogsByProject: (projectId: string) => WorkflowLog[];
+
+  // Workflow State
+  currentWorkflow: WorkflowState;
+  setCurrentWorkflow: (workflow: WorkflowState) => void;
 }
 
 const GlobalContext = createContext<GlobalContextType | undefined>(undefined);
@@ -221,6 +450,12 @@ const initialState: {
   inferencingJobs: InferencingJob[];
   monitoringJobs: MonitoringJob[];
   pipelineJobs: PipelineJob[];
+  reportConfigurations: ReportConfiguration[];
+  generatedReports: GeneratedReport[];
+  dataQualityReports: DataQualityReport[];
+  schedulingJobs: SchedulingJob[];
+  workflowLogs: WorkflowLog[];
+  currentWorkflow: WorkflowState;
 } = {
   projects: [],
   ingestionJobs: [],
@@ -230,24 +465,156 @@ const initialState: {
   inferencingJobs: [],
   monitoringJobs: [],
   pipelineJobs: [],
+  reportConfigurations: [],
+  generatedReports: [],
+  dataQualityReports: [],
+  schedulingJobs: [],
+  workflowLogs: [],
+  currentWorkflow: {},
 };
 
 export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, setState] = useState(initialState);
 
-  // Load from localStorage on mount (registryModels always starts blank - not restored)
+  // Helper function to generate IDs
+  const generateId = () => `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  // Initialize with sample data if no stored data exists
+  const initializeSampleData = () => {
+    const projectId = generateId();
+    const modelId1 = generateId();
+    const modelId2 = generateId();
+    const datasetId1 = generateId();
+    const datasetId2 = generateId();
+
+    const sampleProject: Project = {
+      id: projectId,
+      name: 'Credit Risk Model',
+      description: 'Classification model for predicting credit default risk',
+      environment: 'prod',
+      status: 'active',
+      code: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    const sampleModels: RegistryModel[] = [
+      {
+        id: modelId1,
+        name: 'Credit Risk Classifier v1',
+        version: '1.0.0',
+        projectId,
+        modelType: 'classification',
+        metrics: {
+          auc: 0.92,
+          precision: 0.88,
+          recall: 0.85,
+          f1_score: 0.865,
+          accuracy: 0.9,
+        },
+        stage: 'production',
+        status: 'active',
+        createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        id: modelId2,
+        name: 'Credit Risk Classifier v2',
+        version: '2.0.0',
+        projectId,
+        modelType: 'classification',
+        metrics: {
+          auc: 0.945,
+          precision: 0.91,
+          recall: 0.88,
+          f1_score: 0.895,
+          accuracy: 0.92,
+        },
+        stage: 'staging',
+        status: 'active',
+        createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ];
+
+    const sampleDatasets: IngestionJob[] = [
+      {
+        id: datasetId1,
+        name: 'Training Dataset Q4 2024',
+        projectId,
+        modelId: modelId1,
+        dataSource: 'database',
+        status: 'completed',
+        rows: 50000,
+        columns: 28,
+        outputColumns: [
+          'customer_id', 'age', 'income', 'employment_tenure', 'credit_score',
+          'debt_to_income', 'num_accounts', 'num_inquiries', 'delinquency_status',
+          'default_probability', 'loan_amount', 'interest_rate', 'loan_term',
+          'purpose', 'region', 'employment_type', 'education', 'marital_status',
+          'home_ownership', 'monthly_income', 'debt_payments', 'checking_balance',
+          'savings_balance', 'investment_balance', 'retirement_balance',
+          'total_assets', 'total_liabilities', 'credit_history_length'
+        ],
+        createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        id: datasetId2,
+        name: 'Validation Dataset Q4 2024',
+        projectId,
+        modelId: modelId1,
+        dataSource: 'database',
+        status: 'completed',
+        rows: 20000,
+        columns: 28,
+        outputColumns: [
+          'customer_id', 'age', 'income', 'employment_tenure', 'credit_score',
+          'debt_to_income', 'num_accounts', 'num_inquiries', 'delinquency_status',
+          'default_probability', 'loan_amount', 'interest_rate', 'loan_term',
+          'purpose', 'region', 'employment_type', 'education', 'marital_status',
+          'home_ownership', 'monthly_income', 'debt_payments', 'checking_balance',
+          'savings_balance', 'investment_balance', 'retirement_balance',
+          'total_assets', 'total_liabilities', 'credit_history_length'
+        ],
+        createdAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ];
+
+    return {
+      ...initialState,
+      projects: [sampleProject],
+      registryModels: sampleModels,
+      ingestionJobs: sampleDatasets,
+    };
+  };
+
+  // Load from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
-        setState({
-          ...parsed,
-          registryModels: [], // Model Repository starts blank each session
-        });
+        
+        // Data Migration: Fix models without projectId
+        if (parsed.registryModels && parsed.registryModels.length > 0 && parsed.projects && parsed.projects.length > 0) {
+          const firstProjectId = parsed.projects[0].id;
+          const migratedModels = parsed.registryModels.map((model: any) => ({
+            ...model,
+            projectId: model.projectId || firstProjectId, // Assign to first project if missing
+          }));
+          
+          setState({
+            ...parsed,
+            registryModels: migratedModels,
+          });
+        } else {
+          setState({
+            ...parsed,
+          });
+        }
       } catch (err) {
         console.error('Failed to load state from localStorage:', err);
       }
+    } else {
+      // Initialize with sample data on first load
+      setState(initializeSampleData());
     }
   }, []);
 
@@ -255,9 +622,6 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
-
-  // Helper function to generate IDs
-  const generateId = () => `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   // Projects
   const createProject = (project: Omit<Project, 'id' | 'createdAt'>): Project => {
@@ -359,6 +723,82 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   const getIngestionJob = (id: string) => state.ingestionJobs.find(j => j.id === id);
+
+  // Dataset Cloning and Lineage Functions
+  const cloneDatasetAsResolved = (
+    originalId: string, 
+    resolutionSummary: string,
+    resolvedIssuesCount: number,
+    timestamp?: string
+  ): IngestionJob | null => {
+    const original = getIngestionJob(originalId);
+    if (!original) return null;
+
+    // Prevent duplicate resolved names by checking existing resolved datasets
+    const existingResolved = state.ingestionJobs.filter(j => 
+      j.parentDatasetId === originalId && j.isResolved
+    );
+    
+    // Generate resolved name with optional versioning
+    let resolvedName = original.name.replace(/\.(csv|json|parquet)$/i, '_Resolved.$1');
+    if (!resolvedName.includes('_Resolved')) {
+      resolvedName = `${original.name}_Resolved`;
+    }
+    
+    // Add timestamp suffix for scheduled runs to prevent collisions
+    if (timestamp) {
+      resolvedName = resolvedName.replace('_Resolved', `_Resolved_${timestamp}`);
+    } else if (existingResolved.length > 0) {
+      resolvedName = resolvedName.replace('_Resolved', `_Resolved_${existingResolved.length + 1}`);
+    }
+
+    const clonedDataset: IngestionJob = {
+      ...original,
+      id: generateId(),
+      name: resolvedName,
+      createdAt: new Date().toISOString(),
+      // Lineage metadata
+      parentDatasetId: originalId,
+      isResolved: true,
+      resolutionTimestamp: new Date().toISOString(),
+      resolutionSummary,
+      resolvedIssuesCount,
+      // Update file metadata if exists
+      uploadedFile: original.uploadedFile ? {
+        ...original.uploadedFile,
+        name: resolvedName,
+      } : undefined,
+    };
+
+    setState(prev => ({
+      ...prev,
+      ingestionJobs: [...prev.ingestionJobs, clonedDataset],
+    }));
+
+    return clonedDataset;
+  };
+
+  const getResolvedDatasetsForParent = (parentId: string): IngestionJob[] => {
+    return state.ingestionJobs.filter(j => j.parentDatasetId === parentId && j.isResolved);
+  };
+
+  const getReportsForDataset = (datasetId: string): (GeneratedReport | DataQualityReport)[] => {
+    const generatedReports = state.generatedReports.filter(r => 
+      r.datasetId === datasetId || 
+      r.baselineDatasetIds?.includes(datasetId) ||
+      r.resolvedDatasetIds?.includes(datasetId)
+    );
+    const dataQualityReports = state.dataQualityReports.filter(r => 
+      r.datasetId === datasetId ||
+      r.baselineDatasetIds?.includes(datasetId) ||
+      r.resolvedDatasetIds?.includes(datasetId)
+    );
+    return [...generatedReports, ...dataQualityReports];
+  };
+
+  const getConfigurationsForModel = (modelId: string): ReportConfiguration[] => {
+    return state.reportConfigurations.filter(c => c.modelId === modelId);
+  };
 
   // Preparation Jobs
   const createPreparationJob = (job: Omit<PreparationJob, 'id' | 'createdAt'>): PreparationJob => {
@@ -549,6 +989,210 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const getPipelinesByProject = (projectId: string) => state.pipelineJobs.filter(j => j.projectId === projectId);
 
+  // Report Configurations
+  const createReportConfiguration = (config: Omit<ReportConfiguration, 'id' | 'createdAt' | 'createdBy'>): ReportConfiguration => {
+    const newConfig: ReportConfiguration = {
+      ...config,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+      createdBy: 'Current User',
+    };
+    setState(prev => ({
+      ...prev,
+      reportConfigurations: [...prev.reportConfigurations, newConfig],
+    }));
+    return newConfig;
+  };
+
+  const updateReportConfiguration = (id: string, updates: Partial<ReportConfiguration>) => {
+    setState(prev => ({
+      ...prev,
+      reportConfigurations: prev.reportConfigurations.map(c => c.id === id ? { ...c, ...updates } : c),
+    }));
+  };
+
+  const deleteReportConfiguration = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      reportConfigurations: prev.reportConfigurations.filter(c => c.id !== id),
+    }));
+  };
+
+  const getReportConfiguration = (id: string) => state.reportConfigurations.find(c => c.id === id);
+
+  // Generated Reports
+  const createGeneratedReport = (report: Omit<GeneratedReport, 'id' | 'generatedAt' | 'generatedBy'>): GeneratedReport => {
+    const newReport: GeneratedReport = {
+      ...report,
+      id: generateId(),
+      generatedAt: new Date().toISOString(),
+      generatedBy: 'Current User',
+    };
+    setState(prev => ({
+      ...prev,
+      generatedReports: [...prev.generatedReports, newReport],
+    }));
+    return newReport;
+  };
+
+  const deleteGeneratedReport = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      generatedReports: prev.generatedReports.filter(r => r.id !== id),
+    }));
+  };
+
+  const getGeneratedReport = (id: string) => state.generatedReports.find(r => r.id === id);
+
+  // Data Quality Reports
+  const createDataQualityReport = (report: Omit<DataQualityReport, 'id' | 'generatedAt'>): DataQualityReport => {
+    const newReport: DataQualityReport = {
+      ...report,
+      id: generateId(),
+      generatedAt: new Date().toISOString(),
+    };
+    setState(prev => ({
+      ...prev,
+      dataQualityReports: [...prev.dataQualityReports, newReport],
+    }));
+    return newReport;
+  };
+
+  const deleteDataQualityReport = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      dataQualityReports: prev.dataQualityReports.filter(r => r.id !== id),
+    }));
+  };
+
+  const getDataQualityReport = (id: string) => state.dataQualityReports.find(r => r.id === id);
+
+  // Scheduling Jobs
+  const createSchedulingJob = (job: Omit<SchedulingJob, 'id' | 'createdAt' | 'createdBy'>): SchedulingJob => {
+    const newJob: SchedulingJob = {
+      ...job,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+      createdBy: 'Current User',
+    };
+    setState(prev => ({
+      ...prev,
+      schedulingJobs: [...prev.schedulingJobs, newJob],
+    }));
+    return newJob;
+  };
+
+  const updateSchedulingJob = (id: string, updates: Partial<SchedulingJob>) => {
+    setState(prev => ({
+      ...prev,
+      schedulingJobs: prev.schedulingJobs.map(j => j.id === id ? { ...j, ...updates } : j),
+    }));
+  };
+
+  const deleteSchedulingJob = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      schedulingJobs: prev.schedulingJobs.filter(j => j.id !== id),
+    }));
+  };
+
+  const getSchedulingJob = (id: string) => state.schedulingJobs.find(j => j.id === id);
+
+  const runSchedulingJob = (id: string, action: 'run' | 'toggle' | 'delete' = 'run') => {
+    const job = getSchedulingJob(id);
+    if (!job) return;
+
+    if (action === 'toggle') {
+      updateSchedulingJob(id, { enabled: !job.enabled });
+      return;
+    }
+
+    if (action === 'delete') {
+      deleteSchedulingJob(id);
+      return;
+    }
+
+    // Run action - update lastRun, increment runCount, calculate next run
+    updateSchedulingJob(id, {
+      lastRun: new Date().toISOString(),
+      lastStatus: 'success',
+      runCount: (job.runCount || 0) + 1,
+      nextRun: calculateNextRun(job),
+    });
+  };
+
+  const calculateNextRun = (job: SchedulingJob): string | undefined => {
+    const now = new Date();
+    let next = new Date(now);
+
+    switch (job.scheduleType) {
+      case 'daily':
+        next.setDate(next.getDate() + 1);
+        if (job.scheduleTime) {
+          const [hours, minutes] = job.scheduleTime.split(':');
+          next.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        }
+        break;
+      case 'weekly':
+        next.setDate(next.getDate() + 7);
+        if (job.scheduleTime) {
+          const [hours, minutes] = job.scheduleTime.split(':');
+          next.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        }
+        break;
+      case 'monthly':
+        next.setMonth(next.getMonth() + 1);
+        if (job.dayOfMonth) {
+          next.setDate(job.dayOfMonth);
+        }
+        if (job.scheduleTime) {
+          const [hours, minutes] = job.scheduleTime.split(':');
+          next.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        }
+        break;
+      case 'one-time':
+        return undefined; // One-time jobs don't repeat
+      default:
+        return undefined;
+    }
+
+    return next.toISOString();
+  };
+
+  // Workflow Logs
+  const createWorkflowLog = (log: Omit<WorkflowLog, 'id' | 'createdAt'>): WorkflowLog => {
+    const newLog: WorkflowLog = {
+      ...log,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+    };
+    setState(prev => ({
+      ...prev,
+      workflowLogs: [...prev.workflowLogs, newLog],
+    }));
+    return newLog;
+  };
+
+  const deleteWorkflowLog = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      workflowLogs: prev.workflowLogs.filter(log => log.id !== id),
+    }));
+  };
+
+  const getWorkflowLog = (id: string) => state.workflowLogs.find(log => log.id === id);
+
+  const getWorkflowLogsByProject = (projectId: string) => 
+    state.workflowLogs.filter(log => log.projectId === projectId);
+
+  // Workflow State
+  const setCurrentWorkflow = (workflow: WorkflowState) => {
+    setState(prev => ({
+      ...prev,
+      currentWorkflow: { ...prev.currentWorkflow, ...workflow },
+    }));
+  };
+
   const value: GlobalContextType = {
     projects: state.projects,
     createProject,
@@ -562,9 +1206,14 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     getProjectCodes,
     ingestionJobs: state.ingestionJobs,
     createIngestionJob,
+    addIngestionJob: createIngestionJob, // Alias for convenience
     updateIngestionJob,
     deleteIngestionJob,
     getIngestionJob,
+    cloneDatasetAsResolved,
+    getResolvedDatasetsForParent,
+    getReportsForDataset,
+    getConfigurationsForModel,
     preparationJobs: state.preparationJobs,
     createPreparationJob,
     updatePreparationJob,
@@ -597,6 +1246,32 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     deletePipelineJob,
     getPipelineJob,
     getPipelinesByProject,
+    reportConfigurations: state.reportConfigurations,
+    createReportConfiguration,
+    updateReportConfiguration,
+    deleteReportConfiguration,
+    getReportConfiguration,
+    generatedReports: state.generatedReports,
+    createGeneratedReport,
+    deleteGeneratedReport,
+    getGeneratedReport,
+    dataQualityReports: state.dataQualityReports,
+    createDataQualityReport,
+    deleteDataQualityReport,
+    getDataQualityReport,
+    schedulingJobs: state.schedulingJobs,
+    createSchedulingJob,
+    updateSchedulingJob,
+    deleteSchedulingJob,
+    getSchedulingJob,
+    runSchedulingJob,
+    workflowLogs: state.workflowLogs,
+    createWorkflowLog,
+    deleteWorkflowLog,
+    getWorkflowLog,
+    getWorkflowLogsByProject,
+    currentWorkflow: state.currentWorkflow,
+    setCurrentWorkflow,
   };
 
   return <GlobalContext.Provider value={value}>{children}</GlobalContext.Provider>;

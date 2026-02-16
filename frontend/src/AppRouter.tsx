@@ -20,6 +20,13 @@ import Documentation from './pages/Documentation';
 import Training from './pages/Training';
 import SupportContacts from './pages/SupportContacts';
 import SendFeedback from './pages/SendFeedback';
+import DataQuality from './pages/DataQuality';
+import ReportConfiguration from './pages/ReportConfiguration';
+import ReportGeneration from './pages/ReportGeneration';
+import Datasets from './pages/Datasets';
+import Reports from './pages/Reports';
+import Scheduling from './pages/Scheduling';
+import Logs from './pages/Logs';
 
 /**
  * Session Warning Banner Component
@@ -33,7 +40,7 @@ const SessionWarningBanner: React.FC = () => {
   const minutes = Math.floor((timeUntilExpiry % 3600) / 60);
 
   return (
-    <div className="fixed top-20 left-0 right-0 z-[1000] mx-4 bg-gradient-to-r from-amber-900/30 to-orange-900/30 border border-amber-500/50 rounded-lg p-4 backdrop-blur-md md:ml-64">
+    <div className="fixed top-20 left-0 right-0 z-[1000] mx-4 bg-gradient-to-r from-amber-900/30 to-orange-900/30 border border-amber-500/50 rounded-lg p-4 backdrop-blur-md ml-20 md:ml-64">
       <div className="flex items-center justify-between gap-4 max-w-7xl mx-auto">
         <div className="flex items-center gap-3">
           <Clock size={20} className="text-amber-400 flex-shrink-0" />
@@ -81,7 +88,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       <LeftNavigation />
 
       {/* Main Content Area */}
-      <main className="pt-20 md:pt-20 md:pl-64 transition-all duration-300">
+      <main className="pt-20 pl-20 md:pl-64 transition-all duration-300">
         <div className="px-4 sm:px-6 py-8 max-w-7xl mx-auto">
           <ErrorBoundary>
             {children}
@@ -93,7 +100,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       <NotificationContainer />
 
       {/* Footer */}
-      <footer className={`border-t ${borderClass} ${bgSecondaryClass} mt-12 md:ml-64 transition-colors duration-300`}>
+      <footer className={`border-t ${borderClass} ${bgSecondaryClass} mt-12 ml-20 md:ml-64 transition-colors duration-300`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center md:text-left">
             <div>
@@ -148,6 +155,13 @@ const AppRoutes: React.FC = () => {
         <Route path="/" element={<Dashboard />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/model-repository" element={<ModelRegistry />} />
+        <Route path="/data-quality" element={<DataQuality />} />
+        <Route path="/report-configuration" element={<ReportConfiguration />} />
+        <Route path="/report-generation" element={<ReportGeneration />} />
+        <Route path="/datasets" element={<Datasets />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/scheduling" element={<Scheduling />} />
+        <Route path="/logs" element={<Logs />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/documentation" element={<Documentation />} />
