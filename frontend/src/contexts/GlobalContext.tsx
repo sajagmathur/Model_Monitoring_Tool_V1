@@ -668,7 +668,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getProject = (id: string) => state.projects.find(p => p.id === id);
+  const getProject = (id: string) => (state.projects || []).find(p => p.id === id);
 
   // Project Code
   const addProjectCode = (projectId: string, code: Omit<ProjectCode, 'id' | 'createdAt'>): ProjectCode => {
@@ -739,7 +739,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getIngestionJob = (id: string) => state.ingestionJobs.find(j => j.id === id);
+  const getIngestionJob = (id: string) => (state.ingestionJobs || []).find(j => j.id === id);
 
   // Dataset Cloning and Lineage Functions
   const cloneDatasetAsResolved = (
@@ -752,7 +752,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (!original) return null;
 
     // Prevent duplicate resolved names by checking existing resolved datasets
-    const existingResolved = state.ingestionJobs.filter(j => 
+    const existingResolved = (state.ingestionJobs || []).filter(j => 
       j.parentDatasetId === originalId && j.isResolved
     );
     
@@ -796,16 +796,16 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   const getResolvedDatasetsForParent = (parentId: string): IngestionJob[] => {
-    return state.ingestionJobs.filter(j => j.parentDatasetId === parentId && j.isResolved);
+    return (state.ingestionJobs || []).filter(j => j.parentDatasetId === parentId && j.isResolved);
   };
 
   const getReportsForDataset = (datasetId: string): (GeneratedReport | DataQualityReport)[] => {
-    const generatedReports = state.generatedReports.filter(r => 
+    const generatedReports = (state.generatedReports || []).filter(r => 
       r.datasetId === datasetId || 
       r.baselineDatasetIds?.includes(datasetId) ||
       r.resolvedDatasetIds?.includes(datasetId)
     );
-    const dataQualityReports = state.dataQualityReports.filter(r => 
+    const dataQualityReports = (state.dataQualityReports || []).filter(r => 
       r.datasetId === datasetId ||
       r.baselineDatasetIds?.includes(datasetId) ||
       r.resolvedDatasetIds?.includes(datasetId)
@@ -814,7 +814,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   const getConfigurationsForModel = (modelId: string): ReportConfiguration[] => {
-    return state.reportConfigurations.filter(c => c.modelId === modelId);
+    return (state.reportConfigurations || []).filter(c => c.modelId === modelId);
   };
 
   // Preparation Jobs
@@ -845,7 +845,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getPreparationJob = (id: string) => state.preparationJobs.find(j => j.id === id);
+  const getPreparationJob = (id: string) => (state.preparationJobs || []).find(j => j.id === id);
 
   // Registry Models
   const createRegistryModel = (model: Omit<RegistryModel, 'id' | 'createdAt'>): RegistryModel => {
@@ -882,7 +882,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getRegistryModel = (id: string) => state.registryModels.find(m => m.id === id);
+  const getRegistryModel = (id: string) => (state.registryModels || []).find(m => m.id === id);
 
   // Deployment Jobs
   const createDeploymentJob = (job: Omit<DeploymentJob, 'id' | 'createdAt'>): DeploymentJob => {
@@ -912,7 +912,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getDeploymentJob = (id: string) => state.deploymentJobs.find(j => j.id === id);
+  const getDeploymentJob = (id: string) => (state.deploymentJobs || []).find(j => j.id === id);
 
   // Inferencing Jobs
   const createInferencingJob = (job: Omit<InferencingJob, 'id' | 'createdAt'>): InferencingJob => {
@@ -942,7 +942,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getInferencingJob = (id: string) => state.inferencingJobs.find(j => j.id === id);
+  const getInferencingJob = (id: string) => (state.inferencingJobs || []).find(j => j.id === id);
 
   // Monitoring Jobs
   const createMonitoringJob = (job: Omit<MonitoringJob, 'id' | 'createdAt'>): MonitoringJob => {
@@ -972,7 +972,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getMonitoringJob = (id: string) => state.monitoringJobs.find(j => j.id === id);
+  const getMonitoringJob = (id: string) => (state.monitoringJobs || []).find(j => j.id === id);
 
   // Pipeline Jobs
   const createPipelineJob = (job: Omit<PipelineJob, 'id' | 'createdAt'>): PipelineJob => {
@@ -1002,9 +1002,9 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getPipelineJob = (id: string) => state.pipelineJobs.find(j => j.id === id);
+  const getPipelineJob = (id: string) => (state.pipelineJobs || []).find(j => j.id === id);
 
-  const getPipelinesByProject = (projectId: string) => state.pipelineJobs.filter(j => j.projectId === projectId);
+  const getPipelinesByProject = (projectId: string) => (state.pipelineJobs || []).filter(j => j.projectId === projectId);
 
   // Report Configurations
   const createReportConfiguration = (config: Omit<ReportConfiguration, 'id' | 'createdAt' | 'createdBy'>): ReportConfiguration => {
@@ -1035,7 +1035,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getReportConfiguration = (id: string) => state.reportConfigurations.find(c => c.id === id);
+  const getReportConfiguration = (id: string) => (state.reportConfigurations || []).find(c => c.id === id);
 
   // Generated Reports
   const createGeneratedReport = (report: Omit<GeneratedReport, 'id' | 'generatedAt' | 'generatedBy'>): GeneratedReport => {
@@ -1059,7 +1059,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getGeneratedReport = (id: string) => state.generatedReports.find(r => r.id === id);
+  const getGeneratedReport = (id: string) => (state.generatedReports || []).find(r => r.id === id);
 
   // Data Quality Reports
   const createDataQualityReport = (report: Omit<DataQualityReport, 'id' | 'generatedAt'>): DataQualityReport => {
@@ -1082,7 +1082,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getDataQualityReport = (id: string) => state.dataQualityReports.find(r => r.id === id);
+  const getDataQualityReport = (id: string) => (state.dataQualityReports || []).find(r => r.id === id);
 
   // Scheduling Jobs
   const createSchedulingJob = (job: Omit<SchedulingJob, 'id' | 'createdAt' | 'createdBy'>): SchedulingJob => {
@@ -1113,7 +1113,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
-  const getSchedulingJob = (id: string) => state.schedulingJobs.find(j => j.id === id);
+  const getSchedulingJob = (id: string) => (state.schedulingJobs || []).find(j => j.id === id);
 
   const runSchedulingJob = (id: string, action: 'run' | 'toggle' | 'delete' = 'run') => {
     const job = getSchedulingJob(id);
@@ -1185,7 +1185,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
     setState(prev => ({
       ...prev,
-      workflowLogs: [...prev.workflowLogs, newLog],
+      workflowLogs: [...(prev.workflowLogs || []), newLog],
     }));
     return newLog;
   };
@@ -1193,14 +1193,14 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const deleteWorkflowLog = (id: string) => {
     setState(prev => ({
       ...prev,
-      workflowLogs: prev.workflowLogs.filter(log => log.id !== id),
+      workflowLogs: (prev.workflowLogs || []).filter(log => log.id !== id),
     }));
   };
 
-  const getWorkflowLog = (id: string) => state.workflowLogs.find(log => log.id === id);
+  const getWorkflowLog = (id: string) => (state.workflowLogs || []).find(log => log.id === id);
 
   const getWorkflowLogsByProject = (projectId: string) => 
-    state.workflowLogs.filter(log => log.projectId === projectId);
+    (state.workflowLogs || []).filter(log => log.projectId === projectId);
 
   // Workflow State
   const setCurrentWorkflow = (workflow: WorkflowState) => {
