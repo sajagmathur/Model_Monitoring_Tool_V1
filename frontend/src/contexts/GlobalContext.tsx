@@ -631,7 +631,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const parsed = JSON.parse(stored);
         if (parsed && typeof parsed === 'object' && parsed.projects) {
           // Merge with initial state to ensure all required properties exist
-          return {
+          const mergedState = {
             ...initialState,
             ...parsed,
             // Ensure arrays are properly initialized
@@ -650,6 +650,24 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             workflowLogs: parsed.workflowLogs || [],
             currentWorkflow: parsed.currentWorkflow || {},
           };
+          
+          // Data Migration: Synchronize projects and models on initialization
+          if (mergedState.projects && Array.isArray(mergedState.projects) && 
+              mergedState.registryModels && Array.isArray(mergedState.registryModels)) {
+            const projectIds = new Set(mergedState.projects.map((p: Project) => p.id));
+            const firstProjectId = mergedState.projects.length > 0 ? mergedState.projects[0].id : null;
+            
+            const fixedModels = mergedState.registryModels.map((model: any) => {
+              if (!model.projectId || !projectIds.has(model.projectId)) {
+                return { ...model, projectId: firstProjectId || model.projectId };
+              }
+              return model;
+            });
+            
+            return { ...mergedState, registryModels: fixedModels };
+          }
+          
+          return mergedState;
         }
       }
     } catch (err) {
@@ -689,19 +707,39 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             currentWorkflow: parsed.currentWorkflow || {},
           };
           
-          // Data Migration: Fix models without projectId
-          if (mergedState.registryModels && Array.isArray(mergedState.registryModels) && 
-              mergedState.registryModels.length > 0 && mergedState.projects && Array.isArray(mergedState.projects) && 
-              mergedState.projects.length > 0) {
-            const firstProjectId = mergedState.projects[0].id;
-            const migratedModels = mergedState.registryModels.map((model: any) => ({
-              ...model,
-              projectId: model.projectId || firstProjectId,
-            }));
+          // Data Migration: Synchronize projects and models to ensure all models have valid projectIds
+          if (mergedState.projects && Array.isArray(mergedState.projects) && 
+              mergedState.registryModels && Array.isArray(mergedState.registryModels)) {
+            const projectIds = new Set(mergedState.projects.map((p: Project) => p.id));
+            const firstProjectId = mergedState.projects.length > 0 ? mergedState.projects[0].id : null;
+            
+            // Fix models that have invalid projectIds or no projectId
+            const fixedModels = mergedState.registryModels.map((model: any) => {
+              const modelProjectId = model.projectId;
+              
+              // If model has no projectId or projectId is invalid, assign first project
+              if (!modelProjectId || !projectIds.has(modelProjectId)) {
+                console.log(`[GlobalContext] Fixing model "${model.name}" - invalid projectId: ${modelProjectId}, assigning to first project: ${firstProjectId}`);
+                return {
+                  ...model,
+                  projectId: firstProjectId || modelProjectId, // Fallback to original if no projects exist
+                };
+              }
+              return model;
+            });
+            
+            console.log('[GlobalContext] Data migration complete:', {
+              projectCount: mergedState.projects.length,
+              modelCount: fixedModels.length,
+              modelsFixed: fixedModels.filter((m: any) => {
+                const original = mergedState.registryModels.find((om: any) => om.id === m.id);
+                return m.projectId !== original?.projectId;
+              }).length,
+            });
             
             setState({
               ...mergedState,
-              registryModels: migratedModels,
+              registryModels: fixedModels,
             });
           } else {
             // Update state with merged data
@@ -929,11 +967,33 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   // Registry Models
   const createRegistryModel = (model: Omit<RegistryModel, 'id' | 'createdAt'>): RegistryModel => {
+    // Validate projectId - critical for data quality page
+    if (!model.projectId) {
+      console.error('[GlobalContext] ⚠️ Model created without projectId:', model.name);
+      console.warn('[GlobalContext] Available projects:', (state.projects || []).map(p => ({ id: p.id, name: p.name })));
+    } else {
+      const projectExists = (state.projects || []).some(p => p.id === model.projectId);
+      if (!projectExists) {
+        console.warn(`[GlobalContext] ⚠️ Model projectId "${model.projectId}" does not match any project`, {
+          modelName: model.name,
+          availableProjectIds: (state.projects || []).map(p => p.id),
+        });
+      }
+    }
+    
     const newModel: RegistryModel = {
       ...model,
       id: generateId(),
       createdAt: new Date().toISOString(),
     };
+    
+    console.log('[GlobalContext] Creating registry model:', {
+      modelName: newModel.name,
+      modelId: newModel.id,
+      projectId: newModel.projectId,
+      modelType: newModel.modelType,
+    });
+    
     setState(prev => ({
       ...prev,
       registryModels: [...prev.registryModels, newModel],

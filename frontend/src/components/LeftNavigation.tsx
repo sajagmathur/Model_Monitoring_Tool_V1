@@ -8,7 +8,6 @@ import {
   Folder,
   Database,
   Package,
-  Shield,
   Menu,
   FileText,
   BarChart3,
@@ -54,13 +53,6 @@ const LeftNavigation: React.FC = () => {
       label: 'Model Repository',
       path: '/model-repository',
       icon: <Package size={20} />,
-      section: 'workflow',
-    },
-    {
-      id: 'data-quality',
-      label: 'Data Quality',
-      path: '/data-quality',
-      icon: <Shield size={20} />,
       section: 'workflow',
     },
     {
