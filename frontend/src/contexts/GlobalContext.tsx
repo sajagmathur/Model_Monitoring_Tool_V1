@@ -474,8 +474,6 @@ const initialState: {
 };
 
 export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [state, setState] = useState(initialState);
-
   // Helper function to generate IDs
   const generateId = () => `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -585,36 +583,55 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
   };
 
-  // Load from localStorage on mount
+  // Initialize state with sample data immediately for first render
+  const [state, setState] = useState<typeof initialState>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object' && parsed.projects) {
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load state from localStorage during initialization:', err);
+    }
+    // Return sample data if no valid stored data
+    return initializeSampleData();
+  });
+
+  // Load from localStorage on mount and update if needed
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
         const parsed = JSON.parse(stored);
         
-        // Data Migration: Fix models without projectId
-        if (parsed.registryModels && parsed.registryModels.length > 0 && parsed.projects && parsed.projects.length > 0) {
-          const firstProjectId = parsed.projects[0].id;
-          const migratedModels = parsed.registryModels.map((model: any) => ({
-            ...model,
-            projectId: model.projectId || firstProjectId, // Assign to first project if missing
-          }));
-          
-          setState({
-            ...parsed,
-            registryModels: migratedModels,
-          });
-        } else {
-          setState({
-            ...parsed,
-          });
+        // Validate parsed data has required properties
+        if (parsed && typeof parsed === 'object' && parsed.projects) {
+          // Data Migration: Fix models without projectId
+          if (parsed.registryModels && Array.isArray(parsed.registryModels) && 
+              parsed.registryModels.length > 0 && parsed.projects && Array.isArray(parsed.projects) && 
+              parsed.projects.length > 0) {
+            const firstProjectId = parsed.projects[0].id;
+            const migratedModels = parsed.registryModels.map((model: any) => ({
+              ...model,
+              projectId: model.projectId || firstProjectId,
+            }));
+            
+            setState({
+              ...parsed,
+              registryModels: migratedModels,
+            });
+          } else if (state !== parsed) {
+            // Update state if it's different from what we loaded
+            setState(parsed);
+          }
         }
-      } catch (err) {
-        console.error('Failed to load state from localStorage:', err);
       }
-    } else {
-      // Initialize with sample data on first load
-      setState(initializeSampleData());
+    } catch (err) {
+      console.error('Failed to load state from localStorage in useEffect:', err);
+      // Use existing state if localStorage fails
     }
   }, []);
 
@@ -1194,7 +1211,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   const value: GlobalContextType = {
-    projects: state.projects,
+    projects: state.projects || [],
     createProject,
     updateProject,
     deleteProject,
@@ -1204,9 +1221,9 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     deleteProjectCode,
     getProjectCode,
     getProjectCodes,
-    ingestionJobs: state.ingestionJobs,
+    ingestionJobs: state.ingestionJobs || [],
     createIngestionJob,
-    addIngestionJob: createIngestionJob, // Alias for convenience
+    addIngestionJob: createIngestionJob,
     updateIngestionJob,
     deleteIngestionJob,
     getIngestionJob,
@@ -1214,63 +1231,63 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     getResolvedDatasetsForParent,
     getReportsForDataset,
     getConfigurationsForModel,
-    preparationJobs: state.preparationJobs,
+    preparationJobs: state.preparationJobs || [],
     createPreparationJob,
     updatePreparationJob,
     deletePreparationJob,
     getPreparationJob,
-    registryModels: state.registryModels,
+    registryModels: state.registryModels || [],
     createRegistryModel,
     updateRegistryModel,
     deleteRegistryModel,
     clearRegistryModels,
     getRegistryModel,
-    deploymentJobs: state.deploymentJobs,
+    deploymentJobs: state.deploymentJobs || [],
     createDeploymentJob,
     updateDeploymentJob,
     deleteDeploymentJob,
     getDeploymentJob,
-    inferencingJobs: state.inferencingJobs,
+    inferencingJobs: state.inferencingJobs || [],
     createInferencingJob,
     updateInferencingJob,
     deleteInferencingJob,
     getInferencingJob,
-    monitoringJobs: state.monitoringJobs,
+    monitoringJobs: state.monitoringJobs || [],
     createMonitoringJob,
     updateMonitoringJob,
     deleteMonitoringJob,
     getMonitoringJob,
-    pipelineJobs: state.pipelineJobs,
+    pipelineJobs: state.pipelineJobs || [],
     createPipelineJob,
     updatePipelineJob,
     deletePipelineJob,
     getPipelineJob,
     getPipelinesByProject,
-    reportConfigurations: state.reportConfigurations,
+    reportConfigurations: state.reportConfigurations || [],
     createReportConfiguration,
     updateReportConfiguration,
     deleteReportConfiguration,
     getReportConfiguration,
-    generatedReports: state.generatedReports,
+    generatedReports: state.generatedReports || [],
     createGeneratedReport,
     deleteGeneratedReport,
     getGeneratedReport,
-    dataQualityReports: state.dataQualityReports,
+    dataQualityReports: state.dataQualityReports || [],
     createDataQualityReport,
     deleteDataQualityReport,
     getDataQualityReport,
-    schedulingJobs: state.schedulingJobs,
+    schedulingJobs: state.schedulingJobs || [],
     createSchedulingJob,
     updateSchedulingJob,
     deleteSchedulingJob,
     getSchedulingJob,
     runSchedulingJob,
-    workflowLogs: state.workflowLogs,
+    workflowLogs: state.workflowLogs || [],
     createWorkflowLog,
     deleteWorkflowLog,
     getWorkflowLog,
     getWorkflowLogsByProject,
-    currentWorkflow: state.currentWorkflow,
+    currentWorkflow: state.currentWorkflow || {},
     setCurrentWorkflow,
   };
 

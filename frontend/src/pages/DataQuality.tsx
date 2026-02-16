@@ -81,10 +81,10 @@ const DataQuality: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const {
-    projects,
-    registryModels,
-    ingestionJobs,
-    reportConfigurations,
+    projects = [],
+    registryModels = [],
+    ingestionJobs = [],
+    reportConfigurations = [],
     createGeneratedReport,
     createReportConfiguration,
     cloneDatasetAsResolved,
