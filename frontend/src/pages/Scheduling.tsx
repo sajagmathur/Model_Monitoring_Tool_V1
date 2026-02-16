@@ -269,7 +269,7 @@ const Scheduling: React.FC = () => {
         return `Daily at ${time}`;
       case 'weekly':
         const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        return `Weekly on ${days[job.weekday || 0]} at ${time}`;
+        return `Weekly on ${days[job.weekdays?.[0] || 0]} at ${time}`;
       case 'monthly':
         return `Monthly on day ${job.dayOfMonth || 1} at ${time}`;
       default:

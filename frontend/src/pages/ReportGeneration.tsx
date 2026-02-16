@@ -129,17 +129,13 @@ const ReportGeneration: React.FC = () => {
     const config = reportConfigurations.find(c => c.id === selectedConfigFilter);
     if (!config) return reportTypes;
 
-    // If this is a data quality configuration, show Data Quality Report + conditionally other reports
+    // If this is a data quality configuration, show Data Quality Report + drift + others
     if (config.type === 'data_quality') {
-      const dataQualityReports = [
-        {
-          id: 'data_quality' as const,
-          title: 'Data Quality Report',
-          description: 'Comprehensive data quality analysis for selected datasets',
-          icon: <Shield className="text-blue-500" size={24} />,
-          color: 'blue',
-        }
-      ];
+      const dataQualityReports: typeof reportTypes = [];
+      
+      // Add data quality report if it exists
+      const dqReport = reportTypes.find(rt => rt.id === 'data_quality');
+      if (dqReport) dataQualityReports.push(dqReport);
       
       // Add drift analysis if drift metrics are configured
       if (config.driftMetrics && config.driftMetrics.length > 0) {
@@ -149,7 +145,7 @@ const ReportGeneration: React.FC = () => {
       
       // Add other standard reports (explainability, feature analytics, segmented analysis)
       const otherReports = reportTypes.filter(rt => 
-        ['explainability', 'feature_analytics', 'segmented_analysis'].includes(rt.id)
+        ['explainability', 'feature_analytics', 'segmented_analysis'].includes(rt.id as string)
       );
       
       return [...dataQualityReports, ...otherReports];
@@ -1048,6 +1044,16 @@ const ReportGeneration: React.FC = () => {
                         reportTypes: [],
                         scheduleType: 'daily',
                         scheduleTime: '09:00',
+                        oneTimeDate: '',
+                        oneTimeTime: '',
+                        weekdays: [],
+                        dayOfMonth: 1,
+                        monthlyType: 'day',
+                        weekOfMonth: 1,
+                        monthlyWeekday: 0,
+                        quarterMonth: 1,
+                        yearMonth: 1,
+                        yearDay: 1,
                         enabled: true,
                       });
                     }}

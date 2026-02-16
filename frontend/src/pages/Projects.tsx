@@ -6,7 +6,7 @@ import {
   Activity, Database, Brain, Zap, Beaker, Save, Calendar, Clock, FileText
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
-import { useGlobal } from '../contexts/GlobalContext';
+import { useGlobal, IngestionJob } from '../contexts/GlobalContext';
 import { Breadcrumb } from '../components/UIPatterns';
 import { DataIngestionStepComponent, DataIngestionConfig, UploadedDataset } from './DataIngestionStep';
 import { generateDataQualityPDF } from '../utils/pdfGenerator';
@@ -1322,15 +1322,17 @@ const DataQualityStep: React.FC<{
     await new Promise(resolve => setTimeout(resolve, 1500));
     
     // Create treated dataset
-    const treatedDataset: IngestionJob = {
-      id: `${selectedDataset.id}_treated_${Date.now()}`,
+    const treatedDatasetData = {
       name: `${selectedDataset.name} (AI Treated)`,
+      projectId: projectId,
       modelId: (selectedDataset as any).modelId || '',
-      source: 'treated',
-      status: 'active',
+      dataSource: 'desktop' as const,
+      source: 'treated' as const,
+      status: 'active' as const,
       uploadedAt: new Date().toISOString(),
       rows: selectedDataset.rows,
       columns: selectedDataset.columns,
+      outputColumns: (selectedDataset as any).outputColumns || [],
       schema: selectedDataset.schema,
       treatmentMetadata: {
         originalDatasetId: selectedDataset.id,
@@ -1345,26 +1347,27 @@ const DataQualityStep: React.FC<{
     };
     
     // Add to global ingestion jobs
-    addIngestionJob(treatedDataset);
+    const addedTreatedDataset = addIngestionJob(treatedDatasetData);
     
     // Add to current workflow's tracked datasets
     if (workflow.dataIngestionConfig) {
-      const track = (selectedDataset as any).track || 'train';
-      if (!workflow.dataIngestionConfig.trackDatasets[track]) {
-        workflow.dataIngestionConfig.trackDatasets[track] = [];
+      const track = ((selectedDataset as any).track || 'train') as unknown as any;
+      const trackDatasets = workflow.dataIngestionConfig.trackDatasets as Record<string, any>;
+      if (!trackDatasets[track]) {
+        trackDatasets[track] = [];
       }
-      workflow.dataIngestionConfig.trackDatasets[track].push({
-        id: treatedDataset.id,
-        name: treatedDataset.name,
-        rows: treatedDataset.rows || 0,
-        columns: treatedDataset.columns || 0,
+      trackDatasets[track].push({
+        id: addedTreatedDataset.id,
+        name: addedTreatedDataset.name,
+        rows: addedTreatedDataset.rows || 0,
+        columns: addedTreatedDataset.columns || 0,
         track,
-        schema: treatedDataset.schema,
+        schema: addedTreatedDataset.schema,
       });
     }
     
     setApplyingTreatment(false);
-    alert(`Successfully created treated dataset: ${treatedDataset.name}`);
+    alert(`Successfully created treated dataset: ${addedTreatedDataset.name}`);
     setAiRecommendations([]);
   };
 
@@ -1575,7 +1578,7 @@ const DataQualityStep: React.FC<{
           type: 'data_quality', // TYPE-LOCK for Data Quality
           modelId: selectedModel.id,
           modelName: `${selectedModel.name} v${selectedModel.version}`,
-          modelType: selectedModel.modelType || 'classification',
+          modelType: (selectedModel.modelType === 'classification' ? 'classification' : selectedModel.modelType === 'regression' ? 'regression' : 'classification') as 'classification' | 'regression' | 'timeseries',
           baselineDatasetId: baselineDatasetIds[0],
           baselineDatasetName: allDatasets.find(d => d.id === baselineDatasetIds[0])?.name || 'Baseline',
           referenceDatasetId: resolvedDatasetId,
@@ -1642,8 +1645,8 @@ const DataQualityStep: React.FC<{
                   setResolving(true);
                   
                   // Resolve issues one by one and create cloned UploadedDataset objects
-                  const newlyResolvedClones = [];
-                  const newlyResolvedDatasets = [];
+                  const newlyResolvedClones: UploadedDataset[] = [];
+                  const newlyResolvedDatasets: any[] = [];
                   
                   for (const { datasetId, datasetName, issues } of allResolving) {
                     // Mark issues as resolved in metricsMap
@@ -1714,17 +1717,15 @@ const DataQualityStep: React.FC<{
                   setResolvedDatasets(prev => [...prev, ...newlyResolvedDatasets]);
                   
                   // Save resolved datasets to GlobalContext (makes them appear in Datasets page)
-                  newlyResolvedClones.forEach(clonedDataset => {
+                  newlyResolvedClones.forEach((clonedDataset: any) => {
                     addIngestionJob({
-                      id: clonedDataset.id,
                       name: clonedDataset.name,
                       projectId: projectId,
                       modelId: workflow.selectedModel || '',
-                      dataSource: 'desktop',
-                      source: 'treated',
-                      datasetType: 'reference',
-                      status: 'completed',
-                      createdAt: clonedDataset.uploadedAt,
+                      dataSource: 'desktop' as 'csv' | 'database' | 'api' | 'cloud' | 'desktop',
+                      source: 'treated' as 'csv' | 'database' | 'cloud' | 'treated',
+                      datasetType: 'reference' as 'baseline' | 'reference' | 'monitoring' | 'development',
+                      status: 'completed' as 'created' | 'running' | 'completed' | 'failed' | 'active' | 'processing',
                       uploadedAt: clonedDataset.uploadedAt,
                       rows: clonedDataset.rows || 0,
                       columns: clonedDataset.columns || 0,
@@ -3819,9 +3820,20 @@ const ScheduleReportsStep: React.FC<{ onComplete: () => void; workflow: Workflow
                 setShowJobForm(false);
                 setJobForm({
                   name: '',
+                  configurationId: '',
                   reportTypes: [],
                   scheduleType: 'daily',
                   scheduleTime: '09:00',
+                  oneTimeDate: '',
+                  oneTimeTime: '',
+                  weekdays: [],
+                  dayOfMonth: 1,
+                  monthlyType: 'day',
+                  weekOfMonth: 1,
+                  monthlyWeekday: 0,
+                  quarterMonth: 1,
+                  yearMonth: 1,
+                  yearDay: 1,
                   enabled: true,
                 });
               }}
@@ -4472,7 +4484,6 @@ export default function Projects() {
                                 size: 0,
                                 type: 'csv',
                               },
-                              createdAt: new Date().toISOString(),
                             });
                           }
                         });
@@ -4518,8 +4529,8 @@ export default function Projects() {
                       }}
                       onComplete={() => {
                         // Get data quality analysis information for logging
-                        const analysisCount = selectedProject.workflow.dataQualityConfig?.analyses?.length || 0;
-                        const resolvedCount = selectedProject.workflow.dataQualityConfig?.analyses?.filter((a: any) => a.resolved).length || 0;
+                        const analysisCount = (selectedProject.workflow as any).dataQualityConfig?.analyses?.length || 0;
+                        const resolvedCount = (selectedProject.workflow as any).dataQualityConfig?.analyses?.filter((a: any) => a.resolved).length || 0;
                         const description = getStepDescription.dataQuality(analysisCount, resolvedCount);
                         
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
@@ -4556,9 +4567,9 @@ export default function Projects() {
                       workflow={selectedProject.workflow}
                       onComplete={() => {
                         // Get report configuration information for logging
-                        const configCount = selectedProject.workflow.reportConfigs?.length || 0;
-                        const configNames = selectedProject.workflow.reportConfigs?.map((c: any) => c.name) || [];
-                        const metricsCount = selectedProject.workflow.reportConfigs?.reduce((acc: number, c: any) => acc + (c.metrics?.length || 0), 0) || 0;
+                        const configCount = (selectedProject.workflow as any).reportConfigs?.length || 0;
+                        const configNames = (selectedProject.workflow as any).reportConfigs?.map((c: any) => c.name) || [];
+                        const metricsCount = (selectedProject.workflow as any).reportConfigs?.reduce((acc: number, c: any) => acc + (c.metrics?.length || 0), 0) || 0;
                         const description = getStepDescription.reportConfiguration(configCount, configNames, metricsCount);
                         
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
@@ -4594,8 +4605,8 @@ export default function Projects() {
                     <ReportsStep
                       onComplete={() => {
                         // Get report generation information for logging
-                        const configCount = selectedProject.workflow.reportConfigs?.length || 0;
-                        const reportsReady = selectedProject.workflow.generatedReports?.length || 0;
+                        const configCount = (selectedProject.workflow as any).reportConfigs?.length || 0;
+                        const reportsReady = (selectedProject.workflow as any).generatedReports?.length || 0;
                         const description = getStepDescription.reportGeneration(configCount, reportsReady);
                         
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
@@ -4633,9 +4644,9 @@ export default function Projects() {
                       project={selectedProject}
                       onComplete={() => {
                         // Get scheduling information for logging
-                        const jobCount = selectedProject.workflow.scheduledJobs?.length || 0;
-                        const reportTypes = selectedProject.workflow.reportConfigs?.map((c: any) => c.name) || [];
-                        const scheduleFrequency = selectedProject.workflow.scheduledJobs?.[0]?.frequency || 'Not specified';
+                        const jobCount = (selectedProject.workflow as any).scheduledJobs?.length || 0;
+                        const reportTypes = (selectedProject.workflow as any).reportConfigs?.map((c: any) => c.name) || [];
+                        const scheduleFrequency = (selectedProject.workflow as any).scheduledJobs?.[0]?.frequency || 'Not specified';
                         const description = getStepDescription.scheduleReports(jobCount, reportTypes, scheduleFrequency);
                         
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
