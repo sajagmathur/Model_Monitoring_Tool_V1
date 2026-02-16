@@ -13,6 +13,7 @@ import {
   BarChart3,
   Calendar,
   ClipboardList,
+  Brain,
 } from 'lucide-react';
 import Logo from './Logo';
 
@@ -67,6 +68,13 @@ const LeftNavigation: React.FC = () => {
       label: 'Report Generation',
       path: '/report-generation',
       icon: <BarChart3 size={20} />,
+      section: 'workflow',
+    },
+    {
+      id: 'ai-insights',
+      label: 'AI Insights',
+      path: '/ai-insights',
+      icon: <Brain size={20} />,
       section: 'workflow',
     },
     {

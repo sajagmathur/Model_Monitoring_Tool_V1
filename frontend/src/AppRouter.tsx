@@ -23,6 +23,7 @@ import SendFeedback from './pages/SendFeedback';
 import DataQuality from './pages/DataQuality';
 import ReportConfiguration from './pages/ReportConfiguration';
 import ReportGeneration from './pages/ReportGeneration';
+import AIInsights from './pages/AIInsights';
 import Datasets from './pages/Datasets';
 import Reports from './pages/Reports';
 import Scheduling from './pages/Scheduling';
@@ -158,6 +159,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/data-quality" element={<DataQuality />} />
         <Route path="/report-configuration" element={<ReportConfiguration />} />
         <Route path="/report-generation" element={<ReportGeneration />} />
+        <Route path="/ai-insights" element={<AIInsights />} />
         <Route path="/datasets" element={<Datasets />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/scheduling" element={<Scheduling />} />

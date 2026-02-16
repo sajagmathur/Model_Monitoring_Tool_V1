@@ -140,6 +140,62 @@ export const themeClasses = {
   skeleton: (theme: string) => theme === 'dark'
     ? 'bg-white/10 animate-pulse'
     : 'bg-slate-200 animate-pulse',
+
+  // Chart-specific utilities
+  chartGrid: (theme: string) => theme === 'dark' ? '#475569' : '#e2e8f0',
+  chartAxis: (theme: string) => theme === 'dark' ? '#94a3b8' : '#64748b',
+  chartTooltipBg: (theme: string) => theme === 'dark' ? '#1e293b' : '#ffffff',
+  chartTooltipText: (theme: string) => theme === 'dark' ? '#ffffff' : '#0f172a',
+  chartTooltipBorder: (theme: string) => theme === 'dark' ? '#475569' : '#cbd5e1',
 };
+
+// Chart color palettes
+export const chartColors = {
+  primary: '#3b82f6',    // blue-500
+  secondary: '#8b5cf6',  // violet-500
+  success: '#10b981',    // green-500
+  warning: '#f59e0b',    // amber-500
+  danger: '#ef4444',     // red-500
+  info: '#06b6d4',       // cyan-500
+  purple: '#a855f7',     // purple-500
+  pink: '#ec4899',       // pink-500
+};
+
+// Get chart color palette for multi-line/multi-series charts
+export function getChartColorPalette(theme: string): string[] {
+  if (theme === 'dark') {
+    return [
+      '#60a5fa', // blue-400
+      '#a78bfa', // violet-400
+      '#34d399', // green-400
+      '#fbbf24', // amber-400
+      '#f87171', // red-400
+      '#22d3ee', // cyan-400
+      '#c084fc', // purple-400
+      '#f472b6', // pink-400
+    ];
+  }
+  return [
+    chartColors.primary,
+    chartColors.secondary,
+    chartColors.success,
+    chartColors.warning,
+    chartColors.danger,
+    chartColors.info,
+    chartColors.purple,
+    chartColors.pink,
+  ];
+}
+
+// Get tooltip style for recharts
+export function getTooltipStyle(theme: string) {
+  return {
+    backgroundColor: themeClasses.chartTooltipBg(theme),
+    color: themeClasses.chartTooltipText(theme),
+    border: `1px solid ${themeClasses.chartTooltipBorder(theme)}`,
+    borderRadius: '8px',
+    padding: '8px 12px',
+  };
+}
 
 export default themeClasses;

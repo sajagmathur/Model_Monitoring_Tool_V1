@@ -435,6 +435,9 @@ interface GlobalContextType {
   // Workflow State
   currentWorkflow: WorkflowState;
   setCurrentWorkflow: (workflow: WorkflowState) => void;
+
+  // Utility
+  loadSampleData: () => void;
 }
 
 const GlobalContext = createContext<GlobalContextType | undefined>(undefined);
@@ -487,8 +490,8 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     const sampleProject: Project = {
       id: projectId,
-      name: 'Credit Risk Model',
-      description: 'Classification model for predicting credit default risk',
+      name: 'Credit_Card_Model',
+      description: 'Advanced ML pipeline for credit card fraud detection and risk assessment',
       environment: 'prod',
       status: 'active',
       code: [],
@@ -498,7 +501,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const sampleModels: RegistryModel[] = [
       {
         id: modelId1,
-        name: 'Credit Risk Classifier v1',
+        name: 'Credit_Card_Model',
         version: '1.0.0',
         projectId,
         modelType: 'classification',
@@ -515,7 +518,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       },
       {
         id: modelId2,
-        name: 'Credit Risk Classifier v2',
+        name: 'Credit_Card_Model_v2',
         version: '2.0.0',
         projectId,
         modelType: 'classification',
@@ -535,43 +538,253 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const sampleDatasets: IngestionJob[] = [
       {
         id: datasetId1,
-        name: 'Training Dataset Q4 2024',
+        name: 'Credit Card Training Set',
         projectId,
         modelId: modelId1,
         dataSource: 'database',
         status: 'completed',
-        rows: 50000,
-        columns: 28,
+        rows: 500000,
+        columns: 30,
         outputColumns: [
-          'customer_id', 'age', 'income', 'employment_tenure', 'credit_score',
-          'debt_to_income', 'num_accounts', 'num_inquiries', 'delinquency_status',
-          'default_probability', 'loan_amount', 'interest_rate', 'loan_term',
-          'purpose', 'region', 'employment_type', 'education', 'marital_status',
-          'home_ownership', 'monthly_income', 'debt_payments', 'checking_balance',
-          'savings_balance', 'investment_balance', 'retirement_balance',
-          'total_assets', 'total_liabilities', 'credit_history_length'
+          'transaction_id', 'customer_id', 'card_type', 'amount', 'merchant_category',
+          'merchant_country', 'transaction_date', 'transaction_time', 'time_since_last_transaction',
+          'distance_from_home', 'used_chip', 'used_pin', 'online_order', 'fraud_label',
+          'customer_age', 'customer_income', 'account_age_months', 'previous_fraud_count',
+          'total_transactions_24h', 'total_spend_24h', 'avg_transaction_amount',
+          'account_balance', 'credit_limit', 'credit_utilization', 'payment_status',
+          'delinquency_status', 'num_accounts', 'device_id', 'ip_country', 'is_fraud'
         ],
         createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
       },
       {
         id: datasetId2,
-        name: 'Validation Dataset Q4 2024',
+        name: 'Credit Card Validation Set',
         projectId,
         modelId: modelId1,
         dataSource: 'database',
         status: 'completed',
-        rows: 20000,
-        columns: 28,
+        rows: 150000,
+        columns: 30,
         outputColumns: [
-          'customer_id', 'age', 'income', 'employment_tenure', 'credit_score',
-          'debt_to_income', 'num_accounts', 'num_inquiries', 'delinquency_status',
-          'default_probability', 'loan_amount', 'interest_rate', 'loan_term',
-          'purpose', 'region', 'employment_type', 'education', 'marital_status',
-          'home_ownership', 'monthly_income', 'debt_payments', 'checking_balance',
-          'savings_balance', 'investment_balance', 'retirement_balance',
-          'total_assets', 'total_liabilities', 'credit_history_length'
+          'transaction_id', 'customer_id', 'card_type', 'amount', 'merchant_category',
+          'merchant_country', 'transaction_date', 'transaction_time', 'time_since_last_transaction',
+          'distance_from_home', 'used_chip', 'used_pin', 'online_order', 'fraud_label',
+          'customer_age', 'customer_income', 'account_age_months', 'previous_fraud_count',
+          'total_transactions_24h', 'total_spend_24h', 'avg_transaction_amount',
+          'account_balance', 'credit_limit', 'credit_utilization', 'payment_status',
+          'delinquency_status', 'num_accounts', 'device_id', 'ip_country', 'is_fraud'
         ],
         createdAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ];
+
+    const sampleDeployments: DeploymentJob[] = [
+      {
+        id: generateId(),
+        name: 'Credit_Card_Model-prod-v1',
+        projectId,
+        modelId: modelId1,
+        containerName: 'credit-card-model-prod',
+        environment: 'prod',
+        status: 'active',
+        createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        lastDeployed: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        id: generateId(),
+        name: 'Credit_Card_Model_v2-staging',
+        projectId,
+        modelId: modelId2,
+        containerName: 'credit-card-model-staging',
+        environment: 'staging',
+        status: 'active',
+        createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+        lastDeployed: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ];
+
+    const sampleMonitoringJobs: MonitoringJob[] = [
+      {
+        id: generateId(),
+        name: 'Cancer Risk Monitoring - Drift',
+        projectId,
+        modelId: modelId1,
+        status: 'running',
+        metrics: {
+          dataDrift: 8.2,
+          modelDrift: 12.5,
+          performanceDegradation: 3.1,
+          lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        },
+        createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        lastRun: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        id: generateId(),
+        name: 'Credit_Card_Model_v2 - Drift Detection',
+        projectId,
+        modelId: modelId2,
+        status: 'running',
+        metrics: {
+          dataDrift: 5.3,
+          modelDrift: 4.8,
+          performanceDegradation: 0.8,
+          lastChecked: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+        },
+        createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+        lastRun: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+      },
+    ];
+
+    const sampleDataQualityReports: DataQualityReport[] = [
+      {
+        id: generateId(),
+        name: 'Credit Card Training Data Quality',
+        datasetId: datasetId1,
+        datasetName: 'Credit Card Training Set',
+        modelId: modelId1,
+        qualityScore: 94.2,
+        totalRecords: 500000,
+        recordsAfterExclusion: 485000,
+        issues: [
+          { variable: 'distance_from_home', issue: 'Outliers detected', severity: 'medium', suggestedTreatment: 'Cap at 95th percentile' },
+          { variable: 'amount', issue: '2.1% missing values', severity: 'low', suggestedTreatment: 'Impute with median' },
+          { variable: 'merchant_country', issue: 'Imbalanced categories', severity: 'low', suggestedTreatment: 'Group rare categories' },
+        ],
+        generatedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        id: generateId(),
+        name: 'Credit Card Validation Data Quality',
+        datasetId: datasetId2,
+        datasetName: 'Credit Card Validation Set',
+        modelId: modelId1,
+        qualityScore: 91.8,
+        totalRecords: 150000,
+        recordsAfterExclusion: 145500,
+        issues: [
+          { variable: 'customer_income', issue: '8.3% missing values', severity: 'high', suggestedTreatment: 'Impute with K-NN' },
+          { variable: 'device_id', issue: 'New categorical values', severity: 'medium', suggestedTreatment: 'Map to "OTHER"' },
+          { variable: 'used_chip', issue: 'Class imbalance 93-7', severity: 'low', suggestedTreatment: 'Monitor in production' },
+        ],
+        generatedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ];
+
+    const sampleGeneratedReports: GeneratedReport[] = [
+      {
+        id: generateId(),
+        name: 'Credit_Card_Model Performance Report - Jan 2026',
+        type: 'performance',
+        modelId: modelId1,
+        modelName: 'Credit_Card_Model',
+        datasetId: datasetId1,
+        datasetName: 'Credit Card Training Set',
+        generatedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        generatedBy: 'system',
+        status: 'final',
+        healthScore: 87,
+        fileSize: '2.4 MB',
+        tags: ['production', 'monthly', 'performance'],
+      },
+      {
+        id: generateId(),
+        name: 'Credit_Card_Model Drift Analysis - Jan 2026',
+        type: 'drift_analysis',
+        modelId: modelId1,
+        modelName: 'Credit_Card_Model',
+        datasetId: datasetId2,
+        datasetName: 'Credit Card Validation Set',
+        generatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        generatedBy: 'system',
+        status: 'final',
+        healthScore: 78,
+        fileSize: '1.8 MB',
+        tags: ['production', 'drift', 'monitoring'],
+      },
+      {
+        id: generateId(),
+        name: 'Credit_Card_Model_v2 Stability Report - Jan 2026',
+        type: 'stability',
+        modelId: modelId2,
+        modelName: 'Credit_Card_Model_v2',
+        datasetId: datasetId1,
+        datasetName: 'Credit Card Training Set',
+        generatedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+        generatedBy: 'system',
+        status: 'final',
+        healthScore: 92,
+        fileSize: '2.1 MB',
+        tags: ['staging', 'stability', 'comparison'],
+      },
+      {
+        id: generateId(),
+        name: 'Data Quality Report - Live Production',
+        type: 'data_quality',
+        modelId: modelId1,
+        modelName: 'Credit_Card_Model',
+        generatedAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+        generatedBy: 'system',
+        status: 'final',
+        healthScore: 85,
+        fileSize: '1.2 MB',
+        tags: ['realtime', 'production', 'quality'],
+      },
+    ];
+
+    const sampleSchedulingJobs: SchedulingJob[] = [
+      {
+        id: generateId(),
+        name: 'Daily Performance Report - Credit_Card_Model',
+        type: 'report_generation',
+        reportType: 'performance',
+        modelId: modelId1,
+        modelName: 'Credit_Card_Model',
+        scheduleType: 'daily',
+        scheduleTime: '09:00',
+        enabled: true,
+        lastRun: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+        nextRun: new Date(Date.now() + 21 * 60 * 60 * 1000).toISOString(),
+        lastStatus: 'success',
+        runCount: 45,
+        createdAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
+        createdBy: 'admin@company.com',
+      },
+      {
+        id: generateId(),
+        name: 'Weekly Drift Analysis',
+        type: 'report_generation',
+        reportType: 'drift_analysis',
+        modelId: modelId1,
+        modelName: 'Credit_Card_Model',
+        scheduleType: 'weekly',
+        scheduleTime: '18:00',
+        weekdays: [1, 3, 5], // Mon, Wed, Fri
+        enabled: true,
+        lastRun: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        nextRun: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        lastStatus: 'success',
+        runCount: 12,
+        createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+        createdBy: 'admin@company.com',
+      },
+      {
+        id: generateId(),
+        name: 'Monthly Data Quality Audit',
+        type: 'report_generation',
+        reportType: 'data_quality',
+        modelId: modelId1,
+        modelName: 'Credit_Card_Model',
+        scheduleType: 'monthly',
+        scheduleTime: '22:00',
+        dayOfMonth: 1,
+        enabled: true,
+        lastRun: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
+        nextRun: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
+        lastStatus: 'success',
+        runCount: 3,
+        createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+        createdBy: 'admin@company.com',
       },
     ];
 
@@ -581,12 +794,12 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         projectId,
         projectName: sampleProject.name,
         workflowType: 'model_monitoring',
-        summary: 'Model Import: Credit Risk Classifier v1 imported successfully',
+        summary: 'Model Import: Credit_Card_Model v1.0.0 imported successfully',
         steps: [
           {
             stepName: 'Model Import',
             status: 'completed',
-            details: 'Model "Credit Risk Classifier v1" (Version: 1.0.0, Type: classification, Stage: production) added to repository',
+            details: 'Model "Credit_Card_Model" (Version: 1.0.0, Type: classification, Stage: production) added to repository',
             timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
           },
         ],
@@ -599,18 +812,42 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         projectId,
         projectName: sampleProject.name,
         workflowType: 'data_pipeline',
-        summary: 'Data Ingestion: 2 datasets ingested successfully',
+        summary: 'Data Ingestion: 2 datasets ingested and quality checked',
         steps: [
           {
             stepName: 'Data Ingestion',
             status: 'completed',
-            details: '2 dataset(s) ingested and configured: Training Dataset Q4 2024, Validation Dataset Q4 2024',
+            details: '2 dataset(s) ingested: Credit Card Training Set (500K rows), Credit Card Validation Set (150K rows)',
             timestamp: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
           },
         ],
         scheduledJobs: [],
         createdAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
         completedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        id: generateId(),
+        projectId,
+        projectName: sampleProject.name,
+        workflowType: 'model_monitoring',
+        summary: 'Model Deployment: Credit_Card_Model deployed to production',
+        steps: [
+          {
+            stepName: 'Build',
+            status: 'completed',
+            details: 'Docker image built successfully',
+            timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            stepName: 'Deploy',
+            status: 'completed',
+            details: 'Model deployed to prod environment',
+            timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        scheduledJobs: [],
+        createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        completedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
       },
     ];
 
@@ -619,17 +856,40 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       projects: [sampleProject],
       registryModels: sampleModels,
       ingestionJobs: sampleDatasets,
+      deploymentJobs: sampleDeployments,
+      monitoringJobs: sampleMonitoringJobs,
+      dataQualityReports: sampleDataQualityReports,
+      generatedReports: sampleGeneratedReports,
+      schedulingJobs: sampleSchedulingJobs,
       workflowLogs: sampleWorkflowLogs,
     };
   };
 
   // Initialize state with sample data immediately for first render
   const [state, setState] = useState<typeof initialState>(() => {
+    console.log('🔧 Initializing GlobalContext state...');
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
+        console.log('📦 Found stored data in localStorage');
         const parsed = JSON.parse(stored);
         if (parsed && typeof parsed === 'object' && parsed.projects) {
+          // Check if the data is actually empty (empty arrays everywhere)
+          const isEmpty = (
+            (!parsed.projects || parsed.projects.length === 0) &&
+            (!parsed.registryModels || parsed.registryModels.length === 0) &&
+            (!parsed.generatedReports || parsed.generatedReports.length === 0) &&
+            (!parsed.monitoringJobs || parsed.monitoringJobs.length === 0)
+          );
+          
+          if (isEmpty) {
+            console.log('⚠️ Stored data is empty, loading sample data instead');
+            const sampleData = initializeSampleData();
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
+            return sampleData;
+          }
+          
+          console.log('✅ Using stored data from localStorage');
           // Merge with initial state to ensure all required properties exist
           const mergedState = {
             ...initialState,
@@ -671,11 +931,28 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
       }
     } catch (err) {
-      console.error('Failed to load state from localStorage during initialization:', err);
+      console.error('❌ Failed to load state from localStorage during initialization:', err);
     }
     // Return sample data if no valid stored data
-    return initializeSampleData();
+    console.log('🎲 No valid stored data, loading sample data');
+    const sampleData = initializeSampleData();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
+    return sampleData;
   });
+
+  // Log initial state for debugging
+  useEffect(() => {
+    console.log('📊 GlobalContext state initialized:', {
+      projects: state.projects.length,
+      models: state.registryModels.length,
+      datasets: state.ingestionJobs.length,
+      deployments: state.deploymentJobs.length,
+      monitoring: state.monitoringJobs.length,
+      reports: state.generatedReports.length,
+      dataQuality: state.dataQualityReports.length,
+      scheduling: state.schedulingJobs.length
+    });
+  }, []);
 
   // Load from localStorage on mount and update if needed
   useEffect(() => {
@@ -1377,6 +1654,25 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
+  // Utility Functions
+  const loadSampleData = () => {
+    console.log('🔄 loadSampleData called');
+    const sampleData = initializeSampleData();
+    console.log('✅ Sample data generated:', {
+      projects: sampleData.projects.length,
+      models: sampleData.registryModels.length,
+      datasets: sampleData.ingestionJobs.length,
+      deployments: sampleData.deploymentJobs.length,
+      monitoring: sampleData.monitoringJobs.length,
+      reports: sampleData.generatedReports.length,
+      dataQuality: sampleData.dataQualityReports.length,
+      scheduling: sampleData.schedulingJobs.length
+    });
+    setState(sampleData);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
+    console.log('💾 Sample data saved to localStorage and state updated');
+  };
+
   const value: GlobalContextType = {
     projects: state.projects || [],
     createProject,
@@ -1456,6 +1752,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     getWorkflowLogsByProject,
     currentWorkflow: state.currentWorkflow || {},
     setCurrentWorkflow,
+    loadSampleData,
   };
 
   return <GlobalContext.Provider value={value}>{children}</GlobalContext.Provider>;
