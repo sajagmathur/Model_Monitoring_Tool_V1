@@ -575,11 +575,51 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       },
     ];
 
+    const sampleWorkflowLogs: WorkflowLog[] = [
+      {
+        id: generateId(),
+        projectId,
+        projectName: sampleProject.name,
+        workflowType: 'model_monitoring',
+        summary: 'Model Import: Credit Risk Classifier v1 imported successfully',
+        steps: [
+          {
+            stepName: 'Model Import',
+            status: 'completed',
+            details: 'Model "Credit Risk Classifier v1" (Version: 1.0.0, Type: classification, Stage: production) added to repository',
+            timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        scheduledJobs: [],
+        createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        completedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        id: generateId(),
+        projectId,
+        projectName: sampleProject.name,
+        workflowType: 'data_pipeline',
+        summary: 'Data Ingestion: 2 datasets ingested successfully',
+        steps: [
+          {
+            stepName: 'Data Ingestion',
+            status: 'completed',
+            details: '2 dataset(s) ingested and configured: Training Dataset Q4 2024, Validation Dataset Q4 2024',
+            timestamp: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        scheduledJobs: [],
+        createdAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
+        completedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ];
+
     return {
       ...initialState,
       projects: [sampleProject],
       registryModels: sampleModels,
       ingestionJobs: sampleDatasets,
+      workflowLogs: sampleWorkflowLogs,
     };
   };
 
@@ -590,7 +630,26 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed && typeof parsed === 'object' && parsed.projects) {
-          return parsed;
+          // Merge with initial state to ensure all required properties exist
+          return {
+            ...initialState,
+            ...parsed,
+            // Ensure arrays are properly initialized
+            projects: parsed.projects || [],
+            ingestionJobs: parsed.ingestionJobs || [],
+            preparationJobs: parsed.preparationJobs || [],
+            registryModels: parsed.registryModels || [],
+            deploymentJobs: parsed.deploymentJobs || [],
+            inferencingJobs: parsed.inferencingJobs || [],
+            monitoringJobs: parsed.monitoringJobs || [],
+            pipelineJobs: parsed.pipelineJobs || [],
+            reportConfigurations: parsed.reportConfigurations || [],
+            generatedReports: parsed.generatedReports || [],
+            dataQualityReports: parsed.dataQualityReports || [],
+            schedulingJobs: parsed.schedulingJobs || [],
+            workflowLogs: parsed.workflowLogs || [],
+            currentWorkflow: parsed.currentWorkflow || {},
+          };
         }
       }
     } catch (err) {
@@ -609,23 +668,44 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         
         // Validate parsed data has required properties
         if (parsed && typeof parsed === 'object' && parsed.projects) {
+          // Merge with initial state to ensure all required properties exist
+          const mergedState = {
+            ...initialState,
+            ...parsed,
+            // Ensure arrays are properly initialized
+            projects: parsed.projects || [],
+            ingestionJobs: parsed.ingestionJobs || [],
+            preparationJobs: parsed.preparationJobs || [],
+            registryModels: parsed.registryModels || [],
+            deploymentJobs: parsed.deploymentJobs || [],
+            inferencingJobs: parsed.inferencingJobs || [],
+            monitoringJobs: parsed.monitoringJobs || [],
+            pipelineJobs: parsed.pipelineJobs || [],
+            reportConfigurations: parsed.reportConfigurations || [],
+            generatedReports: parsed.generatedReports || [],
+            dataQualityReports: parsed.dataQualityReports || [],
+            schedulingJobs: parsed.schedulingJobs || [],
+            workflowLogs: parsed.workflowLogs || [],
+            currentWorkflow: parsed.currentWorkflow || {},
+          };
+          
           // Data Migration: Fix models without projectId
-          if (parsed.registryModels && Array.isArray(parsed.registryModels) && 
-              parsed.registryModels.length > 0 && parsed.projects && Array.isArray(parsed.projects) && 
-              parsed.projects.length > 0) {
-            const firstProjectId = parsed.projects[0].id;
-            const migratedModels = parsed.registryModels.map((model: any) => ({
+          if (mergedState.registryModels && Array.isArray(mergedState.registryModels) && 
+              mergedState.registryModels.length > 0 && mergedState.projects && Array.isArray(mergedState.projects) && 
+              mergedState.projects.length > 0) {
+            const firstProjectId = mergedState.projects[0].id;
+            const migratedModels = mergedState.registryModels.map((model: any) => ({
               ...model,
               projectId: model.projectId || firstProjectId,
             }));
             
             setState({
-              ...parsed,
+              ...mergedState,
               registryModels: migratedModels,
             });
-          } else if (state !== parsed) {
-            // Update state if it's different from what we loaded
-            setState(parsed);
+          } else {
+            // Update state with merged data
+            setState(mergedState);
           }
         }
       }
@@ -1178,16 +1258,43 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   // Workflow Logs
   const createWorkflowLog = (log: Omit<WorkflowLog, 'id' | 'createdAt'>): WorkflowLog => {
-    const newLog: WorkflowLog = {
-      ...log,
-      id: generateId(),
-      createdAt: new Date().toISOString(),
-    };
-    setState(prev => ({
-      ...prev,
-      workflowLogs: [...(prev.workflowLogs || []), newLog],
-    }));
-    return newLog;
+    try {
+      const newLog: WorkflowLog = {
+        ...log,
+        id: generateId(),
+        createdAt: new Date().toISOString(),
+      };
+      
+      console.log('Creating workflow log:', newLog.summary);
+      
+      setState(prev => {
+        const currentLogs = prev.workflowLogs || [];
+        return {
+          ...prev,
+          workflowLogs: [...currentLogs, newLog],
+        };
+      });
+      return newLog;
+    } catch (error) {
+      console.error('Error creating workflow log:', error);
+      // Return a minimal log entry in case of error
+      const fallbackLog: WorkflowLog = {
+        id: generateId(),
+        projectId: log.projectId || 'unknown',
+        projectName: log.projectName || 'Unknown Project',
+        workflowType: log.workflowType || 'model_monitoring',
+        summary: log.summary || 'Workflow step completed',
+        steps: [],
+        scheduledJobs: [],
+        createdAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      };
+      setState(prev => ({
+        ...prev,
+        workflowLogs: [...(prev.workflowLogs || []), fallbackLog],
+      }));
+      return fallbackLog;
+    }
   };
 
   const deleteWorkflowLog = (id: string) => {

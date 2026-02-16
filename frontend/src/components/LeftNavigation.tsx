@@ -30,7 +30,7 @@ const LeftNavigation: React.FC = () => {
   const location = useLocation();
   const { user } = useAuth();
   const { theme } = useTheme();
-  const { ingestionJobs, projects, registryModels } = useGlobal();
+  const { ingestionJobs = [], projects = [], registryModels = [] } = useGlobal();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Define navigation items
