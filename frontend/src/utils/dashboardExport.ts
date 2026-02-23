@@ -301,7 +301,7 @@ export async function exportDashboardAsPPT(options: ExportOptions): Promise<void
     if (metrics.bad_rate !== undefined) addRow('Bad Rate', (metrics.bad_rate*100).toFixed(2)+'%', '', '', false);
     if (options.latestMetric.volume) addRow('Volume', options.latestMetric.volume.toLocaleString(), '', '', true);
     kpiSlide.addTable(rows, { x:1.0, y:0.8, w:W-2.0, colW:[3.5,2.2,2.0,3.0], fontSize:14,
-      border:{pt:'1', color:'D1D5DB'}, rowH:0.55, align:'left', valign:'middle' });
+      border:{pt:1, color:'D1D5DB'}, rowH:0.55, align:'left', valign:'middle' });
   }
 
   if (options.includeSections.ragStatus) {

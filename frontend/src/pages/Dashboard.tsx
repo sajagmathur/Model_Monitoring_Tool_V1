@@ -1227,7 +1227,7 @@ const Dashboard: React.FC = () => {
                   
                   setExporting(true);
                   try {
-                    const selectedModel = bankingModels.find(m => m.id === selectedBankingModel);
+                    const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
                     const modelMetrics = bankingMetrics.filter(m => m.model_id === selectedBankingModel);
                     const latestVintage = [...new Set(bankingMetrics.map(m => m.vintage))].sort().reverse()[0];
                     const latestMetric = bankingMetrics.find(
