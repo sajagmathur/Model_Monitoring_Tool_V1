@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   CheckCircle2, AlertCircle, ChevronRight, Upload, Plus, X, Eye, Download,
-  Shield, AlertTriangle, Filter, BarChart3, TrendingUp, CheckCircle, XCircle,
-  Activity, Database, Brain, Zap, Beaker, Save, Calendar, Clock, FileText
+  Shield, BarChart3, TrendingUp, CheckCircle, Database, Zap, Save, Calendar, Clock, FileText
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlobal, IngestionJob } from '../contexts/GlobalContext';
@@ -1024,12 +1023,6 @@ const StepIndicator: React.FC<{ steps: WorkflowStep[]; currentStep: number }> = 
 
 // Data Quality Metrics Interface
 interface DataQualityMetrics {
-  missingValueStats: Array<{
-    variable: string;
-    type: string;
-    missing: number;
-    missingPercent: number;
-  }>;
   statisticalSummary: Array<{
     variable: string;
     mean: number;
@@ -1046,19 +1039,6 @@ interface DataQualityMetrics {
     topCategory: string;
     topPercent: number;
   }>;
-  outlierDetection: Array<{
-    variable: string;
-    outlierCount: number;
-    outlierPercent: number;
-    lowerBound: number;
-    upperBound: number;
-  }>;
-  scoreReplication: {
-    rmse: number;
-    maxDiff: number;
-    meanDiff: number;
-    correlation: number;
-  };
   volumeMetrics: Array<{
     segment: string;
     count: number;
@@ -1066,20 +1046,6 @@ interface DataQualityMetrics {
     baselineEventRate: number;
     delta: number;
   }>;
-}
-
-// AI Treatment Recommendation Interface
-interface TreatmentRecommendation {
-  variable: string;
-  issue: string;
-  severity: 'high' | 'medium' | 'low';
-  recommendations: Array<{
-    id: string;
-    method: string;
-    description: string;
-    impact: string;
-  }>;
-  selected?: string;
 }
 
 const DataQualityStep: React.FC<{ 
@@ -1091,13 +1057,9 @@ const DataQualityStep: React.FC<{
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const { addIngestionJob, registryModels, createDataQualityReport, createGeneratedReport, createReportConfiguration, reportConfigurations, cloneDatasetAsResolved, ingestionJobs, projects, createWorkflowLog } = useGlobal();
-  const [lockWorkflow, setLockWorkflow] = useState(false);
   
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'missing' | 'distributions' | 'outliers' | 'replication' | 'volume' | 'ai-treatment'>('overview');
-  const [aiAnalyzing, setAiAnalyzing] = useState(false);
-  const [aiRecommendations, setAiRecommendations] = useState<TreatmentRecommendation[]>([]);
-  const [applyingTreatment, setApplyingTreatment] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'distributions' | 'volume'>('overview');
   
   // Initialize state from persisted workflow data or use defaults
   const [metricsMap, setMetricsMap] = useState<Record<string, any>>(
@@ -1196,17 +1158,6 @@ const DataQualityStep: React.FC<{
     const numericColumns = columns.slice(0, Math.min(3, columns.length));
     const categoricalColumns = columns.slice(Math.min(3, columns.length), Math.min(6, columns.length));
     
-    // Generate missing value stats for real columns
-    const missingValueStats = columns.slice(0, Math.min(4, columns.length)).map((col: string, idx: number) => {
-      const isNumeric = idx < 3;
-      return {
-        variable: col,
-        type: isNumeric ? 'numeric' : 'categorical',
-        missing: Math.floor((dataset.rows || 1000) * (0.01 + idx * 0.005)),
-        missingPercent: 1.0 + idx * 0.5,
-      };
-    });
-
     // Generate statistical summary for numeric columns
     const statisticalSummary = numericColumns.map((col: string, idx: number) => {
       const baseValue = 100 + idx * 500;
@@ -1230,29 +1181,9 @@ const DataQualityStep: React.FC<{
       topPercent: 40 + idx * 10,
     }));
 
-    // Generate outlier detection for numeric columns
-    const outlierDetection = numericColumns.map((col: string, idx: number) => {
-      const baseValue = 100 + idx * 500;
-      return {
-        variable: col,
-        outlierCount: Math.floor((dataset.rows || 1000) * (0.006 + idx * 0.004)),
-        outlierPercent: 0.6 + idx * 0.4,
-        lowerBound: baseValue * 0.1,
-        upperBound: baseValue * 2.5,
-      };
-    });
-
     return {
-      missingValueStats,
       statisticalSummary,
       categoricalDistributions,
-      outlierDetection,
-      scoreReplication: {
-        rmse: 0.0012,
-        maxDiff: 0.0045,
-        meanDiff: 0.0003,
-        correlation: 0.9987,
-      },
       volumeMetrics: [
         { segment: 'Q1 2024', count: Math.floor((dataset.rows || 1000) * 0.25), eventRate: 3.2, baselineEventRate: 3.0, delta: 0.2 },
         { segment: 'Q2 2024', count: Math.floor((dataset.rows || 1000) * 0.28), eventRate: 3.5, baselineEventRate: 3.0, delta: 0.5 },
@@ -1264,121 +1195,10 @@ const DataQualityStep: React.FC<{
 
   const metrics = selectedDataset ? getComprehensiveMetrics(selectedDataset) : null;
 
-  // AI Analysis Function
-  const handleAIAnalysis = async () => {
-    if (!selectedDataset) return;
-    
-    setAiAnalyzing(true);
-    // Simulate AI analysis
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const recommendations: TreatmentRecommendation[] = [
-      {
-        variable: 'age',
-        issue: 'Missing values detected (2.1%)',
-        severity: 'medium',
-        recommendations: [
-          { id: 'age_mean', method: 'Mean Imputation', description: 'Fill with mean age (42.5)', impact: 'Low bias, maintains distribution' },
-          { id: 'age_median', method: 'Median Imputation', description: 'Fill with median age (42)', impact: 'Robust to outliers' },
-          { id: 'age_knn', method: 'KNN Imputation', description: 'Predict from similar records', impact: 'Most accurate, computationally expensive' },
-        ],
-      },
-      {
-        variable: 'income',
-        issue: 'Outliers detected (2.25%)',
-        severity: 'high',
-        recommendations: [
-          { id: 'income_cap', method: 'Winsorization', description: 'Cap at 1st and 99th percentiles', impact: 'Reduces extreme values' },
-          { id: 'income_log', method: 'Log Transformation', description: 'Apply log transform to normalize', impact: 'Handles skewness' },
-          { id: 'income_remove', method: 'Remove Outliers', description: 'Drop records beyond 3 std deviations', impact: 'Data loss but cleaner' },
-        ],
-      },
-      {
-        variable: 'credit_score',
-        issue: 'Missing values (1.55%) and outliers (0.4%)',
-        severity: 'high',
-        recommendations: [
-          { id: 'credit_model', method: 'Predictive Imputation', description: 'Train model to predict missing scores', impact: 'Most sophisticated approach' },
-          { id: 'credit_median', method: 'Median + Capping', description: 'Fill missing with median, cap outliers', impact: 'Balanced approach' },
-        ],
-      },
-    ];
-    
-    setAiRecommendations(recommendations);
-    setAiAnalyzing(false);
-  };
-
-  // Apply Treatment Function
-  const handleApplyTreatments = async () => {
-    if (!selectedDataset) return;
-    
-    const selectedTreatments = aiRecommendations.filter(r => r.selected);
-    if (selectedTreatments.length === 0) {
-      alert('Please select at least one treatment to apply');
-      return;
-    }
-    
-    setApplyingTreatment(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Create treated dataset
-    const treatedDatasetData = {
-      name: `${selectedDataset.name} (AI Treated)`,
-      projectId: projectId,
-      modelId: (selectedDataset as any).modelId || '',
-      dataSource: 'desktop' as const,
-      source: 'treated' as const,
-      status: 'active' as const,
-      uploadedAt: new Date().toISOString(),
-      rows: selectedDataset.rows,
-      columns: selectedDataset.columns,
-      outputColumns: (selectedDataset as any).outputColumns || [],
-      schema: selectedDataset.schema,
-      treatmentMetadata: {
-        originalDatasetId: selectedDataset.id,
-        treatments: selectedTreatments.map(t => ({
-          variable: t.variable,
-          method: t.recommendations.find(r => r.id === t.selected)?.method || '',
-          appliedAt: new Date().toISOString(),
-        })),
-        treatedBy: 'AI Agent',
-        treatedAt: new Date().toISOString(),
-      },
-    };
-    
-    // Add to global ingestion jobs
-    const addedTreatedDataset = addIngestionJob(treatedDatasetData);
-    
-    // Add to current workflow's tracked datasets
-    if (workflow.dataIngestionConfig) {
-      const track = ((selectedDataset as any).track || 'train') as unknown as any;
-      const trackDatasets = workflow.dataIngestionConfig.trackDatasets as Record<string, any>;
-      if (!trackDatasets[track]) {
-        trackDatasets[track] = [];
-      }
-      trackDatasets[track].push({
-        id: addedTreatedDataset.id,
-        name: addedTreatedDataset.name,
-        rows: addedTreatedDataset.rows || 0,
-        columns: addedTreatedDataset.columns || 0,
-        track,
-        schema: addedTreatedDataset.schema,
-      });
-    }
-    
-    setApplyingTreatment(false);
-    alert(`Successfully created treated dataset: ${addedTreatedDataset.name}`);
-    setAiRecommendations([]);
-  };
-
   const tabs = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'missing', label: 'Missing Values', icon: AlertTriangle },
     { id: 'distributions', label: 'Distributions', icon: TrendingUp },
-    { id: 'outliers', label: 'Outliers', icon: Filter },
-    { id: 'replication', label: 'Score Replication', icon: Activity },
     { id: 'volume', label: 'Volume/Event Rate', icon: Database },
-    { id: 'ai-treatment', label: 'AI Treatment', icon: Brain },
   ];
 
   // Generate comprehensive data quality analysis for all datasets
@@ -1398,7 +1218,7 @@ const DataQualityStep: React.FC<{
         : ['Variable_1', 'Variable_2', 'Variable_3', 'Variable_4']; // Fallback only if no columns
       
       const mockIssues = columns.slice(0, Math.min(4, columns.length)).map((col: string, idx: number) => {
-        const issueTypes = ['missing', 'outlier', 'inconsistency'];
+        const issueTypes = ['inconsistency', 'duplication', 'format_error'];
         const severities = ['high', 'medium', 'low'];
         const issueType = issueTypes[idx % 3];
         const severity = severities[idx % 3];
@@ -1407,21 +1227,10 @@ const DataQualityStep: React.FC<{
 
         return {
           variable: col,
-          type: issueType as 'missing' | 'outlier' | 'inconsistency',
+          type: issueType as 'inconsistency' | 'duplication' | 'format_error',
           severity: severity as 'high' | 'medium' | 'low',
           count,
           percent,
-          aiSuggestions: [
-            {
-              variable: col,
-              issue: `${issueType} detected`,
-              severity: severity as 'high' | 'medium' | 'low',
-              method: issueType === 'missing' ? 'Mean Imputation' : issueType === 'outlier' ? 'Winsorization' : 'Pattern Correction',
-              description: `Apply ${issueType === 'missing' ? 'statistical imputation' : issueType === 'outlier' ? 'outlier capping' : 'consistency correction'}`,
-              impact: 'Improves data quality and model performance',
-            }
-          ],
-          selectedMethod: undefined,
           resolved: false,
         };
       });
@@ -1444,33 +1253,6 @@ const DataQualityStep: React.FC<{
 
   // Get selected model for report generation
   const selectedModel = registryModels.find(m => m.id === workflow.selectedModel);
-
-  // Auto-create report configuration when workflow is locked
-  useEffect(() => {
-    if (lockWorkflow && allDatasets.length > 0 && selectedModel) {
-      const datasetNames = allDatasets.map(d => d.name).join('_');
-      const configName = `Data_Quality_Report_${selectedModel.name}_${datasetNames}`.replace(/\\s+/g, '_');
-      
-      // Check if config already exists
-      const existingConfig = reportConfigurations?.find(c => c.name === configName);
-      
-      if (!existingConfig) {
-        // Create new report configuration automatically
-        createReportConfiguration({
-          name: configName,
-          modelId: selectedModel.id,
-          modelName: `${selectedModel.name} v${selectedModel.version}`,
-          modelType: 'classification',
-          baselineDatasetId: allDatasets[0]?.id || '',
-          baselineDatasetName: allDatasets[0]?.name || '',
-          referenceDatasetId: allDatasets[allDatasets.length - 1]?.id || '',
-          referenceDatasetName: allDatasets[allDatasets.length - 1]?.name || '',
-          metricsToMonitor: ['quality_score', 'data_completeness', 'data_accuracy'],
-          driftMetrics: [],
-        });
-      }
-    }
-  }, [lockWorkflow, allDatasets, selectedModel, reportConfigurations, createReportConfiguration]);
 
   const handleDownloadReport = async () => {
     if (Object.keys(metricsMap).length === 0 || !selectedModel) return;
@@ -1523,7 +1305,6 @@ const DataQualityStep: React.FC<{
           })),
         };
       }).filter(Boolean) as any[],
-      lockWorkflow,
     };
 
     // Store as immutable artifact
@@ -1564,31 +1345,6 @@ const DataQualityStep: React.FC<{
       immutable: true,
     });
 
-    // Create OR update report configuration if lock workflow is enabled
-    if (lockWorkflow) {
-      const existingConfig = reportConfigurations?.find(
-        c => c.name === configName
-      );
-
-      if (!existingConfig && baselineDatasetIds.length > 0) {
-        const resolvedDatasetId = resolvedDatasetIds.length > 0 ? resolvedDatasetIds[0] : baselineDatasetIds[baselineDatasetIds.length - 1];
-        
-        createReportConfiguration({
-          name: configName,
-          type: 'data_quality', // TYPE-LOCK for Data Quality
-          modelId: selectedModel.id,
-          modelName: `${selectedModel.name} v${selectedModel.version}`,
-          modelType: (selectedModel.modelType === 'classification' ? 'classification' : selectedModel.modelType === 'regression' ? 'regression' : 'classification') as 'classification' | 'regression' | 'timeseries',
-          baselineDatasetId: baselineDatasetIds[0],
-          baselineDatasetName: allDatasets.find(d => d.id === baselineDatasetIds[0])?.name || 'Baseline',
-          referenceDatasetId: resolvedDatasetId,
-          referenceDatasetName: allDatasets.find(d => d.id === resolvedDatasetId)?.name || 'Reference',
-          metricsToMonitor: ['quality_score', 'issue_count', 'exclusion_rate'],
-          driftMetrics: [],
-        });
-      }
-    }
-
     setGeneratingPDF(false);
     
     // Log data quality report generation
@@ -1602,7 +1358,7 @@ const DataQualityStep: React.FC<{
       ));
     }
     
-    alert(`✓ Data Quality Report generated and saved to Reports section!${lockWorkflow ? '\n✓ Configuration created for scheduling.' : ''}`);
+    alert(`✓ Data Quality Report generated and saved to Reports section!`);
   };
 
   const handleExportReport = () => {
@@ -1861,7 +1617,6 @@ const DataQualityStep: React.FC<{
                     }`}
                     onClick={() => {
                       setSelectedDatasetId(dataset.id);
-                      setAiRecommendations([]);
                     }}
                   >
                     <div className="flex items-start justify-between mb-2">
@@ -1999,65 +1754,6 @@ const DataQualityStep: React.FC<{
                 </div>
               )}
 
-              {/* Missing Values Tab */}
-              {activeTab === 'missing' && (
-                <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                    Missing Value Analysis
-                  </h4>
-                  {metrics.missingValueStats && metrics.missingValueStats.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                            <th className={`text-left py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Variable</th>
-                            <th className={`text-left py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Type</th>
-                            <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Missing Count</th>
-                            <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Missing %</th>
-                            <th className={`text-center py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {metrics.missingValueStats.map((stat, idx) => (
-                            <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                              <td className={`py-3 px-4 font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                {stat.variable}
-                              </td>
-                              <td className={`py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.type}
-                              </td>
-                              <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.missing}
-                              </td>
-                              <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.missingPercent.toFixed(2)}%
-                              </td>
-                              <td className="py-3 px-4 text-center">
-                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs ${
-                                  stat.missingPercent < 1
-                                    ? isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
-                                    : stat.missingPercent < 5
-                                    ? isDark ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
-                                    : isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
-                                }`}>
-                                  {stat.missingPercent < 1 ? 'Good' : stat.missingPercent < 5 ? 'Warning' : 'Critical'}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className={`p-6 rounded-lg text-center ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-                      <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        No missing value data available
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Distributions Tab */}
               {activeTab === 'distributions' && (
                 <div className="space-y-6">
@@ -2143,106 +1839,6 @@ const DataQualityStep: React.FC<{
                 </div>
               )}
 
-              {/* Outliers Tab */}
-              {activeTab === 'outliers' && (
-                <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                    Outlier Detection
-                  </h4>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <th className={`text-left py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Variable</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Outlier Count</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Outlier %</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Lower Bound</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Upper Bound</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metrics.outlierDetection.map((outlier, idx) => (
-                          <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                            <td className={`py-3 px-4 font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                              {outlier.variable}
-                                </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {outlier.outlierCount}
-                            </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {outlier.outlierPercent.toFixed(2)}%
-                            </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {outlier.lowerBound.toLocaleString()}
-                            </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {outlier.upperBound.toLocaleString()}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Score Replication Tab */}
-              {activeTab === 'replication' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      Score Replication Quality
-                    </h4>
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>RMSE</span>
-                        <span className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                          {metrics.scoreReplication.rmse.toFixed(4)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Max Difference</span>
-                        <span className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                          {metrics.scoreReplication.maxDiff.toFixed(4)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Mean Difference</span>
-                        <span className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                          {metrics.scoreReplication.meanDiff.toFixed(4)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Correlation</span>
-                        <span className={`text-lg font-semibold ${isDark ? 'text-green-400' : 'text-green-600'}`}>
-                          {metrics.scoreReplication.correlation.toFixed(4)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className={`mt-6 p-4 rounded-lg ${isDark ? 'bg-green-500/10' : 'bg-green-50'}`}>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className={`${isDark ? 'text-green-400' : 'text-green-600'}`} size={20} />
-                        <span className={`font-medium ${isDark ? 'text-green-400' : 'text-green-700'}`}>
-                          Excellent Replication Quality
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      Interpretation
-                    </h4>
-                    <ul className={`space-y-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                      <li>✓ RMSE &lt; 0.02: Scores replicate accurately</li>
-                      <li>✓ Correlation &gt; 0.99: Strong agreement</li>
-                      <li>✓ Mean difference near 0: No systematic bias</li>
-                      <li>✓ Model execution validated successfully</li>
-                    </ul>
-                  </div>
-                </div>
-              )}
-
               {/* Volume/Event Rate Tab */}
               {activeTab === 'volume' && (
                 <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -2293,160 +1889,6 @@ const DataQualityStep: React.FC<{
                       </tbody>
                     </table>
                   </div>
-                </div>
-              )}
-
-              {/* AI Treatment Tab */}
-              {activeTab === 'ai-treatment' && (
-                <div className="space-y-6">
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-500/30' : 'bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200'}`}>
-                    <div className="flex items-center gap-3 mb-4">
-                      <Brain className={`${isDark ? 'text-purple-400' : 'text-purple-600'}`} size={32} />
-                      <div>
-                        <h4 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                          AI-Powered Dataset Treatment
-                        </h4>
-                        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                          Analyze and apply intelligent transformations to improve data quality
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <button
-                      onClick={handleAIAnalysis}
-                      disabled={aiAnalyzing}
-                      className={`w-full px-6 py-3 rounded-lg flex items-center justify-center gap-2 font-medium ${
-                        isDark ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'
-                      } ${aiAnalyzing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      {aiAnalyzing ? (
-                        <>
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
-                          Analyzing Dataset...
-                        </>
-                      ) : (
-                        <>
-                          <Zap size={20} />
-                          Run AI Analysis
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {aiRecommendations.length > 0 && (
-                    <>
-                      <div className="space-y-4">
-                        {aiRecommendations.map((rec) => (
-                          <div
-                            key={rec.variable}
-                            className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
-                          >
-                            <div className="flex items-start justify-between mb-4">
-                              <div>
-                                <h5 className={`font-semibold flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                  <Beaker size={18} />
-                                  {rec.variable}
-                                </h5>
-                                <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                                  {rec.issue}
-                                </p>
-                              </div>
-                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                                rec.severity === 'high'
-                                  ? isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
-                                  : rec.severity === 'medium'
-                                  ? isDark ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
-                                  : isDark ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'
-                              }`}>
-                                {rec.severity.toUpperCase()}
-                              </span>
-                            </div>
-
-                            <div className="space-y-2">
-                              <p className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                Recommended Treatments:
-                              </p>
-                              {rec.recommendations.map((treatment) => (
-                                <label
-                                  key={treatment.id}
-                                  className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition ${
-                                    rec.selected === treatment.id
-                                      ? isDark ? 'bg-blue-500/20 border border-blue-500/50' : 'bg-blue-50 border border-blue-200'
-                                      : isDark ? 'bg-slate-700/50 hover:bg-slate-700' : 'bg-slate-50 hover:bg-slate-100'
-                                  }`}
-                                >
-                                  <input
-                                    type="radio"
-                                    name={`treatment-${rec.variable}`}
-                                    checked={rec.selected === treatment.id}
-                                    onChange={() => {
-                                      const updatedRecs = aiRecommendations.map(r =>
-                                        r.variable === rec.variable ? { ...r, selected: treatment.id } : r
-                                      );
-                                      setAiRecommendations(updatedRecs);
-                                    }}
-                                    className="mt-1"
-                                  />
-                                  <div className="flex-1">
-                                    <div className={`font-medium text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                      {treatment.method}
-                                    </div>
-                                    <div className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                                      {treatment.description}
-                                    </div>
-                                    <div className={`text-xs mt-1 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
-                                      Impact: {treatment.impact}
-                                    </div>
-                                  </div>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h5 className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                              Apply Selected Treatments
-                            </h5>
-                            <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                              This will create a new treated dataset that will appear in the Datasets section
-                            </p>
-                          </div>
-                          <button
-                            onClick={handleApplyTreatments}
-                            disabled={applyingTreatment || aiRecommendations.filter(r => r.selected).length === 0}
-                            className={`px-6 py-3 rounded-lg flex items-center gap-2 font-medium ${
-                              isDark ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-green-500 hover:bg-green-600 text-white'
-                            } ${(applyingTreatment || aiRecommendations.filter(r => r.selected).length === 0) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                          >
-                            {applyingTreatment ? (
-                              <>
-                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
-                                Applying...
-                              </>
-                            ) : (
-                              <>
-                                <CheckCircle2 size={20} />
-                                Apply Treatments
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {aiRecommendations.length === 0 && !aiAnalyzing && (
-                    <div className={`p-8 rounded-lg border text-center ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                      <Brain className={`mx-auto mb-3 ${isDark ? 'text-slate-600' : 'text-slate-400'}`} size={48} />
-                      <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Click "Run AI Analysis" to get intelligent treatment recommendations
-                      </p>
-                    </div>
-                  )}
                 </div>
               )}
             </>
@@ -2559,37 +2001,6 @@ const DataQualityStep: React.FC<{
                               <div className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                                 {issue.type}: {issue.count} records ({issue.percent}%) affected
                               </div>
-                              
-                              {!issue.resolved && issue.aiSuggestions.length > 0 && (
-                                <div className="mt-3">
-                                  <label className={`block text-xs font-medium mb-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                                    Select Treatment Method:
-                                  </label>
-                                  <select
-                                    value={issue.selectedMethod || ''}
-                                    onChange={(e) => {
-                                      setMetricsMap(prev => {
-                                        const updated = { ...prev };
-                                        const issueIndex = updated[dataset.id].issues.findIndex((i: any) => i.variable === issue.variable);
-                                        if (issueIndex !== -1) {
-                                          updated[dataset.id].issues[issueIndex].selectedMethod = e.target.value || undefined;
-                                        }
-                                        return updated;
-                                      });
-                                    }}
-                                    className={`w-full px-3 py-1 text-sm rounded border ${
-                                      isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'
-                                    }`}
-                                  >
-                                    <option value="">-- Select Treatment --</option>
-                                    {issue.aiSuggestions.map((suggestion: any, suggestionIdx: number) => (
-                                      <option key={suggestionIdx} value={suggestion.method}>
-                                        {suggestion.method} - {suggestion.description}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              )}
                             </div>
                           ))}
                         </div>
@@ -2603,21 +2014,8 @@ const DataQualityStep: React.FC<{
         </>
       )}
 
-      {/* Footer Section - Workflow Lock and Complete Button */}
-      <div className="flex justify-between items-center pt-4">
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={lockWorkflow}
-              onChange={(e) => setLockWorkflow(e.target.checked)}
-              className="w-4 h-4"
-            />
-            <span className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-              Lock Data Quality Workflow (Apply to scheduled reports)
-            </span>
-          </label>
-        </div>
+      {/* Footer Section - Complete Button */}
+      <div className="flex justify-end items-center pt-4">
         <button
           onClick={() => {
             // Log approval before completing
@@ -2629,7 +2027,7 @@ const DataQualityStep: React.FC<{
                 project.id,
                 project.name,
                 'Data Quality',
-                `Approved data quality with ${analysisCount} analyzed dataset(s), ${resolvedCount} resolved dataset(s), and ${allDatasets.length} total dataset(s) ready for monitoring. Workflow lock: ${lockWorkflow ? 'Enabled' : 'Disabled'}.`
+                `Approved data quality with ${analysisCount} analyzed dataset(s), ${resolvedCount} resolved dataset(s), and ${allDatasets.length} total dataset(s) ready for monitoring.`
               ));
             }
             onComplete();
@@ -4674,7 +4072,19 @@ export default function Projects() {
                         // Navigate to dashboard after completing workflow
                         if (isLastStep) {
                           setTimeout(() => {
-                            navigate('/');
+                            // Extract model ID to pass to dashboard
+                            const completedModelId = selectedProject.workflow.selectedModel 
+                              || selectedProject.workflow.models?.[0]?.id;
+                            
+                            if (completedModelId) {
+                              // Navigate with model ID as URL parameter
+                              navigate(`/?modelId=${completedModelId}&source=projects`);
+                              console.log('✓ Navigating to dashboard with model:', completedModelId);
+                            } else {
+                              // Navigate without parameters if no model found
+                              navigate('/');
+                              console.log('⚠️ No model found in workflow, navigating to dashboard');
+                            }
                           }, 1000); // Brief delay to show completion message
                         }
                       }}

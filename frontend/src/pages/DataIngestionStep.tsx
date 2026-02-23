@@ -320,7 +320,7 @@ export const DataIngestionStepComponent: React.FC<{
 }> = ({ workflow, onComplete }) => {
   const { theme } = useTheme();
   const { registryModels } = useGlobal();
-  const tracks: DataTrack[] = ['Development', 'OOT', 'Monitoring', 'Recent'];
+  const tracks: DataTrack[] = ['Development', 'Monitoring', 'Recent'];
   const [activeTrack, setActiveTrack] = useState<DataTrack>('Development');
   const [trackDatasets, setTrackDatasets] = useState<Record<DataTrack, UploadedDataset[]>>({
     Development: [],

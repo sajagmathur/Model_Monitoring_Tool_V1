@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Shield, ChevronRight, CheckCircle, CheckCircle2, AlertTriangle, Filter,
-  BarChart3, TrendingUp, Activity, Database, Brain, Zap, Beaker, Download,
-  Folder, Package, XCircle, ArrowLeft
+  Shield, ChevronRight, CheckCircle, BarChart3, TrendingUp,
+  Database, Zap, Download, Folder, Package, ArrowLeft
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlobal, IngestionJob } from '../contexts/GlobalContext';
@@ -10,12 +9,6 @@ import { generateDataQualityPDF } from '../utils/pdfGenerator';
 
 // ─── Interfaces (mirror the workflow DataQualityStep) ─────────────────────
 interface DataQualityMetrics {
-  missingValueStats: Array<{
-    variable: string;
-    type: string;
-    missing: number;
-    missingPercent: number;
-  }>;
   statisticalSummary: Array<{
     variable: string;
     mean: number;
@@ -32,19 +25,6 @@ interface DataQualityMetrics {
     topCategory: string;
     topPercent: number;
   }>;
-  outlierDetection: Array<{
-    variable: string;
-    outlierCount: number;
-    outlierPercent: number;
-    lowerBound: number;
-    upperBound: number;
-  }>;
-  scoreReplication: {
-    rmse: number;
-    maxDiff: number;
-    meanDiff: number;
-    correlation: number;
-  };
   volumeMetrics: Array<{
     segment: string;
     count: number;
@@ -52,19 +32,6 @@ interface DataQualityMetrics {
     baselineEventRate: number;
     delta: number;
   }>;
-}
-
-interface TreatmentRecommendation {
-  variable: string;
-  issue: string;
-  severity: 'high' | 'medium' | 'low';
-  recommendations: Array<{
-    id: string;
-    method: string;
-    description: string;
-    impact: string;
-  }>;
-  selected?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────
@@ -75,12 +42,7 @@ const DataQuality: React.FC = () => {
     projects,
     registryModels,
     ingestionJobs,
-    addIngestionJob,
-    createDataQualityReport,
     createGeneratedReport,
-    createReportConfiguration,
-    reportConfigurations,
-    cloneDatasetAsResolved,
   } = useGlobal();
 
   // ── wizard state ───────────────────────────────────────────────
@@ -90,21 +52,11 @@ const DataQuality: React.FC = () => {
 
   // ── analysis state (mirrors DataQualityStep) ───────────────────
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'missing' | 'distributions' | 'outliers' | 'replication' | 'volume' | 'ai-treatment'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'distributions' | 'volume'>('overview');
   const [metricsMap, setMetricsMap] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
   const [currentAnalyzingDataset, setCurrentAnalyzingDataset] = useState('');
-  const [resolving, setResolving] = useState(false);
-  const [currentResolvingIndex, setCurrentResolvingIndex] = useState(-1);
   const [generatingPDF, setGeneratingPDF] = useState(false);
-  const [resolvedDatasetClones, setResolvedDatasetClones] = useState<any[]>([]);
-  const [resolvedDatasets, setResolvedDatasets] = useState<any[]>([]);
-  const [lockWorkflow, setLockWorkflow] = useState(false);
-
-  // AI treatment state
-  const [aiAnalyzing, setAiAnalyzing] = useState(false);
-  const [aiRecommendations, setAiRecommendations] = useState<TreatmentRecommendation[]>([]);
-  const [applyingTreatment, setApplyingTreatment] = useState(false);
 
   // ── Refresh trigger for manual data refresh ───────────────────
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -144,7 +96,7 @@ const DataQuality: React.FC = () => {
       )
     : [];
 
-  const allAvailableDatasets = [...datasetsForModel, ...datasetsForProject, ...resolvedDatasetClones];
+  const allAvailableDatasets = [...datasetsForModel, ...datasetsForProject];
 
   const selectedDataset = selectedDatasetId
     ? allAvailableDatasets.find(d => d.id === selectedDatasetId)
@@ -155,18 +107,12 @@ const DataQuality: React.FC = () => {
     setSelectedModelId(null);
     setSelectedDatasetId(null);
     setMetricsMap({});
-    setResolvedDatasetClones([]);
-    setResolvedDatasets([]);
-    setAiRecommendations([]);
   }, [selectedProjectId]);
 
   // Reset downstream state when model changes
   useEffect(() => {
     setSelectedDatasetId(null);
     setMetricsMap({});
-    setResolvedDatasetClones([]);
-    setResolvedDatasets([]);
-    setAiRecommendations([]);
   }, [selectedModelId]);
 
   // Debug orphaned models and warn about sync issues
@@ -214,13 +160,6 @@ const DataQuality: React.FC = () => {
     const numericColumns = columns.slice(0, Math.min(3, columns.length));
     const categoricalColumns = columns.slice(Math.min(3, columns.length), Math.min(6, columns.length));
 
-    const missingValueStats = columns.slice(0, Math.min(4, columns.length)).map((col: string, idx: number) => ({
-      variable: col,
-      type: idx < 3 ? 'numeric' : 'categorical',
-      missing: Math.floor((dataset.rows || 1000) * (0.01 + idx * 0.005)),
-      missingPercent: 1.0 + idx * 0.5,
-    }));
-
     const statisticalSummary = numericColumns.map((col: string, idx: number) => {
       const baseValue = 100 + idx * 500;
       return {
@@ -242,28 +181,9 @@ const DataQuality: React.FC = () => {
       topPercent: 40 + idx * 10,
     }));
 
-    const outlierDetection = numericColumns.map((col: string, idx: number) => {
-      const baseValue = 100 + idx * 500;
-      return {
-        variable: col,
-        outlierCount: Math.floor((dataset.rows || 1000) * (0.006 + idx * 0.004)),
-        outlierPercent: 0.6 + idx * 0.4,
-        lowerBound: baseValue * 0.1,
-        upperBound: baseValue * 2.5,
-      };
-    });
-
     return {
-      missingValueStats,
       statisticalSummary,
       categoricalDistributions,
-      outlierDetection,
-      scoreReplication: {
-        rmse: 0.0012,
-        maxDiff: 0.0045,
-        meanDiff: 0.0003,
-        correlation: 0.9987,
-      },
       volumeMetrics: [
         { segment: 'Q1 2024', count: Math.floor((dataset.rows || 1000) * 0.25), eventRate: 3.2, baselineEventRate: 3.0, delta: 0.2 },
         { segment: 'Q2 2024', count: Math.floor((dataset.rows || 1000) * 0.28), eventRate: 3.5, baselineEventRate: 3.0, delta: 0.5 },
@@ -291,23 +211,14 @@ const DataQuality: React.FC = () => {
         ['Variable_1', 'Variable_2', 'Variable_3', 'Variable_4'];
 
       const mockIssues = columns.slice(0, Math.min(4, columns.length)).map((col: string, idx: number) => {
-        const issueTypes = ['missing', 'outlier', 'inconsistency'];
+        const issueTypes = ['inconsistency', 'duplication', 'format_error'];
         const severities = ['high', 'medium', 'low'];
         return {
           variable: col,
-          type: issueTypes[idx % 3] as 'missing' | 'outlier' | 'inconsistency',
+          type: issueTypes[idx % 3] as 'inconsistency' | 'duplication' | 'format_error',
           severity: severities[idx % 3] as 'high' | 'medium' | 'low',
           count: Math.floor((dataset.rows || 1000) * ((2 + idx * 1.5) / 100)),
           percent: 2 + idx * 1.5,
-          aiSuggestions: [{
-            variable: col,
-            issue: `${issueTypes[idx % 3]} detected`,
-            severity: severities[idx % 3] as 'high' | 'medium' | 'low',
-            method: issueTypes[idx % 3] === 'missing' ? 'Mean Imputation' : issueTypes[idx % 3] === 'outlier' ? 'Winsorization' : 'Pattern Correction',
-            description: `Apply ${issueTypes[idx % 3] === 'missing' ? 'statistical imputation' : issueTypes[idx % 3] === 'outlier' ? 'outlier capping' : 'consistency correction'}`,
-            impact: 'Improves data quality and model performance',
-          }],
-          selectedMethod: undefined,
           resolved: false,
         };
       });
@@ -328,218 +239,13 @@ const DataQuality: React.FC = () => {
     setCurrentAnalyzingDataset('');
   };
 
-  // ── AI Analysis ──
-  const handleAIAnalysis = async () => {
-    if (!selectedDataset) return;
-    setAiAnalyzing(true);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const recommendations: TreatmentRecommendation[] = [
-      {
-        variable: 'age',
-        issue: 'Missing values detected (2.1%)',
-        severity: 'medium',
-        recommendations: [
-          { id: 'age_mean', method: 'Mean Imputation', description: 'Fill with mean age (42.5)', impact: 'Low bias, maintains distribution' },
-          { id: 'age_median', method: 'Median Imputation', description: 'Fill with median age (42)', impact: 'Robust to outliers' },
-          { id: 'age_knn', method: 'KNN Imputation', description: 'Predict from similar records', impact: 'Most accurate, computationally expensive' },
-        ],
-      },
-      {
-        variable: 'income',
-        issue: 'Outliers detected (2.25%)',
-        severity: 'high',
-        recommendations: [
-          { id: 'income_cap', method: 'Winsorization', description: 'Cap at 1st and 99th percentiles', impact: 'Reduces extreme values' },
-          { id: 'income_log', method: 'Log Transformation', description: 'Apply log transform to normalize', impact: 'Handles skewness' },
-          { id: 'income_remove', method: 'Remove Outliers', description: 'Drop records beyond 3 std deviations', impact: 'Data loss but cleaner' },
-        ],
-      },
-      {
-        variable: 'credit_score',
-        issue: 'Missing values (1.55%) and outliers (0.4%)',
-        severity: 'high',
-        recommendations: [
-          { id: 'credit_model', method: 'Predictive Imputation', description: 'Train model to predict missing scores', impact: 'Most sophisticated approach' },
-          { id: 'credit_median', method: 'Median + Capping', description: 'Fill missing with median, cap outliers', impact: 'Balanced approach' },
-        ],
-      },
-    ];
-
-    setAiRecommendations(recommendations);
-    setAiAnalyzing(false);
-  };
-
-  // ── Apply treatments ──
-  const handleApplyTreatments = async () => {
-    if (!selectedDataset || !selectedModelId) return;
-    const selectedTreatments = aiRecommendations.filter(r => r.selected);
-    if (selectedTreatments.length === 0) {
-      alert('Please select at least one treatment to apply');
-      return;
-    }
-
-    setApplyingTreatment(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    const treatedDatasetData = {
-      name: `${selectedDataset.name} (AI Treated)`,
-      projectId: selectedProjectId || '',
-      modelId: selectedModelId,
-      dataSource: 'desktop' as const,
-      source: 'treated' as const,
-      status: 'active' as const,
-      uploadedAt: new Date().toISOString(),
-      rows: selectedDataset.rows,
-      columns: selectedDataset.columns,
-      outputColumns: (selectedDataset as any).outputColumns || [],
-      schema: selectedDataset.schema,
-      treatmentMetadata: {
-        originalDatasetId: selectedDataset.id,
-        treatments: selectedTreatments.map(t => ({
-          variable: t.variable,
-          method: t.recommendations.find(r => r.id === t.selected)?.method || '',
-          appliedAt: new Date().toISOString(),
-        })),
-        treatedBy: 'AI Agent',
-        treatedAt: new Date().toISOString(),
-      },
-    };
-
-    const addedTreatedDataset = addIngestionJob(treatedDatasetData);
-    setApplyingTreatment(false);
-    alert(`Successfully created treated dataset: ${addedTreatedDataset.name}`);
-    setAiRecommendations([]);
-  };
-
-  // ── Resolve all issues ──
-  const handleResolveAllIssues = async () => {
-    const allResolving: { datasetId: string; datasetName: string; issues: any[] }[] = [];
-    for (const dataset of allAvailableDatasets) {
-      const m = metricsMap[dataset.id];
-      if (m) {
-        const issuesToResolve = m.issues.filter((issue: any) => issue.selectedMethod && !issue.resolved);
-        if (issuesToResolve.length > 0) {
-          allResolving.push({ datasetId: dataset.id, datasetName: dataset.name, issues: issuesToResolve });
-        }
-      }
-    }
-
-    if (allResolving.length === 0) {
-      alert('Please select treatment methods for issues first');
-      return;
-    }
-
-    setResolving(true);
-    const newlyResolvedClones: any[] = [];
-    const newlyResolvedDatasets: any[] = [];
-
-    for (const { datasetId, datasetName, issues } of allResolving) {
-      for (const issue of issues) {
-        setCurrentResolvingIndex(metricsMap[datasetId].issues.findIndex((i: any) => i.variable === issue.variable));
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        setMetricsMap(prev => {
-          const updated = { ...prev };
-          const issueIndex = updated[datasetId].issues.findIndex((i: any) => i.variable === issue.variable);
-          if (issueIndex !== -1) {
-            updated[datasetId].issues[issueIndex].resolved = true;
-          }
-          return updated;
-        });
-      }
-
-      const originalDataset = allAvailableDatasets.find(d => d.id === datasetId);
-      if (originalDataset) {
-        const resolutionSummary = issues.map((i: any) => `${i.variable} (${i.type}): ${i.selectedMethod}`).join(', ');
-        const resolvedName = originalDataset.name.replace(/\.(csv|json|parquet)$/i, '_Resolved.$1');
-        const clonedId = `${datasetId}_resolved_${Date.now()}`;
-        const clonedDataset: any = {
-          ...originalDataset,
-          id: clonedId,
-          name: resolvedName.includes('_Resolved') ? resolvedName : `${originalDataset.name}_Resolved`,
-          parentDatasetId: datasetId,
-          isResolved: true,
-          resolutionTimestamp: new Date().toISOString(),
-          resolutionSummary,
-          resolvedIssuesCount: issues.length,
-          uploadedAt: new Date().toISOString(),
-        };
-
-        const parentMetrics = metricsMap[datasetId];
-        if (parentMetrics) {
-          setMetricsMap(prev => ({
-            ...prev,
-            [clonedId]: {
-              ...parentMetrics,
-              issues: parentMetrics.issues.map((issue: any) => ({ ...issue, resolved: true })),
-            },
-          }));
-        }
-
-        newlyResolvedClones.push(clonedDataset);
-        newlyResolvedDatasets.push({ ...clonedDataset, metrics: parentMetrics, resolvedAt: new Date().toLocaleString() });
-      }
-    }
-
-    setCurrentResolvingIndex(-1);
-    setResolving(false);
-    setResolvedDatasetClones(prev => [...prev, ...newlyResolvedClones]);
-    setResolvedDatasets(prev => [...prev, ...newlyResolvedDatasets]);
-
-    // Persist resolved clones to global context
-    newlyResolvedClones.forEach((clonedDataset: any) => {
-      addIngestionJob({
-        name: clonedDataset.name,
-        projectId: selectedProjectId || '',
-        modelId: selectedModelId || '',
-        dataSource: 'desktop' as any,
-        source: 'treated' as any,
-        datasetType: 'reference',
-        status: 'completed' as any,
-        uploadedAt: clonedDataset.uploadedAt,
-        rows: clonedDataset.rows || 0,
-        columns: clonedDataset.columns || 0,
-        outputShape: { rows: clonedDataset.rows || 0, columns: clonedDataset.columns || 0 },
-        outputColumns: clonedDataset.outputColumns || clonedDataset.columnsList || [],
-        uploadedFile: {
-          name: clonedDataset.name,
-          path: `/data/${clonedDataset.name}`,
-          size: 1200000,
-          type: 'text/csv',
-        },
-        parentDatasetId: clonedDataset.parentDatasetId,
-        isResolved: true,
-        resolutionTimestamp: clonedDataset.resolutionTimestamp,
-        resolutionSummary: clonedDataset.resolutionSummary,
-        resolvedIssuesCount: clonedDataset.resolvedIssuesCount,
-      });
-    });
-
-    if (newlyResolvedClones.length > 0) {
-      setSelectedDatasetId(newlyResolvedClones[0].id);
-    }
-
-    alert(`✓ All data quality issues have been resolved!\n✓ ${newlyResolvedClones.length} resolved dataset(s) created and available in Datasets page.`);
-  };
-
-  // ── Download report ──
+  // ── Download / Generate report ──
   const handleDownloadReport = async () => {
     if (Object.keys(metricsMap).length === 0 || !selectedModel) return;
     setGeneratingPDF(true);
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    const baselineDatasetIds: string[] = [];
-    const resolvedDatasetIds: string[] = [];
-    allAvailableDatasets.forEach(dataset => {
-      if ((dataset as any).isResolved === true) {
-        resolvedDatasetIds.push(dataset.id);
-      } else {
-        baselineDatasetIds.push(dataset.id);
-      }
-    });
-
-    const timestamp = new Date().toISOString().split('T')[0];
+    const datasetIds = allAvailableDatasets.map(d => d.id);
     const reportName = `Data Quality Report - ${selectedModel.name} (${allAvailableDatasets.map(d => d.name).join(', ')})`;
 
     const pdfData = {
@@ -560,11 +266,9 @@ const DataQuality: React.FC = () => {
             severity: issue.severity,
             count: issue.count,
             percent: issue.percent,
-            selectedMethod: issue.selectedMethod,
           })),
         };
       }).filter(Boolean) as any[],
-      lockWorkflow,
     };
 
     generateDataQualityPDF(pdfData);
@@ -593,47 +297,21 @@ const DataQuality: React.FC = () => {
       status: 'final',
       healthScore: avgQualityScore,
       fileSize: '2.1 MB',
-      tags: ['data-quality', 'automated', 'standalone', resolvedDatasets.length > 0 ? 'resolved' : 'in-progress'],
+      tags: ['data-quality', 'automated', 'standalone'],
       reportArtifact,
-      baselineDatasetIds,
-      resolvedDatasetIds,
+      baselineDatasetIds: datasetIds,
       immutable: true,
     });
 
-    if (lockWorkflow) {
-      const configName = `Data_Quality_${selectedModel.name}_${timestamp}`.replace(/\s+/g, '_');
-      const existingConfig = reportConfigurations?.find(c => c.name === configName);
-      if (!existingConfig && baselineDatasetIds.length > 0) {
-        const resolvedDatasetId = resolvedDatasetIds.length > 0 ? resolvedDatasetIds[0] : baselineDatasetIds[baselineDatasetIds.length - 1];
-        createReportConfiguration({
-          name: configName,
-          type: 'data_quality',
-          modelId: selectedModel.id,
-          modelName: `${selectedModel.name} v${selectedModel.version}`,
-          modelType: (selectedModel.modelType === 'classification' ? 'classification' : selectedModel.modelType === 'regression' ? 'regression' : 'classification') as 'classification' | 'regression' | 'timeseries',
-          baselineDatasetId: baselineDatasetIds[0],
-          baselineDatasetName: allAvailableDatasets.find(d => d.id === baselineDatasetIds[0])?.name || 'Baseline',
-          referenceDatasetId: resolvedDatasetId,
-          referenceDatasetName: allAvailableDatasets.find(d => d.id === resolvedDatasetId)?.name || 'Reference',
-          metricsToMonitor: ['quality_score', 'issue_count', 'exclusion_rate'],
-          driftMetrics: [],
-        });
-      }
-    }
-
     setGeneratingPDF(false);
-    alert(`✓ Data Quality Report generated and saved to Reports section!${lockWorkflow ? '\n✓ Configuration created for scheduling.' : ''}`);
+    alert('✓ Data Quality Report generated and saved to Reports section!');
   };
 
   // ── Tab definitions ──
   const tabs = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'missing', label: 'Missing Values', icon: AlertTriangle },
     { id: 'distributions', label: 'Distributions', icon: TrendingUp },
-    { id: 'outliers', label: 'Outliers', icon: Filter },
-    { id: 'replication', label: 'Score Replication', icon: Activity },
     { id: 'volume', label: 'Volume/Event Rate', icon: Database },
-    { id: 'ai-treatment', label: 'AI Treatment', icon: Brain },
   ];
 
   // ═══════════════════════════════════════════════════════════════
@@ -907,48 +585,33 @@ const DataQuality: React.FC = () => {
           ) : (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {allAvailableDatasets.map(dataset => {
-                  const isResolved = (dataset as any).isResolved === true;
-                  return (
-                    <div
-                      key={dataset.id}
-                      className={`p-4 rounded-lg border transition-all ${
-                        isDark
-                          ? isResolved
-                            ? 'bg-green-500/10 border-green-500/30'
-                            : 'bg-slate-800 border-slate-700'
-                          : isResolved
-                          ? 'bg-green-50 border-green-200'
-                          : 'bg-white border-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1 min-w-0">
-                          <p className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                            {dataset.name}
-                          </p>
-                          <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                            {(dataset.rows || 0).toLocaleString()} rows × {dataset.columns || 0} cols
-                          </p>
-                        </div>
-                        {isResolved ? (
-                          <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'}`}>
-                            <CheckCircle size={12} /> Resolved
-                          </span>
-                        ) : (
-                          <span className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-slate-600 text-slate-300' : 'bg-slate-200 text-slate-700'}`}>
-                            {dataset.status}
-                          </span>
-                        )}
+                {allAvailableDatasets.map(dataset => (
+                  <div
+                    key={dataset.id}
+                    className={`p-4 rounded-lg border transition-all ${
+                      isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1 min-w-0">
+                        <p className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                          {dataset.name}
+                        </p>
+                        <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                          {(dataset.rows || 0).toLocaleString()} rows × {dataset.columns || 0} cols
+                        </p>
                       </div>
-                      {dataset.datasetType && (
-                        <span className={`text-xs px-2 py-0.5 rounded ${isDark ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'}`}>
-                          {dataset.datasetType}
-                        </span>
-                      )}
+                      <span className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-slate-600 text-slate-300' : 'bg-slate-200 text-slate-700'}`}>
+                        {dataset.status}
+                      </span>
                     </div>
-                  );
-                })}
+                    {dataset.datasetType && (
+                      <span className={`text-xs px-2 py-0.5 rounded ${isDark ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'}`}>
+                        {dataset.datasetType}
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
               <div className="flex justify-end">
                 <button
@@ -983,59 +646,25 @@ const DataQuality: React.FC = () => {
             </div>
 
             {Object.keys(metricsMap).length > 0 && (
-              <div className="flex items-center gap-3">
-                {/* Resolve Issues button */}
-                {allAvailableDatasets.some(dataset => {
-                  const m = metricsMap[dataset.id];
-                  return m && m.issues.some((issue: any) => issue.selectedMethod && !issue.resolved);
-                }) && (
-                  <button
-                    onClick={handleResolveAllIssues}
-                    disabled={resolving}
-                    className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
-                      isDark ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-green-500 hover:bg-green-600 text-white'
-                    } ${resolving ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {resolving ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                        Resolving Issues...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle size={16} />
-                        Resolve All Issues
-                      </>
-                    )}
-                  </button>
+              <button
+                onClick={handleDownloadReport}
+                disabled={generatingPDF}
+                className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
+                  isDark ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'
+                } ${generatingPDF ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {generatingPDF ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                    Generating Report...
+                  </>
+                ) : (
+                  <>
+                    <Download size={16} />
+                    Generate &amp; Download Report
+                  </>
                 )}
-
-                {/* Download Report button */}
-                {allAvailableDatasets.every(dataset => {
-                  const m = metricsMap[dataset.id];
-                  return m && m.issues.every((issue: any) => !issue.selectedMethod || issue.resolved);
-                }) && (
-                  <button
-                    onClick={handleDownloadReport}
-                    disabled={generatingPDF}
-                    className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
-                      isDark ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'
-                    } ${generatingPDF ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {generatingPDF ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <Download size={16} />
-                        Download Report (PDF)
-                      </>
-                    )}
-                  </button>
-                )}
-              </div>
+              </button>
             )}
           </div>
 
@@ -1053,80 +682,37 @@ const DataQuality: React.FC = () => {
                   <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
                     Select Dataset for Detailed Analysis
                   </h2>
-                  <div className="flex items-center gap-2">
-                    {resolvedDatasets.length > 0 && (
-                      <span className={`text-xs px-3 py-1 rounded-full ${isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'}`}>
-                        {resolvedDatasets.length} Resolved
-                      </span>
-                    )}
-                    <span className={`text-xs px-3 py-1 rounded-full ${isDark ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'}`}>
-                      {allAvailableDatasets.length} Total Dataset{allAvailableDatasets.length > 1 ? 's' : ''}
-                    </span>
-                  </div>
+                  <span className={`text-xs px-3 py-1 rounded-full ${isDark ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'}`}>
+                    {allAvailableDatasets.length} Total Dataset{allAvailableDatasets.length > 1 ? 's' : ''}
+                  </span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                  {allAvailableDatasets.map((dataset) => {
-                    const isResolved = (dataset as any).isResolved === true;
-                    const resolvedData = isResolved ? resolvedDatasets.find(rd => rd.id === dataset.id) : null;
-                    const resolvedMetrics = resolvedData?.metrics || metricsMap[(dataset as any).parentDatasetId || dataset.id];
-                    return (
-                      <div
-                        key={dataset.id}
-                        className={`p-3 rounded-lg border cursor-pointer transition ${
-                          selectedDataset?.id === dataset.id
-                            ? isDark ? 'bg-blue-500/20 border-blue-500' : 'bg-blue-50 border-blue-500'
-                            : isResolved
-                            ? isDark ? 'bg-green-500/10 border-green-500/30 hover:bg-green-500/20' : 'bg-green-50 border-green-200 hover:bg-green-100'
-                            : isDark ? 'bg-slate-700/50 border-slate-600 hover:bg-slate-700' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-                        }`}
-                        onClick={() => {
-                          setSelectedDatasetId(dataset.id);
-                          setAiRecommendations([]);
-                        }}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1">
-                            <p className={`font-medium text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                              {dataset.name}
-                            </p>
-                            <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                              {(dataset.rows || 0).toLocaleString()} rows × {dataset.columns || 0} cols
-                            </p>
-                          </div>
-                          {isResolved ? (
-                            <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'}`}>
-                              <CheckCircle size={12} /> Resolved
-                            </span>
-                          ) : (
-                            <span className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-slate-600 text-slate-300' : 'bg-slate-200 text-slate-700'}`}>
-                              Imported
-                            </span>
-                          )}
+                  {allAvailableDatasets.map((dataset) => (
+                    <div
+                      key={dataset.id}
+                      className={`p-3 rounded-lg border cursor-pointer transition ${
+                        selectedDataset?.id === dataset.id
+                          ? isDark ? 'bg-blue-500/20 border-blue-500' : 'bg-blue-50 border-blue-500'
+                          : isDark ? 'bg-slate-700/50 border-slate-600 hover:bg-slate-700' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                      }`}
+                      onClick={() => setSelectedDatasetId(dataset.id)}
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <p className={`font-medium text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                            {dataset.name}
+                          </p>
+                          <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                            {(dataset.rows || 0).toLocaleString()} rows × {dataset.columns || 0} cols
+                          </p>
                         </div>
-                        {isResolved && resolvedMetrics && (
-                          <div className={`text-xs space-y-1 pt-2 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-                            <div className="flex justify-between">
-                              <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Quality Score:</span>
-                              <span className={`font-semibold ${
-                                (resolvedMetrics?.qualityScore || 0) >= 80 ? 'text-green-500' :
-                                (resolvedMetrics?.qualityScore || 0) >= 60 ? 'text-yellow-500' :
-                                'text-red-500'
-                              }`}>
-                                {resolvedMetrics?.qualityScore || 0}%
-                              </span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Issues Resolved:</span>
-                              <span className={isDark ? 'text-white' : 'text-slate-900'}>
-                                {(resolvedMetrics?.issues?.filter((i: any) => i.resolved) || []).length}/{resolvedMetrics?.issues?.length || 0}
-                              </span>
-                            </div>
-                          </div>
-                        )}
+                        <span className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-slate-600 text-slate-300' : 'bg-slate-200 text-slate-700'}`}>
+                          {dataset.status || 'Imported'}
+                        </span>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -1194,53 +780,6 @@ const DataQuality: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Missing Values Tab */}
-                  {activeTab === 'missing' && (
-                    <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                      <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>Missing Value Analysis</h4>
-                      {metrics.missingValueStats.length > 0 ? (
-                        <div className="overflow-x-auto">
-                          <table className="w-full">
-                            <thead>
-                              <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                                <th className={`text-left py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Variable</th>
-                                <th className={`text-left py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Type</th>
-                                <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Missing Count</th>
-                                <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Missing %</th>
-                                <th className={`text-center py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Status</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {metrics.missingValueStats.map((stat, idx) => (
-                                <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                                  <td className={`py-3 px-4 font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>{stat.variable}</td>
-                                  <td className={`py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{stat.type}</td>
-                                  <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{stat.missing}</td>
-                                  <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{stat.missingPercent.toFixed(2)}%</td>
-                                  <td className="py-3 px-4 text-center">
-                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs ${
-                                      stat.missingPercent < 1
-                                        ? isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
-                                        : stat.missingPercent < 5
-                                        ? isDark ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
-                                        : isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
-                                    }`}>
-                                      {stat.missingPercent < 1 ? 'Good' : stat.missingPercent < 5 ? 'Warning' : 'Critical'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <div className={`p-6 rounded-lg text-center ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-                          <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>No missing value data available</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   {/* Distributions Tab */}
                   {activeTab === 'distributions' && (
                     <div className="space-y-6">
@@ -1300,80 +839,6 @@ const DataQuality: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Outliers Tab */}
-                  {activeTab === 'outliers' && (
-                    <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                      <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>Outlier Detection</h4>
-                      <div className="overflow-x-auto">
-                        <table className="w-full">
-                          <thead>
-                            <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                              <th className={`text-left py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Variable</th>
-                              <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Outlier Count</th>
-                              <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Outlier %</th>
-                              <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Lower Bound</th>
-                              <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Upper Bound</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {metrics.outlierDetection.map((outlier, idx) => (
-                              <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                                <td className={`py-3 px-4 font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>{outlier.variable}</td>
-                                <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{outlier.outlierCount}</td>
-                                <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{outlier.outlierPercent.toFixed(2)}%</td>
-                                <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{outlier.lowerBound.toLocaleString()}</td>
-                                <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{outlier.upperBound.toLocaleString()}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Score Replication Tab */}
-                  {activeTab === 'replication' && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                        <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>Score Replication Quality</h4>
-                        <div className="space-y-4">
-                          <div className="flex justify-between items-center">
-                            <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>RMSE</span>
-                            <span className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{metrics.scoreReplication.rmse.toFixed(4)}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Max Difference</span>
-                            <span className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{metrics.scoreReplication.maxDiff.toFixed(4)}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Mean Difference</span>
-                            <span className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{metrics.scoreReplication.meanDiff.toFixed(4)}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Correlation</span>
-                            <span className={`text-lg font-semibold ${isDark ? 'text-green-400' : 'text-green-600'}`}>{metrics.scoreReplication.correlation.toFixed(4)}</span>
-                          </div>
-                        </div>
-                        <div className={`mt-6 p-4 rounded-lg ${isDark ? 'bg-green-500/10' : 'bg-green-50'}`}>
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className={isDark ? 'text-green-400' : 'text-green-600'} size={20} />
-                            <span className={`font-medium ${isDark ? 'text-green-400' : 'text-green-700'}`}>Excellent Replication Quality</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                        <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>Interpretation</h4>
-                        <ul className={`space-y-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                          <li>✓ RMSE &lt; 0.02: Scores replicate accurately</li>
-                          <li>✓ Correlation &gt; 0.99: Strong agreement</li>
-                          <li>✓ Mean difference near 0: No systematic bias</li>
-                          <li>✓ Model execution validated successfully</li>
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-
                   {/* Volume/Event Rate Tab */}
                   {activeTab === 'volume' && (
                     <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -1414,147 +879,6 @@ const DataQuality: React.FC = () => {
                           </tbody>
                         </table>
                       </div>
-                    </div>
-                  )}
-
-                  {/* AI Treatment Tab */}
-                  {activeTab === 'ai-treatment' && (
-                    <div className="space-y-6">
-                      <div className={`p-6 rounded-lg border ${isDark ? 'bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-500/30' : 'bg-gradient-to-br from-purple-50 to-blue-50 border-purple-200'}`}>
-                        <div className="flex items-center gap-3 mb-4">
-                          <Brain className={isDark ? 'text-purple-400' : 'text-purple-600'} size={32} />
-                          <div>
-                            <h4 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>AI-Powered Dataset Treatment</h4>
-                            <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                              Analyze and apply intelligent transformations to improve data quality
-                            </p>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={handleAIAnalysis}
-                          disabled={aiAnalyzing}
-                          className={`w-full px-6 py-3 rounded-lg flex items-center justify-center gap-2 font-medium ${
-                            isDark ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'
-                          } ${aiAnalyzing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          {aiAnalyzing ? (
-                            <>
-                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
-                              Analyzing Dataset...
-                            </>
-                          ) : (
-                            <>
-                              <Zap size={20} />
-                              Run AI Analysis
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      {aiRecommendations.length > 0 && (
-                        <>
-                          <div className="space-y-4">
-                            {aiRecommendations.map((rec) => (
-                              <div
-                                key={rec.variable}
-                                className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
-                              >
-                                <div className="flex items-start justify-between mb-4">
-                                  <div>
-                                    <h5 className={`font-semibold flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                      <Beaker size={18} />
-                                      {rec.variable}
-                                    </h5>
-                                    <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{rec.issue}</p>
-                                  </div>
-                                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                                    rec.severity === 'high'
-                                      ? isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
-                                      : rec.severity === 'medium'
-                                      ? isDark ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
-                                      : isDark ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'
-                                  }`}>
-                                    {rec.severity.toUpperCase()}
-                                  </span>
-                                </div>
-
-                                <div className="space-y-2">
-                                  <p className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Recommended Treatments:</p>
-                                  {rec.recommendations.map((treatment) => (
-                                    <label
-                                      key={treatment.id}
-                                      className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition ${
-                                        rec.selected === treatment.id
-                                          ? isDark ? 'bg-blue-500/20 border border-blue-500/50' : 'bg-blue-50 border border-blue-200'
-                                          : isDark ? 'bg-slate-700/50 hover:bg-slate-700' : 'bg-slate-50 hover:bg-slate-100'
-                                      }`}
-                                    >
-                                      <input
-                                        type="radio"
-                                        name={`treatment-${rec.variable}`}
-                                        checked={rec.selected === treatment.id}
-                                        onChange={() => {
-                                          setAiRecommendations(prev =>
-                                            prev.map(r =>
-                                              r.variable === rec.variable ? { ...r, selected: treatment.id } : r
-                                            )
-                                          );
-                                        }}
-                                        className="mt-1"
-                                      />
-                                      <div className="flex-1">
-                                        <div className={`font-medium text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{treatment.method}</div>
-                                        <div className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{treatment.description}</div>
-                                        <div className={`text-xs mt-1 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Impact: {treatment.impact}</div>
-                                      </div>
-                                    </label>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-
-                          <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <h5 className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Apply Selected Treatments</h5>
-                                <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                                  This will create a new treated dataset that will appear in the Datasets section
-                                </p>
-                              </div>
-                              <button
-                                onClick={handleApplyTreatments}
-                                disabled={applyingTreatment || aiRecommendations.filter(r => r.selected).length === 0}
-                                className={`px-6 py-3 rounded-lg flex items-center gap-2 font-medium ${
-                                  isDark ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-green-500 hover:bg-green-600 text-white'
-                                } ${(applyingTreatment || aiRecommendations.filter(r => r.selected).length === 0) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                              >
-                                {applyingTreatment ? (
-                                  <>
-                                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
-                                    Applying...
-                                  </>
-                                ) : (
-                                  <>
-                                    <CheckCircle2 size={20} />
-                                    Apply Treatments
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        </>
-                      )}
-
-                      {aiRecommendations.length === 0 && !aiAnalyzing && (
-                        <div className={`p-8 rounded-lg border text-center ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                          <Brain className={`mx-auto mb-3 ${isDark ? 'text-slate-600' : 'text-slate-400'}`} size={48} />
-                          <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>
-                            Click "Run AI Analysis" to get intelligent treatment recommendations
-                          </p>
-                        </div>
-                      )}
                     </div>
                   )}
                 </>
@@ -1644,53 +968,10 @@ const DataQuality: React.FC = () => {
                                       {issue.severity}
                                     </span>
                                   </div>
-                                  {issue.resolved ? (
-                                    <span className="text-green-500 flex items-center gap-1">
-                                      <CheckCircle size={16} /> Resolved
-                                    </span>
-                                  ) : (
-                                    currentResolvingIndex === idx && resolving ? (
-                                      <span className="text-blue-500 flex items-center gap-1">
-                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500" />
-                                        Resolving...
-                                      </span>
-                                    ) : null
-                                  )}
                                 </div>
                                 <div className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                                   {issue.type}: {issue.count} records ({issue.percent}%) affected
                                 </div>
-
-                                {!issue.resolved && issue.aiSuggestions && issue.aiSuggestions.length > 0 && (
-                                  <div className="mt-3">
-                                    <label className={`block text-xs font-medium mb-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                                      Select Treatment Method:
-                                    </label>
-                                    <select
-                                      value={issue.selectedMethod || ''}
-                                      onChange={(e) => {
-                                        setMetricsMap(prev => {
-                                          const updated = { ...prev };
-                                          const issueIndex = updated[dataset.id].issues.findIndex((i: any) => i.variable === issue.variable);
-                                          if (issueIndex !== -1) {
-                                            updated[dataset.id].issues[issueIndex].selectedMethod = e.target.value || undefined;
-                                          }
-                                          return updated;
-                                        });
-                                      }}
-                                      className={`w-full px-3 py-1 text-sm rounded border ${
-                                        isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'
-                                      }`}
-                                    >
-                                      <option value="">-- Select Treatment --</option>
-                                      {issue.aiSuggestions.map((suggestion: any, suggestionIdx: number) => (
-                                        <option key={suggestionIdx} value={suggestion.method}>
-                                          {suggestion.method} - {suggestion.description}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                )}
                               </div>
                             ))}
                           </div>
@@ -1701,22 +982,6 @@ const DataQuality: React.FC = () => {
                 </div>
               )}
 
-              {/* Footer - Lock Workflow */}
-              <div className="flex justify-between items-center pt-4">
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={lockWorkflow}
-                      onChange={(e) => setLockWorkflow(e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                      Lock Data Quality Workflow (Apply to scheduled reports)
-                    </span>
-                  </label>
-                </div>
-              </div>
             </>
           )}
         </div>

@@ -539,21 +539,7 @@ const ReportGeneration: React.FC = () => {
                 Quick Actions
               </h3>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <button
-                onClick={() => setShowScheduleForm(!showScheduleForm)}
-                className={`p-4 rounded-lg border flex items-center gap-3 ${
-                  isDark ? 'bg-blue-900/30 border-blue-500/50 hover:bg-blue-900/50 text-white' : 'bg-blue-50 border-blue-200 hover:bg-blue-100 text-slate-900'
-                }`}
-              >
-                <Clock size={20} className={isDark ? 'text-blue-400' : 'text-blue-600'} />
-                <div className="text-left">
-                  <div className="font-medium">Schedule Reports</div>
-                  <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                    Automate report generation
-                  </div>
-                </div>
-              </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <button
                 onClick={() => navigate('/reports')}
                 className={`p-4 rounded-lg border flex items-center gap-3 ${

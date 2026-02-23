@@ -1,4 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { 
+  BankingModel, 
+  BankingMetrics, 
+  SegmentMetrics,
+  VariableStability,
+  DecileData,
+  FeatureImportance,
+  generateCompleteBankingDataset 
+} from '../utils/bankingMetricsMock';
+import { 
+  syncRegistryModelsToDashboard,
+  mergeRegistryModelsWithExisting 
+} from '../utils/modelMetricsMapper';
 
 // Type Definitions
 export interface ProjectCode {
@@ -436,6 +449,16 @@ interface GlobalContextType {
   currentWorkflow: WorkflowState;
   setCurrentWorkflow: (workflow: WorkflowState) => void;
 
+  // Banking Metrics
+  bankingModels: BankingModel[];
+  bankingMetrics: BankingMetrics[];
+  getBankingModelMetrics: (modelId: string, vintage?: string) => BankingMetrics[];
+  getBankingModelsByPortfolio: (portfolio: string) => BankingModel[];
+  getBankingModelsByType: (modelType: string) => BankingModel[];
+  getMetricsByRAGStatus: (ragStatus: 'green' | 'amber' | 'red') => BankingMetrics[];
+  refreshBankingData: () => void;
+  syncRegistryModelsToDashboard: () => void;
+
   // Utility
   loadSampleData: () => void;
 }
@@ -459,6 +482,8 @@ const initialState: {
   schedulingJobs: SchedulingJob[];
   workflowLogs: WorkflowLog[];
   currentWorkflow: WorkflowState;
+  bankingModels: BankingModel[];
+  bankingMetrics: BankingMetrics[];
 } = {
   projects: [],
   ingestionJobs: [],
@@ -474,6 +499,8 @@ const initialState: {
   schedulingJobs: [],
   workflowLogs: [],
   currentWorkflow: {},
+  bankingModels: [],
+  bankingMetrics: [],
 };
 
 export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -851,6 +878,9 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       },
     ];
 
+    // Generate banking metrics dataset
+    const { models: bankingModels, metrics: bankingMetrics } = generateCompleteBankingDataset();
+
     return {
       ...initialState,
       projects: [sampleProject],
@@ -862,6 +892,8 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       generatedReports: sampleGeneratedReports,
       schedulingJobs: sampleSchedulingJobs,
       workflowLogs: sampleWorkflowLogs,
+      bankingModels,
+      bankingMetrics,
     };
   };
 
@@ -909,7 +941,16 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             schedulingJobs: parsed.schedulingJobs || [],
             workflowLogs: parsed.workflowLogs || [],
             currentWorkflow: parsed.currentWorkflow || {},
+            bankingModels: parsed.bankingModels || [],
+            bankingMetrics: parsed.bankingMetrics || [],
           };
+          
+          // If banking data is missing, generate it
+          if (!mergedState.bankingModels.length || !mergedState.bankingMetrics.length) {
+            const { models: bankingModels, metrics: bankingMetrics } = generateCompleteBankingDataset();
+            mergedState.bankingModels = bankingModels;
+            mergedState.bankingMetrics = bankingMetrics;
+          }
           
           // Data Migration: Synchronize projects and models on initialization
           if (mergedState.projects && Array.isArray(mergedState.projects) && 
@@ -950,7 +991,9 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       monitoring: state.monitoringJobs.length,
       reports: state.generatedReports.length,
       dataQuality: state.dataQualityReports.length,
-      scheduling: state.schedulingJobs.length
+      scheduling: state.schedulingJobs.length,
+      bankingModels: state.bankingModels.length,
+      bankingMetrics: state.bankingMetrics.length
     });
   }, []);
 
@@ -982,7 +1025,16 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             schedulingJobs: parsed.schedulingJobs || [],
             workflowLogs: parsed.workflowLogs || [],
             currentWorkflow: parsed.currentWorkflow || {},
+            bankingModels: parsed.bankingModels || [],
+            bankingMetrics: parsed.bankingMetrics || [],
           };
+          
+          // If banking data is missing, generate it
+          if (!mergedState.bankingModels.length || !mergedState.bankingMetrics.length) {
+            const { models: bankingModels, metrics: bankingMetrics } = generateCompleteBankingDataset();
+            mergedState.bankingModels = bankingModels;
+            mergedState.bankingMetrics = bankingMetrics;
+          }
           
           // Data Migration: Synchronize projects and models to ensure all models have valid projectIds
           if (mergedState.projects && Array.isArray(mergedState.projects) && 
@@ -1673,6 +1725,59 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     console.log('💾 Sample data saved to localStorage and state updated');
   };
 
+  // Banking Metrics Functions
+  const getBankingModelMetrics = (modelId: string, vintage?: string): BankingMetrics[] => {
+    let filtered = state.bankingMetrics.filter(m => m.model_id === modelId);
+    if (vintage) {
+      filtered = filtered.filter(m => m.vintage === vintage);
+    }
+    return filtered;
+  };
+
+  const getBankingModelsByPortfolio = (portfolio: string): BankingModel[] => {
+    return state.bankingModels.filter(m => m.portfolio === portfolio);
+  };
+
+  const getBankingModelsByType = (modelType: string): BankingModel[] => {
+    return state.bankingModels.filter(m => m.model_type === modelType);
+  };
+
+  const getMetricsByRAGStatus = (ragStatus: 'green' | 'amber' | 'red'): BankingMetrics[] => {
+    return state.bankingMetrics.filter(m => m.rag_status === ragStatus);
+  };
+
+  const refreshBankingData = () => {
+    const { models: bankingModels, metrics: bankingMetrics } = generateCompleteBankingDataset();
+    setState(prev => ({ ...prev, bankingModels, bankingMetrics }));
+    console.log('🔄 Banking data refreshed:', { models: bankingModels.length, metrics: bankingMetrics.length });
+  };
+
+  // Sync RegistryModels to Dashboard Banking Data
+  const syncRegistryModelsToDashboard = () => {
+    if (state.registryModels.length === 0) {
+      console.log('⚠️ No registry models to sync');
+      return;
+    }
+
+    const synced = mergeRegistryModelsWithExisting(
+      state.bankingModels,
+      state.bankingMetrics,
+      state.registryModels
+    );
+
+    setState(prev => ({
+      ...prev,
+      bankingModels: synced.bankingModels,
+      bankingMetrics: synced.bankingMetrics,
+    }));
+
+    console.log('✓ Synced registry models to dashboard:', {
+      totalModels: synced.bankingModels.length,
+      registryModels: state.registryModels.length,
+      totalMetrics: synced.bankingMetrics.length,
+    });
+  };
+
   const value: GlobalContextType = {
     projects: state.projects || [],
     createProject,
@@ -1752,6 +1857,14 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     getWorkflowLogsByProject,
     currentWorkflow: state.currentWorkflow || {},
     setCurrentWorkflow,
+    bankingModels: state.bankingModels || [],
+    bankingMetrics: state.bankingMetrics || [],
+    getBankingModelMetrics,
+    getBankingModelsByPortfolio,
+    getBankingModelsByType,
+    getMetricsByRAGStatus,
+    refreshBankingData,
+    syncRegistryModelsToDashboard,
     loadSampleData,
   };
 

@@ -54,6 +54,7 @@ const TopBarEnhanced: React.FC = () => {
   const [showLanguage, setShowLanguage] = useState(false);
   const [chatMessages, setChatMessages] = useState<Array<{ role: string; content: string }>>([]);
   const [chatInput, setChatInput] = useState('');
+  const [chatWelcomed, setChatWelcomed] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -202,37 +203,88 @@ const TopBarEnhanced: React.FC = () => {
     localStorage.setItem('userSettings', JSON.stringify(newSettings));
   };
 
+  const getBotReply = (message: string): string => {
+    const msg = message.toLowerCase();
+
+    if (msg.includes('attention') || (msg.includes('need') && msg.includes('monitor'))) {
+      return '**Models requiring attention:**\n\n**ACQ-ML-003** — PSI = 0.052 (approaching 0.1 threshold). Distribution drift detected.\n\n**ECM-LIMIT-001** — PSI = 0.031 (moderate). KS = 0.388, slightly below peers.\n\n**Action items:**\n• Review ACQ-ML-003 input variable distributions\n• Consider recalibration if PSI exceeds 0.1\n• Monitor ECM model for further degradation';
+    }
+    if (msg.includes('rag') || (msg.includes('red') && msg.includes('amber')) || (msg.includes('status') && msg.includes('mean'))) {
+      return '**RAG Status Indicators:**\n\n🟢 **Green** — Model performing well\n• KS > 0.4 AND PSI < 0.1\n\n🟡 **Amber** — Warning, needs monitoring\n• KS 0.3–0.4 OR PSI 0.1–0.25\n\n🔴 **Red** — Action required\n• KS < 0.3 OR PSI > 0.25\n\nMost models are currently Green. ECM-LIMIT-001 is Amber.';
+    }
+    if (msg.includes('compare') && msg.includes('portfolio')) {
+      return '**Portfolio Comparison:**\n\n**Acquisition** (3 models)\n• Best: ACQ-RET-002 — KS: 0.523, AUC: 0.876\n• Watch: ACQ-ML-003 — PSI elevated at 0.052\n\n**ECM** (1 model)\n• ECM-LIMIT-001 — KS: 0.388, needs improvement\n\n**Collections** (1 model)\n• COL-RISK-001 — KS: 0.412\n\n**Fraud** (1 model)\n• FRD-TXN-001 — KS: 0.623, 89% detection rate\n\n**Winner:** Fraud portfolio leads in performance';
+    }
+    if ((msg.includes('explain') || msg.includes('what')) && msg.includes('ks') && msg.includes('psi')) {
+      return '**KS (Kolmogorov-Smirnov):**\nMeasures how well the model separates good vs bad customers.\n• Target: > 0.4 (good), > 0.5 (excellent)\n\n**PSI (Population Stability Index):**\nMeasures how much the scored population has drifted.\n• < 0.1 stable, 0.1–0.25 monitor, > 0.25 action required\n\n**Together:** KS shows if model works, PSI shows if population changed. Both stable = healthy model!';
+    }
+    if (msg.includes('ks') && !msg.includes('psi')) {
+      return 'KS (Kolmogorov-Smirnov) measures the maximum separation between cumulative distributions of good and bad customers. Values above 0.4 indicate good discrimination. Most portfolio models show KS between 0.38–0.62.';
+    }
+    if (msg.includes('psi') && !msg.includes('ks')) {
+      return 'PSI (Population Stability Index) measures distribution drift. PSI < 0.1 is stable, 0.1–0.25 needs monitoring, > 0.25 requires action. Current models show PSI from 0.018 to 0.052 — stable populations overall.';
+    }
+    if (msg.includes('auc') || msg.includes('roc')) {
+      return 'AUC (Area Under ROC Curve) ranges from 0.5 (random) to 1.0 (perfect). Values above 0.7 are acceptable, above 0.8 are good. The fraud model achieves 0.91 AUC — outstanding performance.';
+    }
+    if (msg.includes('gini')) {
+      return 'Gini coefficient = 2×AUC − 1, ranging from 0 to 1. Values above 0.6 are good. It represents the area between the Lorenz curve and the diagonal, indicating model lift over random.';
+    }
+    if ((msg.includes('model') || msg.includes('which')) && msg.includes('perform')) {
+      return '**ACQ-RET-002** (ML) shows the best overall performance with KS=0.523 and AUC=0.876. **FRD-TXN-001** (Fraud) excels with KS=0.623 and 89% fraud detection rate. All models maintain stable PSI values.';
+    }
+    if (msg.includes('best') || msg.includes('top')) {
+      return '**Top 3 Models:**\n1. **FRD-TXN-001** (Fraud) — KS: 0.623, AUC: 0.912\n2. **ACQ-RET-002** (ML) — KS: 0.523, AUC: 0.876\n3. **ACQ-ML-003** (ML) — KS: 0.499, AUC: 0.857 (watch PSI)\n\nAll three show strong discrimination with KS > 0.49';
+    }
+    if (msg.includes('worst') || msg.includes('poor')) {
+      return '**Models needing improvement:**\n• **ECM-LIMIT-001** — KS: 0.388 (below 0.4 threshold)\n• Moderate discrimination, consider enhancement\n• PSI: 0.031 (acceptable)\n\nNot necessarily bad, but has room for optimisation.';
+    }
+    if (msg.includes('trend')) {
+      return 'Trend analysis shows stable KS performance across vintages for most models. PSI has slightly increased for ACQ-ML-003, suggesting potential distribution drift that requires monitoring.';
+    }
+    if (msg.includes('segment')) {
+      return 'Segment analysis shows that **thick_file** segments consistently outperform **thin_file** segments. For ACQ-RET-001: thick_file KS=0.492 vs thin_file KS=0.388 — highlighting the importance of segment-level monitoring.';
+    }
+    if (msg.includes('recommendation') || msg.includes('recommend') || msg.includes('action')) {
+      return '**Key recommendations:**\n1. Monitor ACQ-ML-003 closely (PSI=0.052, approaching threshold)\n2. Investigate thick_file vs thin_file performance gaps\n3. Leverage FRD-TXN-001 as best-practice benchmark\n4. Consider ECM-LIMIT-001 enhancements to improve KS\n5. Maintain current strategies for all stable models';
+    }
+    if (msg.includes('fraud')) {
+      return '**Fraud Model (FRD-TXN-001):**\n• KS: 0.623 (excellent)\n• AUC: 0.912 (outstanding)\n• Fraud detection rate: 89.45%\n• False positive rate: 2.34% (very low)\n• PSI: 0.019 (very stable)\n\nBest performing model in the portfolio.';
+    }
+    if (msg.includes('hello') || msg.includes('hi') || msg.includes('help')) {
+      return 'Hello! I am your Model Monitoring assistant. I can help you with:\n• **Metrics**: KS, PSI, AUC, Gini\n• **Models**: Which models need attention?\n• **RAG Status**: What do the colour indicators mean?\n• **Portfolios**: Compare portfolio performance\n• **Trends**: Drift and performance over time\n\nWhat would you like to know?';
+    }
+    return `I understand you are asking about "${message}". I can discuss:\n• KS, PSI, AUC metrics\n• Model performance comparisons\n• RAG status meanings\n• Portfolio analysis\n• Models needing attention\n\nTry: "Which models need attention?" or "Compare portfolios"`;
+  };
+
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (chatInput.trim()) {
-      const newMessages = [
-        ...chatMessages,
-        { role: 'user', content: chatInput }
-      ];
+    if (!chatInput.trim()) return;
+    const userMsg = chatInput.trim();
+    const reply = getBotReply(userMsg);
+    setChatMessages(prev => [
+      ...prev,
+      { role: 'user', content: userMsg },
+      { role: 'assistant', content: reply },
+    ]);
+    setChatInput('');
+    setTimeout(() => {
+      const chatContainer = document.getElementById('chat-messages-panel');
+      if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+    }, 0);
+  };
 
-      // Simulate AI response (mock - read-only advisory)
-      const responses = [
-        '💡 Based on your pipeline configuration, I recommend checking the data quality metrics. Consider adding data validation steps.',
-        '📊 Your model appears to have good accuracy (>0.92). Monitor for data drift in production to catch degradation early.',
-        '✅ The deployment looks healthy. All services are running normally with 99.8% uptime.',
-        '⚠️ I notice some anomalies in the training metrics. Your loss increased by 15% in the last run. Would you like to review the data?',
-        '🔧 For better model performance, consider: 1) Feature engineering, 2) Hyperparameter tuning, 3) Ensemble methods.',
-        '📈 Your inference latency is averaging 120ms. This is within acceptable range but monitor for degradation.',
-      ];
-      const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-
-      newMessages.push({ role: 'assistant', content: randomResponse });
-      setChatMessages(newMessages);
-      setChatInput('');
-
-      // Auto-scroll chat to bottom
-      setTimeout(() => {
-        const chatContainer = document.getElementById('chat-messages');
-        if (chatContainer) {
-          chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-      }, 0);
-    }
+  const handleSuggestion = (query: string) => {
+    const reply = getBotReply(query);
+    setChatMessages(prev => [
+      ...prev,
+      { role: 'user', content: query },
+      { role: 'assistant', content: reply },
+    ]);
+    setTimeout(() => {
+      const chatContainer = document.getElementById('chat-messages-panel');
+      if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+    }, 0);
   };
   const unreadNotifications = notifications.filter(n => !localStorage.getItem(`read-${n.id}`)).length;
 
@@ -282,51 +334,91 @@ const TopBarEnhanced: React.FC = () => {
           {/* LLM Chat */}
           <div className="relative">
             <button
-              onClick={() => setShowChat(!showChat)}
+              onClick={() => {
+                const opening = !showChat;
+                setShowChat(opening);
+                if (opening && !chatWelcomed) {
+                  setChatMessages([{ role: 'assistant', content: "Hi! I can help with model performance queries — status, KS, PSI, portfolios, trends, and RAG. Try a suggestion below or type your question." }]);
+                  setChatWelcomed(true);
+                }
+              }}
               className={`p-2 rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-200'}`}
-              title="AI Advisory Chat"
+              title="Model Performance Assistant"
             >
               <MessageSquare size={20} />
             </button>
 
             {showChat && (
-              <div className={`absolute right-0 top-12 w-80 h-96 ${theme === 'dark' ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-gray-200'} rounded-lg shadow-xl flex flex-col overflow-hidden`}>
-                <div className={`${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-100'} p-4 flex items-center justify-between border-b ${theme === 'dark' ? 'border-slate-600' : 'border-gray-200'}`}>
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <MessageSquare size={16} /> {t('chat')}
+              <div className={`absolute right-0 top-12 w-96 ${theme === 'dark' ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-gray-200'} rounded-lg shadow-xl flex flex-col overflow-hidden`} style={{ height: '480px' }}>
+                {/* Header */}
+                <div className="p-3 flex items-center justify-between" style={{ background: '#1e3a8a' }}>
+                  <h3 className="font-semibold flex items-center gap-2 text-sm" style={{ color: '#ffffff' }}>
+                    <MessageSquare size={15} /> Model Performance Assistant
                   </h3>
-                  <button onClick={() => setShowChat(false)} className="hover:opacity-70">
+                  <button onClick={() => setShowChat(false)} className="text-white hover:opacity-70">
                     <X size={16} />
                   </button>
                 </div>
 
-                <div id="chat-messages" className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {chatMessages.length === 0 ? (
-                    <div className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'} text-center mt-8`}>
-                      Ask our AI advisor about your ML pipelines, models, and deployments.
+                {/* Messages */}
+                <div id="chat-messages-panel" className="flex-1 overflow-y-auto p-3 space-y-2">
+                  {chatMessages.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div
+                        className={`max-w-[85%] px-3 py-2 rounded-xl text-sm leading-relaxed ${
+                          msg.role === 'user'
+                            ? 'bg-blue-500 text-white rounded-br-sm'
+                            : theme === 'dark'
+                            ? 'bg-slate-700 text-slate-100 rounded-bl-sm'
+                            : 'bg-slate-100 text-slate-900 rounded-bl-sm'
+                        }`}
+                        dangerouslySetInnerHTML={{
+                          __html: msg.role === 'assistant'
+                            ? msg.content
+                                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                                .replace(/\n/g, '<br/>')
+                            : msg.content,
+                        }}
+                      />
                     </div>
-                  ) : (
-                    chatMessages.map((msg, i) => (
-                      <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-xs px-3 py-2 rounded-lg text-sm ${msg.role === 'user' ? `${theme === 'dark' ? 'bg-blue-600' : 'bg-blue-500'} text-white` : `${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-100'}`}`}>
-                          {msg.content}
-                        </div>
-                      </div>
-                    ))
-                  )}
+                  ))}
                 </div>
 
+                {/* Suggestion chips */}
+                <div className={`px-3 py-2 border-t flex flex-wrap gap-1 ${theme === 'dark' ? 'border-slate-700' : 'border-gray-200'}`}>
+                  <span className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-white'} w-full mb-1`}>Try asking:</span>
+                  {[
+                    'Which models need attention?',
+                    'What does RAG status mean?',
+                    'Compare portfolios',
+                    'Explain KS and PSI',
+                  ].map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => handleSuggestion(q)}
+                      className={`px-2 py-1 rounded-full text-xs border transition-colors ${
+                        theme === 'dark'
+                          ? 'bg-slate-700 border-slate-600 text-blue-300 hover:bg-slate-600'
+                          : 'bg-slate-600 border-slate-500 text-white hover:bg-slate-700'
+                      }`}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Input */}
                 <form onSubmit={handleSendMessage} className={`p-3 border-t ${theme === 'dark' ? 'border-slate-700' : 'border-gray-200'}`}>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
-                      placeholder={t('askAdvisor')}
-                      className={`flex-1 px-3 py-1 rounded text-sm outline-none ${theme === 'dark' ? 'bg-slate-700 border border-slate-600 text-white' : 'bg-white border border-gray-300 text-slate-900'}`}
+                      placeholder="Ask about KS, PSI, RAG status, portfolios…"
+                      className={`flex-1 px-3 py-1.5 rounded-lg text-sm outline-none ${theme === 'dark' ? 'bg-slate-700 border border-slate-600 text-white placeholder-slate-400' : 'bg-white border border-gray-300 text-slate-900 placeholder-slate-400'}`}
                     />
-                    <button type="submit" className="p-1 hover:opacity-70 transition-opacity">
-                      <Send size={16} />
+                    <button type="submit" className="p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                      <Send size={14} />
                     </button>
                   </div>
                 </form>
