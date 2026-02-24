@@ -12,7 +12,7 @@ export interface ExportOptions {
     ragStatus: boolean;
     trends: boolean;
     segments: boolean;
-    deciles: boolean;
+    volumeBadRate: boolean;
     variables: boolean;
   };
   format: 'pdf' | 'ppt';
@@ -208,10 +208,10 @@ export async function exportDashboardAsPDF(options: ExportOptions): Promise<void
     }
   }
 
-  if (options.includeSections.deciles) {
+  if (options.includeSections.volumeBadRate) {
     checkBreak(20);
-    y = addPDFSectionHeader(pdf, '5. Decile Analysis', y, pageWidth, margin);
-    const img = await captureSection('export-deciles');
+    y = addPDFSectionHeader(pdf, '5. Volume vs Bad Rate', y, pageWidth, margin);
+    const img = await captureSection('export-volumeBadRate');
     if (img) {
       const imgH = contentWidth * 0.55;
       checkBreak(imgH);
@@ -322,9 +322,9 @@ export async function exportDashboardAsPPT(options: ExportOptions): Promise<void
     if (img) s.addImage({ data:img, x:1.0, y:0.8, w:W-2.0, h:H-1.4 });
   }
 
-  if (options.includeSections.deciles) {
-    const s = pptx.addSlide(); addSlideHeader(s, 'Decile Analysis');
-    const img = await captureSection('export-deciles');
+  if (options.includeSections.volumeBadRate) {
+    const s = pptx.addSlide(); addSlideHeader(s, 'Volume vs Bad Rate');
+    const img = await captureSection('export-volumeBadRate');
     if (img) s.addImage({ data:img, x:1.0, y:0.8, w:W-2.0, h:H-1.4 });
   }
 

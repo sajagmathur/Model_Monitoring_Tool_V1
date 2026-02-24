@@ -86,6 +86,19 @@ export interface FeatureImportance {
   drift?: number;
 }
 
+export interface QuarterlyVolumeData {
+  quarter: string;
+  volume: number;
+  badRate: number;
+}
+
+export interface ScoreBandData {
+  band: string;
+  shortLabel: string;
+  volume: number;
+  badRate: number;
+}
+
 // Constants
 const PORTFOLIOS = ['Retail', 'Corporate', 'SME', 'Acquisition', 'ECM', 'Collections', 'Fraud'];
 const MODEL_TYPES = ['Acquisition Scorecard', 'ECM Scorecard', 'Bureau', 'Collections', 'Fraud', 'ML'];
@@ -259,23 +272,36 @@ export function generateMetricsTimeSeries(
 
 /**
  * Generate segment comparison metrics for Acquisition Scorecard
+ * dataset: 'training' gives stable/better baseline metrics; 'monitoring' shows possible drift
  */
-export function generateSegmentMetrics(modelId: string, vintage: string): SegmentMetrics {
+export function generateSegmentMetrics(
+  modelId: string,
+  vintage: string,
+  dataset: 'training' | 'monitoring' = 'monitoring'
+): SegmentMetrics {
+  const ksDelta = dataset === 'training' ? 0.05 : 0;
+  const psiCap = dataset === 'training' ? 0.05 : 0.20;
   return {
     model_id: modelId,
     vintage,
     segments: [
       {
         segment: 'thin_file',
-        label: 'Thin file',
+        label: 'Thin File',
         volume: randInt(8000, 20000),
-        metrics: generateMetricsForType('Acquisition Scorecard', randBetween(0.32, 0.42)),
+        metrics: {
+          ...generateMetricsForType('Acquisition Scorecard', randBetween(0.32 + ksDelta, 0.42 + ksDelta)),
+          PSI: Math.min(psiCap, Math.max(0.01, randBetween(0.01, psiCap))),
+        },
       },
       {
         segment: 'thick_file',
-        label: 'Thick file',
+        label: 'Thick File',
         volume: randInt(15000, 35000),
-        metrics: generateMetricsForType('Acquisition Scorecard', randBetween(0.42, 0.52)),
+        metrics: {
+          ...generateMetricsForType('Acquisition Scorecard', randBetween(0.42 + ksDelta, 0.52 + ksDelta)),
+          PSI: Math.min(psiCap, Math.max(0.01, randBetween(0.01, psiCap))),
+        },
       },
     ],
   };
@@ -283,8 +309,13 @@ export function generateSegmentMetrics(modelId: string, vintage: string): Segmen
 
 /**
  * Generate variable-level stability analysis
+ * dataset: 'training' gives lower PSI (stable reference); 'monitoring' may show drift
  */
-export function generateVariableStability(modelId: string, vintage: string): VariableStability[] {
+export function generateVariableStability(
+  modelId: string,
+  vintage: string,
+  dataset: 'training' | 'monitoring' = 'monitoring'
+): VariableStability[] {
   const variables = [
     'credit_score', 'debt_to_income', 'age', 'income', 'employment_length',
     'num_accounts', 'total_balance', 'credit_utilization', 'payment_history',
@@ -293,9 +324,13 @@ export function generateVariableStability(modelId: string, vintage: string): Var
     'external_rating', 'income_verified', 'home_ownership', 'purpose', 'state',
     'num_collections', 'total_credit_limit', 'avg_account_balance'
   ];
-  
+
+  // Training data has lower PSI (reference/baseline), monitoring may drift
+  const psiMax = dataset === 'training' ? 0.12 : 0.30;
+  const psiMin = dataset === 'training' ? 0.005 : 0.01;
+
   return variables.map((variable) => {
-    const psi = Math.max(0.005, randBetween(0.01, 0.30));
+    const psi = Math.max(psiMin, randBetween(psiMin, psiMax));
     return {
       variable,
       psi: parseFloat(psi.toFixed(4)),
@@ -372,6 +407,110 @@ export function generateMLExplainability(modelId: string): FeatureImportance[] {
     .map((item, idx) => ({ ...item, rank: idx + 1 }));
   
   return importances;
+}
+
+/**
+ * Generate quarterly volume and bad rate data by segment and dataset
+ */
+export function generateQuarterlyVolumeData(
+  modelId: string,
+  segment: 'thin_file' | 'thick_file' | 'all' = 'all',
+  dataset: 'training' | 'monitoring' = 'monitoring'
+): QuarterlyVolumeData[] {
+  const modelSeed = modelId.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  seed = (modelSeed % 900) + 10;
+
+  const quarters = ['Q1 2024', 'Q2 2024', 'Q3 2024', 'Q4 2024'];
+  const baseVolThin = randInt(8000, 15000);
+  const baseVolThick = randInt(15000, 28000);
+  const baseBRThin = dataset === 'training' ? randBetween(0.04, 0.07) : randBetween(0.065, 0.10);
+  const baseBRThick = dataset === 'training' ? randBetween(0.02, 0.045) : randBetween(0.035, 0.07);
+
+  return quarters.map((quarter, idx) => {
+    // Monitoring shows mild upward drift in bad rate over quarters
+    const driftFactor = dataset === 'monitoring' ? 1 + idx * 0.04 : 1 + idx * 0.005;
+
+    if (segment === 'thin_file') {
+      const volume = Math.floor(baseVolThin * (1 + idx * 0.07 + randBetween(-0.04, 0.04)));
+      const badRate = parseFloat(Math.min(0.25, baseBRThin * driftFactor + randBetween(-0.004, 0.004)).toFixed(4));
+      return { quarter, volume, badRate };
+    } else if (segment === 'thick_file') {
+      const volume = Math.floor(baseVolThick * (1 + idx * 0.05 + randBetween(-0.04, 0.04)));
+      const badRate = parseFloat(Math.min(0.15, baseBRThick * driftFactor + randBetween(-0.003, 0.003)).toFixed(4));
+      return { quarter, volume, badRate };
+    } else {
+      // All: aggregate thin + thick
+      const vt = Math.floor(baseVolThin * (1 + idx * 0.07 + randBetween(-0.04, 0.04)));
+      const vk = Math.floor(baseVolThick * (1 + idx * 0.05 + randBetween(-0.04, 0.04)));
+      const volume = vt + vk;
+      const brt = Math.min(0.25, baseBRThin * driftFactor);
+      const brk = Math.min(0.15, baseBRThick * driftFactor);
+      const badRate = parseFloat(((brt * vt + brk * vk) / volume).toFixed(4));
+      return { quarter, volume, badRate };
+    }
+  });
+}
+
+/**
+ * Generate score-band volume and bad rate data by segment and dataset
+ */
+export function generateScoreBandData(
+  modelId: string,
+  segment: 'thin_file' | 'thick_file' | 'all' = 'all',
+  dataset: 'training' | 'monitoring' = 'monitoring'
+): ScoreBandData[] {
+  const modelSeed = modelId.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  seed = (modelSeed % 900) + 200;
+
+  const driftFactor = dataset === 'monitoring' ? 1.18 : 1.0;
+  const segVolMult = segment === 'thin_file' ? 0.42 : segment === 'thick_file' ? 0.65 : 1.0;
+  const segBRMult = segment === 'thin_file' ? 1.35 : segment === 'thick_file' ? 0.75 : 1.0;
+
+  return [
+    { band: 'Band 1 — Low Risk',  shortLabel: 'Low' },
+    { band: 'Band 2 — Med-Low',   shortLabel: 'Med-Low' },
+    { band: 'Band 3 — Med-High',  shortLabel: 'Med-High' },
+    { band: 'Band 4 — High Risk', shortLabel: 'High' },
+  ].map(({ band, shortLabel }, idx) => {
+    const baseVol = randInt(6000, 16000);
+    const volume = Math.floor(baseVol * segVolMult + randBetween(-500, 500));
+    const baseBR = 0.02 + idx * 0.055;
+    const badRate = parseFloat(Math.min(0.55, baseBR * segBRMult * driftFactor + randBetween(-0.008, 0.008)).toFixed(4));
+    return { band, shortLabel, volume, badRate };
+  });
+}
+
+/**
+ * Generate baseline (training) metrics for a model — used in compare mode
+ * Returns a stable, better-performing series representing training/reference data
+ */
+export function generateBaselineMetrics(
+  model: BankingModel,
+  segment: string | undefined,
+  vintages: string[] = VINTAGES
+): BankingMetrics[] {
+  const modelSeed = model.model_id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  seed = (modelSeed % 800) + 99;
+
+  return vintages.map((vintage, idx) => {
+    // Training has higher base KS (well-performing), low PSI (reference period)
+    const baseKS = randBetween(0.40, 0.54);
+    const adjustedKS = baseKS + randBetween(-0.01, 0.01); // very stable
+    const metrics = generateMetricsForType(model.model_type, adjustedKS);
+    // Force low PSI — training is the reference so drift = 0
+    metrics.PSI = parseFloat(Math.max(0.005, randBetween(0.005, 0.04)).toFixed(4));
+    return {
+      model_id: model.model_id,
+      portfolio: model.portfolio,
+      model_type: model.model_type,
+      vintage,
+      segment,
+      volume: randInt(10000, 28000),
+      metrics,
+      computed_at: new Date(2023, idx, 15).toISOString(),
+      rag_status: calculateRAGStatus(metrics.KS, metrics.PSI),
+    };
+  });
 }
 
 /**

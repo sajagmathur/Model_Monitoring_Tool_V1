@@ -5,11 +5,14 @@ import { ArrowUp, ArrowDown, Minus } from 'lucide-react';
 interface VariableStabilityTableProps {
   variables: VariableStability[];
   maxRows?: number;
+  /** When provided (compare mode), shows Baseline PSI and delta columns */
+  baselineVariables?: VariableStability[];
 }
 
 export const VariableStabilityTable: React.FC<VariableStabilityTableProps> = ({ 
   variables,
-  maxRows = 20
+  maxRows = 20,
+  baselineVariables,
 }) => {
   // Sort by PSI descending (most unstable first)
   const sortedVariables = useMemo(() => {
@@ -17,6 +20,14 @@ export const VariableStabilityTable: React.FC<VariableStabilityTableProps> = ({
       .sort((a, b) => b.psi - a.psi)
       .slice(0, maxRows);
   }, [variables, maxRows]);
+
+  // Build baseline lookup map
+  const baselineMap = useMemo(() => {
+    if (!baselineVariables) return {};
+    return Object.fromEntries(baselineVariables.map(v => [v.variable, v]));
+  }, [baselineVariables]);
+
+  const isCompareMode = !!baselineVariables && baselineVariables.length > 0;
 
   const getStatusBadge = (status: 'stable' | 'warning' | 'unstable') => {
     const styles = {
@@ -63,9 +74,19 @@ export const VariableStabilityTable: React.FC<VariableStabilityTableProps> = ({
             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200">
               Variable
             </th>
+            {isCompareMode && (
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b-2 border-gray-200">
+                Baseline PSI
+              </th>
+            )}
             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200">
-              PSI
+              {isCompareMode ? 'Current PSI' : 'PSI'}
             </th>
+            {isCompareMode && (
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200">
+                Delta
+              </th>
+            )}
             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200">
               Status
             </th>
@@ -75,30 +96,51 @@ export const VariableStabilityTable: React.FC<VariableStabilityTableProps> = ({
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {sortedVariables.map((variable, idx) => (
-            <tr 
-              key={variable.variable} 
-              className={`hover:bg-gray-50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
-            >
-              <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                {variable.variable.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-              </td>
-              <td className="px-4 py-3 text-sm text-gray-700 font-mono">
-                {variable.psi.toFixed(4)}
-              </td>
-              <td className="px-4 py-3">
-                {getStatusBadge(variable.status)}
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex items-center gap-2">
-                  {getPSIBar(variable.psi)}
-                  <span className="text-xs text-gray-500 min-w-fit">
-                    {variable.psi < 0.10 ? 'Stable' : variable.psi < 0.25 ? 'Monitor' : 'Alert'}
-                  </span>
-                </div>
-              </td>
-            </tr>
-          ))}
+          {sortedVariables.map((variable, idx) => {
+            const baseline = baselineMap[variable.variable];
+            const delta = baseline ? variable.psi - baseline.psi : undefined;
+            return (
+              <tr 
+                key={variable.variable} 
+                className={`hover:bg-gray-50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
+              >
+                <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                  {variable.variable.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </td>
+                {isCompareMode && (
+                  <td className="px-4 py-3 text-sm text-gray-500 font-mono">
+                    {baseline ? baseline.psi.toFixed(4) : '—'}
+                  </td>
+                )}
+                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                  {variable.psi.toFixed(4)}
+                </td>
+                {isCompareMode && (
+                  <td className="px-4 py-3 text-sm font-mono">
+                    {delta !== undefined ? (
+                      <span className={`inline-flex items-center gap-1 ${
+                        delta > 0.02 ? 'text-red-600' : delta < -0.02 ? 'text-green-600' : 'text-gray-500'
+                      }`}>
+                        {delta > 0.005 ? <ArrowUp className="w-3 h-3" /> : delta < -0.005 ? <ArrowDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                        {delta > 0 ? '+' : ''}{delta.toFixed(4)}
+                      </span>
+                    ) : '—'}
+                  </td>
+                )}
+                <td className="px-4 py-3">
+                  {getStatusBadge(variable.status)}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    {getPSIBar(variable.psi)}
+                    <span className="text-xs text-gray-500 min-w-fit">
+                      {variable.psi < 0.10 ? 'Stable' : variable.psi < 0.25 ? 'Monitor' : 'Alert'}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {variables.length > maxRows && (

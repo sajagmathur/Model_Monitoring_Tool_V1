@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlobal } from '../contexts/GlobalContext';
 import { useNotification } from '../hooks/useNotification';
-import { ChevronRight, Download, Filter, FileText, Presentation, X, CheckCircle } from 'lucide-react';
+import { ChevronRight, Download, FileText, Presentation, X, CheckCircle } from 'lucide-react';
 import { exportDashboard } from '../utils/dashboardExport';
 import { KPICard, SkeletonLoader } from '../components/DashboardWidgets';
 import ModelHealthGauge from '../components/charts/ModelHealthGauge';
@@ -16,7 +16,7 @@ import { PortfolioRAGChart } from '../components/charts/PortfolioRAGChart';
 import { BankingMetricsTrendChart } from '../components/charts/BankingMetricsTrendChart';
 import { SegmentComparisonChart } from '../components/charts/SegmentComparisonChart';
 import { VariableStabilityTable } from '../components/charts/VariableStabilityTable';
-import { DecileAnalysisChart } from '../components/charts/DecileAnalysisChart';
+import { VolumeVsBadRateChart } from '../components/charts/VolumeVsBadRateChart';
 import {
   transformReportsToTimeSeries,
   aggregateModelHealth,
@@ -29,7 +29,11 @@ import {
 import {
   generateSegmentMetrics,
   generateVariableStability,
-  generateDecileAnalysis,
+  generateQuarterlyVolumeData,
+  generateScoreBandData,
+  generateBaselineMetrics,
+  calculateRAGStatus,
+  type BankingMetrics,
 } from '../utils/bankingMetricsMock';
 
 interface Alert {
@@ -71,7 +75,7 @@ const Dashboard: React.FC = () => {
     ragStatus: true,
     trends: true,
     segments: true,
-    deciles: true,
+    volumeBadRate: true,
     variables: true,
   });
   const [exporting, setExporting] = useState(false);
@@ -79,23 +83,27 @@ const Dashboard: React.FC = () => {
     ragStatus: 'chart' | 'table';
     trends: 'chart' | 'table';
     segments: 'chart' | 'table';
-    deciles: 'chart' | 'table';
+    volumeBadRate: 'chart' | 'table';
     variables: 'chart' | 'table';
   }>({
     ragStatus: 'chart',
     trends: 'chart',
     segments: 'chart',
-    deciles: 'chart',
+    volumeBadRate: 'chart',
     variables: 'table',
   });
-  const [filters, setFilters] = useState({
-    portfolio: 'All',
-    businessLine: 'All',
-    modelType: 'All',
-    model: 'All',
-    timeWindow: 'Last 30 Days',
-    segment: 'All',
-  });
+
+  // Segment filter (Thin File / Thick File / All)
+  const [selectedSegment, setSelectedSegment] = useState<'all' | 'thin_file' | 'thick_file'>('all');
+
+  // Compare mode: baseline (Training) vs current (Monitoring)
+  const [compareMode, setCompareMode] = useState(false);
+  const [selectedDataset, setSelectedDataset] = useState<'training' | 'monitoring'>('monitoring');
+  const [baselineDataset, setBaselineDataset] = useState<'training' | 'monitoring'>('training');
+  const [currentDataset, setCurrentDataset] = useState<'training' | 'monitoring'>('monitoring');
+
+  // Volume vs Bad Rate display toggle
+  const [volumeDisplayMode, setVolumeDisplayMode] = useState<'quarterly' | 'scorebands'>('quarterly');
 
   // Auto-load sample data if no data exists
   useEffect(() => {
@@ -230,8 +238,8 @@ const Dashboard: React.FC = () => {
     }
     
     // Apply portfolio filter
-    if (filters.portfolio !== 'All') {
-      filteredBankingMetrics = filteredBankingMetrics.filter(m => m.portfolio === filters.portfolio);
+    if (false) {
+      // portfolio filter removed — kept for future use
     }
     
     // Get latest vintage metrics per model
@@ -338,50 +346,64 @@ const Dashboard: React.FC = () => {
     ingestionJobs,
     bankingMetrics,
     selectedRAGFilter,
-    filters.portfolio,
   ]);
 
-  const filterOptions = {
-    portfolio: ['All', ...Array.from(new Set(bankingModels.map(m => m.portfolio)))],
-    businessLine: ['All', 'Retail', 'Commercial', 'Digital'],
-    modelType: ['All', 'Classification', 'Regression', 'Ranking'],
-    model: ['All', ...registryModels.map((m) => m.name)],
-    timeWindow: ['Last 7 Days', 'Last 30 Days', 'Last 90 Days', 'Year to Date'],
-    segment: ['All', 'Prime', 'Non-Prime', 'Subprime'],
-  };
+  // ─────────────────────────────────────────────────────
+  // Segment-filtered metrics for the selected model
+  // ─────────────────────────────────────────────────────
+  const segmentFilteredMetrics = useMemo((): BankingMetrics[] => {
+    if (!selectedBankingModel) return [];
+    const allModelMetrics = bankingMetrics.filter(m => m.model_id === selectedBankingModel);
+    if (selectedSegment === 'all') {
+      const thinM = allModelMetrics.filter(m => m.segment === 'thin_file');
+      const thickM = allModelMetrics.filter(m => m.segment === 'thick_file');
+      const unseg = allModelMetrics.filter(m => !m.segment);
+      if (thinM.length > 0 && thickM.length > 0) {
+        const vintages = [...new Set(allModelMetrics.map(m => m.vintage))].sort();
+        return vintages.map(vintage => {
+          const thin = thinM.find(m => m.vintage === vintage);
+          const thick = thickM.find(m => m.vintage === vintage);
+          if (!thin && !thick) return null as any;
+          if (!thin) return thick!;
+          if (!thick) return thin!;
+          const totalVol = thin.volume + thick.volume;
+          const wt = thin.volume / totalVol;
+          const wk = thick.volume / totalVol;
+          const wavg = (a?: number, b?: number) =>
+            a !== undefined && b !== undefined ? a * wt + b * wk : (a ?? b);
+          return {
+            ...thin,
+            segment: undefined,
+            volume: totalVol,
+            metrics: {
+              KS: wavg(thin.metrics.KS, thick.metrics.KS),
+              PSI: wavg(thin.metrics.PSI, thick.metrics.PSI),
+              AUC: wavg(thin.metrics.AUC, thick.metrics.AUC),
+              Gini: wavg(thin.metrics.Gini, thick.metrics.Gini),
+              bad_rate: wavg(thin.metrics.bad_rate, thick.metrics.bad_rate),
+              CA_at_10: wavg(thin.metrics.CA_at_10, thick.metrics.CA_at_10),
+            },
+            rag_status: calculateRAGStatus(
+              wavg(thin.metrics.KS, thick.metrics.KS),
+              wavg(thin.metrics.PSI, thick.metrics.PSI)
+            ),
+          } as BankingMetrics;
+        }).filter(Boolean);
+      }
+      return unseg.length > 0 ? unseg : allModelMetrics;
+    }
+    const filtered = allModelMetrics.filter(m => m.segment === selectedSegment);
+    return filtered.length > 0 ? filtered : allModelMetrics;
+  }, [selectedBankingModel, bankingMetrics, selectedSegment]);
 
-  const FilterBar: React.FC = () => {
-    return (
-      <div className={`p-4 rounded-lg border mb-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-        <div className="flex items-center gap-2 mb-4">
-          <Filter size={18} className={isDark ? 'text-slate-400' : 'text-slate-600'} />
-          <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Global Filters</h3>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          {Object.entries(filterOptions).map(([key, options]) => (
-            <select
-              key={key}
-              value={filters[key as keyof typeof filters]}
-              onChange={(e) =>
-                setFilters({ ...filters, [key]: e.target.value })
-              }
-              className={`px-3 py-2 rounded border text-sm ${
-                isDark
-                  ? 'bg-slate-700 border-slate-600 text-white'
-                  : 'bg-white border-slate-300 text-slate-900'
-              }`}
-            >
-              {options.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          ))}
-        </div>
-      </div>
-    );
-  };
+  // Baseline (Training) metrics for compare mode
+  const baselineFilteredMetrics = useMemo((): BankingMetrics[] => {
+    if (!compareMode || !selectedBankingModel) return [];
+    const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
+    if (!selectedModel) return [];
+    const seg = selectedSegment !== 'all' ? selectedSegment : undefined;
+    return generateBaselineMetrics(selectedModel, seg);
+  }, [compareMode, selectedBankingModel, selectedSegment, bankingModels]);
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
@@ -506,8 +528,108 @@ const Dashboard: React.FC = () => {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Filters */}
-        <FilterBar />
+        {/* Controls Bar: Segment + Dataset / Compare Mode */}
+        <div className={`p-4 rounded-lg border mb-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div className="flex flex-wrap items-center gap-6">
+            {/* Segment Filter */}
+            <div className="flex items-center gap-3">
+              <span className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Segment:</span>
+              <div className="flex gap-1">
+                {(['all', 'thin_file', 'thick_file'] as const).map(seg => (
+                  <button
+                    key={seg}
+                    onClick={() => setSelectedSegment(seg)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                      selectedSegment === seg
+                        ? 'bg-blue-600 text-white'
+                        : isDark
+                          ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {seg === 'all' ? 'All' : seg === 'thin_file' ? 'Thin File' : 'Thick File'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className={`h-6 w-px ${isDark ? 'bg-slate-600' : 'bg-slate-300'}`} />
+
+            {/* Compare Mode Toggle + Dataset Selectors */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={() => setCompareMode(prev => !prev)}
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors border ${
+                  compareMode
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : isDark
+                      ? 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                      : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                ⇄ Compare Mode {compareMode ? 'ON' : 'OFF'}
+              </button>
+
+              {compareMode ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1">
+                    <span className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Baseline:</span>
+                    <select
+                      value={baselineDataset}
+                      onChange={e => setBaselineDataset(e.target.value as 'training' | 'monitoring')}
+                      className={`text-xs px-2 py-1 rounded border ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                    >
+                      <option value="training">Training</option>
+                      <option value="monitoring">Monitoring</option>
+                    </select>
+                  </div>
+                  <span className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>vs</span>
+                  <div className="flex items-center gap-1">
+                    <span className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Current:</span>
+                    <select
+                      value={currentDataset}
+                      onChange={e => setCurrentDataset(e.target.value as 'training' | 'monitoring')}
+                      className={`text-xs px-2 py-1 rounded border ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                    >
+                      <option value="training">Training</option>
+                      <option value="monitoring">Monitoring</option>
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <span className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Dataset:</span>
+                  <select
+                    value={selectedDataset}
+                    onChange={e => setSelectedDataset(e.target.value as 'training' | 'monitoring')}
+                    className={`text-xs px-2 py-1 rounded border ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                  >
+                    <option value="training">Training</option>
+                    <option value="monitoring">Monitoring</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Active filter chips */}
+            {(selectedSegment !== 'all' || compareMode) && (
+              <div className="flex items-center gap-2 ml-auto flex-wrap">
+                {selectedSegment !== 'all' && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>
+                    {selectedSegment === 'thin_file' ? 'Thin File' : 'Thick File'}
+                    <button onClick={() => setSelectedSegment('all')} className="ml-1 hover:opacity-70">×</button>
+                  </span>
+                )}
+                {compareMode && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${isDark ? 'bg-indigo-900/40 text-indigo-300' : 'bg-indigo-50 text-indigo-700'}`}>
+                    {baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} vs {currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
 
         {loading ? (
           <SkeletonLoader count={6} isDark={isDark} variant="card" />
@@ -679,8 +801,8 @@ const Dashboard: React.FC = () => {
                 {/* Model Performance Analysis */}
                 {selectedBankingModel && (() => {
                   const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
-                  const modelMetrics = bankingMetrics.filter(m => m.model_id === selectedBankingModel);
-                  const latestMetric = modelMetrics.sort((a, b) => b.vintage.localeCompare(a.vintage))[0];
+                  const modelMetrics = segmentFilteredMetrics;
+                  const latestMetric = [...modelMetrics].sort((a, b) => b.vintage.localeCompare(a.vintage))[0];
                   
                   return (
                     <div id="export-model-section" className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -807,6 +929,9 @@ const Dashboard: React.FC = () => {
                                   metrics={modelMetrics}
                                   metricKey="KS"
                                   height={200}
+                                  baselineMetrics={compareMode ? baselineFilteredMetrics : undefined}
+                                  currentLabel={compareMode ? `KS — ${currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}` : 'KS'}
+                                  baselineLabel={`KS — ${baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} (Baseline)`}
                                 />
                               </div>
                             )}
@@ -819,6 +944,9 @@ const Dashboard: React.FC = () => {
                                   metrics={modelMetrics}
                                   metricKey="PSI"
                                   height={200}
+                                  baselineMetrics={compareMode ? baselineFilteredMetrics : undefined}
+                                  currentLabel={compareMode ? `PSI — ${currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}` : 'PSI'}
+                                  baselineLabel={`PSI — ${baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} (Baseline)`}
                                 />
                               </div>
                             )}
@@ -831,6 +959,9 @@ const Dashboard: React.FC = () => {
                                   metrics={modelMetrics}
                                   metricKey="AUC"
                                   height={200}
+                                  baselineMetrics={compareMode ? baselineFilteredMetrics : undefined}
+                                  currentLabel={compareMode ? `AUC — ${currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}` : 'AUC'}
+                                  baselineLabel={`AUC — ${baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} (Baseline)`}
                                 />
                               </div>
                             )}
@@ -889,12 +1020,38 @@ const Dashboard: React.FC = () => {
                   );
                 })()}
 
-                {/* Segment & Decile Analysis */}
+                {/* Segment & Volume vs Bad Rate Analysis */}
                 {selectedBankingModel && (() => {
-                  const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
-                  const segmentData = generateSegmentMetrics(selectedBankingModel, dashboardData.latestMetrics[0]?.vintage || '2024-12');
-                  const decileData = generateDecileAnalysis(selectedBankingModel, dashboardData.latestMetrics[0]?.vintage || '2024-12');
-                  
+                  const vintage = dashboardData.latestMetrics[0]?.vintage || '2024-12';
+                  const currentDatasetType = compareMode ? currentDataset : selectedDataset;
+
+                  // Segment data
+                  const segmentData = generateSegmentMetrics(selectedBankingModel, vintage, currentDatasetType);
+                  const baselineSegDataForChart = compareMode
+                    ? generateSegmentMetrics(selectedBankingModel, vintage, baselineDataset)
+                    : undefined;
+
+                  // Volume vs Bad Rate data
+                  const rawVol = volumeDisplayMode === 'quarterly'
+                    ? generateQuarterlyVolumeData(selectedBankingModel, selectedSegment, currentDatasetType)
+                    : generateScoreBandData(selectedBankingModel, selectedSegment, currentDatasetType);
+                  const volumeData = rawVol.map(d => ({
+                    label: volumeDisplayMode === 'quarterly' ? (d as any).quarter : (d as any).shortLabel,
+                    volume: d.volume,
+                    badRate: d.badRate,
+                  }));
+
+                  const rawBaseVol = compareMode
+                    ? (volumeDisplayMode === 'quarterly'
+                        ? generateQuarterlyVolumeData(selectedBankingModel, selectedSegment, baselineDataset)
+                        : generateScoreBandData(selectedBankingModel, selectedSegment, baselineDataset))
+                    : undefined;
+                  const baselineVolumeData = rawBaseVol?.map(d => ({
+                    label: volumeDisplayMode === 'quarterly' ? (d as any).quarter : (d as any).shortLabel,
+                    volume: d.volume,
+                    badRate: d.badRate,
+                  }));
+
                   return (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       {/* Segment Comparison */}
@@ -902,6 +1059,7 @@ const Dashboard: React.FC = () => {
                         <div className="flex items-center justify-between mb-4">
                           <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
                             Segment Comparison
+                            {compareMode && <span className={`ml-2 text-xs font-normal px-2 py-0.5 rounded-full ${isDark ? 'bg-indigo-900/40 text-indigo-300' : 'bg-indigo-50 text-indigo-600'}`}>Compare Mode</span>}
                           </h3>
                           <div className="flex items-center gap-2">
                             <button
@@ -911,9 +1069,7 @@ const Dashboard: React.FC = () => {
                                   ? 'bg-blue-600 text-white'
                                   : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'
                               }`}
-                            >
-                              Chart
-                            </button>
+                            >Chart</button>
                             <button
                               onClick={() => setViewModes({...viewModes, segments: 'table'})}
                               className={`px-3 py-1 rounded text-sm ${
@@ -921,15 +1077,17 @@ const Dashboard: React.FC = () => {
                                   ? 'bg-blue-600 text-white'
                                   : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'
                               }`}
-                            >
-                              Table
-                            </button>
+                            >Table</button>
                           </div>
                         </div>
-                        
+
                         {viewModes.segments === 'chart' ? (
                           <div style={{ height: '300px' }}>
-                            <SegmentComparisonChart segmentData={segmentData} />
+                            <SegmentComparisonChart
+                              segmentData={segmentData}
+                              activeSegment={selectedSegment}
+                              baselineSegmentData={baselineSegDataForChart}
+                            />
                           </div>
                         ) : (
                           <div className="overflow-auto">
@@ -945,24 +1103,14 @@ const Dashboard: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200">
-                                {segmentData.segments.map((seg, idx) => (
+                                {(selectedSegment === 'all' ? segmentData.segments : segmentData.segments.filter(s => s.segment === selectedSegment)).map((seg, idx) => (
                                   <tr key={idx} className={isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}>
                                     <td className={`px-3 py-2 ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{seg.label}</td>
-                                    <td className={`px-3 py-2 text-right ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
-                                      {seg.volume.toLocaleString()}
-                                    </td>
-                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
-                                      {seg.metrics.KS?.toFixed(3) || '-'}
-                                    </td>
-                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
-                                      {seg.metrics.PSI?.toFixed(3) || '-'}
-                                    </td>
-                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
-                                      {seg.metrics.AUC?.toFixed(3) || '-'}
-                                    </td>
-                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
-                                      {seg.metrics.bad_rate ? (seg.metrics.bad_rate * 100).toFixed(2) + '%' : '-'}
-                                    </td>
+                                    <td className={`px-3 py-2 text-right ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{seg.volume.toLocaleString()}</td>
+                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{seg.metrics.KS?.toFixed(3) || '-'}</td>
+                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{seg.metrics.PSI?.toFixed(3) || '-'}</td>
+                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{seg.metrics.AUC?.toFixed(3) || '-'}</td>
+                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{seg.metrics.bad_rate ? (seg.metrics.bad_rate * 100).toFixed(2) + '%' : '-'}</td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -971,70 +1119,84 @@ const Dashboard: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Decile Analysis */}
-                      <div id="export-deciles" className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                      {/* Volume vs Bad Rate */}
+                      <div id="export-volumeBadRate" className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
                         <div className="flex items-center justify-between mb-4">
-                          <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                            Decile Analysis
-                          </h3>
+                          <div>
+                            <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                              Volume vs Bad Rate
+                              {compareMode && <span className={`ml-2 text-xs font-normal px-2 py-0.5 rounded-full ${isDark ? 'bg-indigo-900/40 text-indigo-300' : 'bg-indigo-50 text-indigo-600'}`}>Compare Mode</span>}
+                            </h3>
+                            {/* Display mode: Quarterly / Score Bands */}
+                            <div className="flex gap-1 mt-1">
+                              {(['quarterly', 'scorebands'] as const).map(mode => (
+                                <button
+                                  key={mode}
+                                  onClick={() => setVolumeDisplayMode(mode)}
+                                  className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                                    volumeDisplayMode === mode
+                                      ? 'bg-blue-600 text-white'
+                                      : isDark ? 'bg-slate-700 text-slate-400 hover:bg-slate-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                  }`}
+                                >
+                                  {mode === 'quarterly' ? 'Quarterly' : 'Score Bands'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => setViewModes({...viewModes, deciles: 'chart'})}
+                              onClick={() => setViewModes({...viewModes, volumeBadRate: 'chart'})}
                               className={`px-3 py-1 rounded text-sm ${
-                                viewModes.deciles === 'chart'
+                                viewModes.volumeBadRate === 'chart'
                                   ? 'bg-blue-600 text-white'
                                   : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'
                               }`}
-                            >
-                              Chart
-                            </button>
+                            >Chart</button>
                             <button
-                              onClick={() => setViewModes({...viewModes, deciles: 'table'})}
+                              onClick={() => setViewModes({...viewModes, volumeBadRate: 'table'})}
                               className={`px-3 py-1 rounded text-sm ${
-                                viewModes.deciles === 'table'
+                                viewModes.volumeBadRate === 'table'
                                   ? 'bg-blue-600 text-white'
                                   : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'
                               }`}
-                            >
-                              Table
-                            </button>
+                            >Table</button>
                           </div>
                         </div>
-                        
-                        {viewModes.deciles === 'chart' ? (
-                          <div style={{ height: '300px' }}>
-                            <DecileAnalysisChart deciles={decileData} />
-                          </div>
+
+                        {viewModes.volumeBadRate === 'chart' ? (
+                          <VolumeVsBadRateChart
+                            data={volumeData}
+                            baselineData={compareMode ? baselineVolumeData : undefined}
+                            height={300}
+                          />
                         ) : (
                           <div className="overflow-auto max-h-[400px]">
                             <table className="w-full text-sm">
                               <thead className={`sticky top-0 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
                                 <tr>
-                                  <th className={`px-3 py-2 text-left font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Decile</th>
-                                  <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Count</th>
-                                  <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Bad Count</th>
+                                  <th className={`px-3 py-2 text-left font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                                    {volumeDisplayMode === 'quarterly' ? 'Quarter' : 'Band'}
+                                  </th>
+                                  {compareMode && <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Baseline Vol.</th>}
+                                  <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Volume</th>
+                                  {compareMode && <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Baseline Bad Rate</th>}
                                   <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Bad Rate</th>
-                                  <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>KS</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200">
-                                {decileData.map((d) => (
-                                  <tr key={d.decile} className={isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}>
-                                    <td className={`px-3 py-2 ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>D{d.decile}</td>
-                                    <td className={`px-3 py-2 text-right ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
-                                      {d.count.toLocaleString()}
-                                    </td>
-                                    <td className={`px-3 py-2 text-right ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
-                                      {d.bad_count.toLocaleString()}
-                                    </td>
-                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
-                                      {(d.bad_rate * 100).toFixed(2)}%
-                                    </td>
-                                    <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
-                                      {d.ks.toFixed(4)}
-                                    </td>
-                                  </tr>
-                                ))}
+                                {volumeData.map((row, idx) => {
+                                  const blRow = baselineVolumeData?.[idx];
+                                  return (
+                                    <tr key={idx} className={isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}>
+                                      <td className={`px-3 py-2 font-medium ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{row.label}</td>
+                                      {compareMode && <td className={`px-3 py-2 text-right ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{blRow?.volume.toLocaleString() ?? '-'}</td>}
+                                      <td className={`px-3 py-2 text-right ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{row.volume.toLocaleString()}</td>
+                                      {compareMode && <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{blRow ? (blRow.badRate * 100).toFixed(2) + '%' : '-'}</td>}
+                                      <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{(row.badRate * 100).toFixed(2)}%</td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
@@ -1077,15 +1239,31 @@ const Dashboard: React.FC = () => {
                     
                     {viewModes.variables === 'table' ? (
                       <VariableStabilityTable 
-                        variables={generateVariableStability(selectedBankingModel, dashboardData.latestMetrics[0]?.vintage || '2024-12')}
+                        variables={generateVariableStability(
+                          selectedBankingModel,
+                          dashboardData.latestMetrics[0]?.vintage || '2024-12',
+                          compareMode ? currentDataset : selectedDataset
+                        )}
+                        baselineVariables={compareMode
+                          ? generateVariableStability(
+                              selectedBankingModel,
+                              dashboardData.latestMetrics[0]?.vintage || '2024-12',
+                              baselineDataset
+                            )
+                          : undefined
+                        }
                         maxRows={15}
                       />
                     ) : (
                       <div style={{ height: '400px' }}>
                         <BankingMetricsTrendChart
-                          metrics={generateVariableStability(selectedBankingModel, dashboardData.latestMetrics[0]?.vintage || '2024-12')
+                          metrics={generateVariableStability(
+                            selectedBankingModel,
+                            dashboardData.latestMetrics[0]?.vintage || '2024-12',
+                            compareMode ? currentDataset : selectedDataset
+                          )
                             .slice(0, 10)
-                            .map((v, idx) => ({
+                            .map((v) => ({
                               model_id: selectedBankingModel,
                               portfolio: '',
                               model_type: '',
@@ -1175,7 +1353,7 @@ const Dashboard: React.FC = () => {
                       ragStatus: !allSelected,
                       trends: !allSelected,
                       segments: !allSelected,
-                      deciles: !allSelected,
+                      volumeBadRate: !allSelected,
                       variables: !allSelected,
                     });
                   }}
@@ -1190,7 +1368,7 @@ const Dashboard: React.FC = () => {
                   { key: 'ragStatus', label: 'RAG Status' },
                   { key: 'trends', label: 'Performance Trends' },
                   { key: 'segments', label: 'Segment Analysis' },
-                  { key: 'deciles', label: 'Decile Analysis' },
+                  { key: 'volumeBadRate', label: 'Volume vs Bad Rate' },
                   { key: 'variables', label: 'Variable Stability' },
                 ].map(({ key, label }) => (
                   <label key={key} className="flex items-center cursor-pointer">
@@ -1228,11 +1406,11 @@ const Dashboard: React.FC = () => {
                   setExporting(true);
                   try {
                     const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
-                    const modelMetrics = bankingMetrics.filter(m => m.model_id === selectedBankingModel);
+                    const modelMetrics = segmentFilteredMetrics;
                     const latestVintage = [...new Set(bankingMetrics.map(m => m.vintage))].sort().reverse()[0];
-                    const latestMetric = bankingMetrics.find(
-                      m => m.model_id === selectedBankingModel && m.vintage === latestVintage
-                    );
+                    const latestMetric =
+                      segmentFilteredMetrics.find(m => m.vintage === latestVintage) ??
+                      bankingMetrics.find(m => m.model_id === selectedBankingModel && m.vintage === latestVintage);
 
                     await exportDashboard({
                       format: exportFormat,

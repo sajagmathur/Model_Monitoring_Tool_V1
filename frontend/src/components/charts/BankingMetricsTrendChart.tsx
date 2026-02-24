@@ -9,13 +9,20 @@ interface BankingMetricsTrendChartProps {
   metricKey: 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'Gini' | 'CA_at_10' | 'volume';
   title?: string;
   height?: number;
+  /** When provided, renders a second dashed series for baseline comparison */
+  baselineMetrics?: BankingMetrics[];
+  currentLabel?: string;
+  baselineLabel?: string;
 }
 
 export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> = ({ 
   metrics, 
   metricKey, 
   title,
-  height = 300
+  height = 300,
+  baselineMetrics,
+  currentLabel = 'Monitoring',
+  baselineLabel = 'Training (Baseline)',
 }) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
@@ -59,25 +66,53 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
 
     const color = getColor();
 
+    const isCompareMode = !!baselineMetrics && baselineMetrics.length > 0;
+    const sortedBaseline = isCompareMode
+      ? [...baselineMetrics!].sort((a, b) => a.vintage.localeCompare(b.vintage))
+      : [];
+    const baselineDataPoints = sortedBaseline.map(m => {
+      if (metricKey === 'volume') return m.volume;
+      return m.metrics[metricKey] || null;
+    });
+
+    const datasets: any[] = [
+      {
+        label: isCompareMode ? currentLabel : (title || metricKey),
+        data: dataPoints,
+        borderColor: color,
+        backgroundColor: `${color}33`,
+        borderWidth: 2,
+        tension: 0.4,
+        fill: !isCompareMode,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: color,
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+      },
+    ];
+
+    if (isCompareMode) {
+      datasets.push({
+        label: baselineLabel,
+        data: baselineDataPoints,
+        borderColor: '#9ca3af',
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        borderDash: [6, 3],
+        tension: 0.4,
+        fill: false,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#9ca3af',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+      });
+    }
+
     chartInstanceRef.current = new Chart(ctx, {
       type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: title || metricKey,
-          data: dataPoints,
-          borderColor: color,
-          backgroundColor: `${color}33`,
-          borderWidth: 2,
-          tension: 0.4,
-          fill: true,
-          pointRadius: 4,
-          pointHoverRadius: 6,
-          pointBackgroundColor: color,
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        }],
-      },
+      data: { labels, datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -138,7 +173,7 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
         chartInstanceRef.current.destroy();
       }
     };
-  }, [metrics, metricKey, title, height]);
+  }, [metrics, metricKey, title, height, baselineMetrics, currentLabel, baselineLabel]);
 
   return (
     <div style={{ height: `${height}px` }} className="w-full">
