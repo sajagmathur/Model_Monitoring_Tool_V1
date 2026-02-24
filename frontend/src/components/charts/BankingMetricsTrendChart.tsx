@@ -4,6 +4,10 @@ import { BankingMetrics } from '../../utils/bankingMetricsMock';
 
 Chart.register(...registerables);
 
+// Shared segment colours (also used by VolumeVsBadRateChart)
+export const THIN_COLOR  = '#3b82f6'; // blue
+export const THICK_COLOR = '#14b8a6'; // teal
+
 interface BankingMetricsTrendChartProps {
   metrics: BankingMetrics[];
   metricKey: 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'Gini' | 'CA_at_10' | 'volume';
@@ -13,72 +17,148 @@ interface BankingMetricsTrendChartProps {
   baselineMetrics?: BankingMetrics[];
   currentLabel?: string;
   baselineLabel?: string;
+  /**
+   * "All segments" dual-line mode — pass both thin + thick series; the chart
+   * renders THIN_COLOR + THICK_COLOR lines instead of a single aggregate line.
+   */
+  thinFileMetrics?: BankingMetrics[];
+  thickFileMetrics?: BankingMetrics[];
+  thinFileBaselineMetrics?: BankingMetrics[];
+  thickFileBaselineMetrics?: BankingMetrics[];
+  /** Shown as a subtitle badge when exactly one segment is active */
+  segmentLabel?: string;
 }
 
-export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> = ({ 
-  metrics, 
-  metricKey, 
+export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> = ({
+  metrics,
+  metricKey,
   title,
   height = 300,
   baselineMetrics,
   currentLabel = 'Monitoring',
   baselineLabel = 'Training (Baseline)',
+  thinFileMetrics,
+  thickFileMetrics,
+  thinFileBaselineMetrics,
+  thickFileBaselineMetrics,
+  segmentLabel,
 }) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
 
+  const isDualSegment = !!(thinFileMetrics?.length && thickFileMetrics?.length);
+
   useEffect(() => {
-    if (!chartRef.current || !metrics.length) return;
+    if (!chartRef.current) return;
+    if (!isDualSegment && !metrics.length) return;
 
-    // Sort by vintage
-    const sortedMetrics = [...metrics].sort((a, b) => a.vintage.localeCompare(b.vintage));
+    const sortBy = (arr: BankingMetrics[]) =>
+      [...arr].sort((a, b) => a.vintage.localeCompare(b.vintage));
+    const extract = (arr: BankingMetrics[]) =>
+      sortBy(arr).map(m =>
+        metricKey === 'volume' ? m.volume : (m.metrics[metricKey] ?? null)
+      );
 
-    // Extract data
-    const labels = sortedMetrics.map(m => m.vintage);
-    const dataPoints = sortedMetrics.map(m => {
-      if (metricKey === 'volume') {
-        return m.volume;
-      }
-      return m.metrics[metricKey] || null;
-    });
-
-    // Destroy existing chart
-    if (chartInstanceRef.current) {
-      chartInstanceRef.current.destroy();
-    }
-
+    if (chartInstanceRef.current) chartInstanceRef.current.destroy();
     const ctx = chartRef.current.getContext('2d');
     if (!ctx) return;
 
-    // Determine color based on metric
-    const getColor = () => {
+    const metricColor = () => {
       switch (metricKey) {
-        case 'KS': return '#3b82f6'; // blue
-        case 'PSI': return '#f59e0b'; // amber
-        case 'AUC': return '#10b981'; // green
-        case 'bad_rate': return '#ef4444'; // red
-        case 'Gini': return '#8b5cf6'; // purple
-        case 'CA_at_10': return '#06b6d4'; // cyan
-        case 'volume': return '#6366f1'; // indigo
-        default: return '#6b7280'; // gray
+        case 'KS':       return '#3b82f6';
+        case 'PSI':      return '#f59e0b';
+        case 'AUC':      return '#10b981';
+        case 'bad_rate': return '#ef4444';
+        case 'Gini':     return '#8b5cf6';
+        case 'CA_at_10': return '#06b6d4';
+        case 'volume':   return '#6366f1';
+        default:         return '#6b7280';
       }
     };
 
-    const color = getColor();
+    const labels = isDualSegment
+      ? sortBy(thinFileMetrics!).map(m => m.vintage)
+      : sortBy(metrics).map(m => m.vintage);
 
-    const isCompareMode = !!baselineMetrics && baselineMetrics.length > 0;
-    const sortedBaseline = isCompareMode
-      ? [...baselineMetrics!].sort((a, b) => a.vintage.localeCompare(b.vintage))
-      : [];
-    const baselineDataPoints = sortedBaseline.map(m => {
-      if (metricKey === 'volume') return m.volume;
-      return m.metrics[metricKey] || null;
-    });
+    const datasets: any[] = [];
 
-    const datasets: any[] = [
-      {
-        label: isCompareMode ? currentLabel : (title || metricKey),
-        data: dataPoints,
+    if (isDualSegment) {
+      // ── "All" mode: two solid lines, one per segment ──────────────────────
+      datasets.push({
+        label: 'Thin File',
+        data: extract(thinFileMetrics!),
+        borderColor: THIN_COLOR,
+        backgroundColor: `${THIN_COLOR}33`,
+        borderWidth: 2.5,
+        tension: 0.4,
+        fill: false,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: THIN_COLOR,
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+      });
+      datasets.push({
+        label: 'Thick File',
+        data: extract(thickFileMetrics!),
+        borderColor: THICK_COLOR,
+        backgroundColor: `${THICK_COLOR}33`,
+        borderWidth: 2.5,
+        tension: 0.4,
+        fill: false,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: THICK_COLOR,
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+      });
+      if (thinFileBaselineMetrics?.length) {
+        datasets.push({
+          label: 'Thin File — Baseline',
+          data: extract(thinFileBaselineMetrics),
+          borderColor: THIN_COLOR,
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6, 3],
+          tension: 0.4,
+          fill: false,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          pointBackgroundColor: THIN_COLOR,
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+        });
+      }
+      if (thickFileBaselineMetrics?.length) {
+        datasets.push({
+          label: 'Thick File — Baseline',
+          data: extract(thickFileBaselineMetrics),
+          borderColor: THICK_COLOR,
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6, 3],
+          tension: 0.4,
+          fill: false,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          pointBackgroundColor: THICK_COLOR,
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+        });
+      }
+    } else {
+      // ── Single-segment / aggregate mode ───────────────────────────────────
+      const isCompareMode = !!baselineMetrics?.length;
+      const color = segmentLabel === 'Thin File' ? THIN_COLOR
+        : segmentLabel === 'Thick File' ? THICK_COLOR
+        : metricColor();
+      const lbl = isCompareMode
+        ? currentLabel
+        : (segmentLabel ? `${segmentLabel}` : (title || metricKey));
+
+      datasets.push({
+        label: lbl,
+        data: extract(metrics),
         borderColor: color,
         backgroundColor: `${color}33`,
         borderWidth: 2,
@@ -89,26 +169,31 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
         pointBackgroundColor: color,
         pointBorderColor: '#fff',
         pointBorderWidth: 2,
-      },
-    ];
-
-    if (isCompareMode) {
-      datasets.push({
-        label: baselineLabel,
-        data: baselineDataPoints,
-        borderColor: '#9ca3af',
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        borderDash: [6, 3],
-        tension: 0.4,
-        fill: false,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: '#9ca3af',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
       });
+      if (isCompareMode) {
+        datasets.push({
+          label: baselineLabel,
+          data: extract(baselineMetrics!),
+          borderColor: '#9ca3af',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6, 3],
+          tension: 0.4,
+          fill: false,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#9ca3af',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+        });
+      }
     }
+
+    const subtitleText = isDualSegment
+      ? 'All Segments — Thin File (blue)  vs  Thick File (teal)'
+      : segmentLabel
+        ? `Segment: ${segmentLabel}`
+        : undefined;
 
     chartInstanceRef.current = new Chart(ctx, {
       type: 'line',
@@ -118,50 +203,51 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
         maintainAspectRatio: false,
         plugins: {
           legend: {
-            display: false,
+            display: true,
+            position: 'top',
+            labels: {
+              font: { size: 11, family: 'Inter, system-ui, sans-serif' },
+              padding: 10,
+              usePointStyle: true,
+              pointStyleWidth: 16,
+            },
           },
+          title: subtitleText ? {
+            display: true,
+            text: subtitleText,
+            font: { size: 10, family: 'Inter, system-ui, sans-serif', style: 'italic' },
+            color: '#6b7280',
+            padding: { bottom: 4 },
+          } : { display: false },
           tooltip: {
             callbacks: {
               label: (context: any) => {
-                const value = context.parsed.y;
-                if (metricKey === 'volume') {
-                  return `Volume: ${value.toLocaleString()}`;
-                }
-                return `${metricKey}: ${value.toFixed(4)}`;
+                const val = context.parsed.y;
+                if (val === null) return `${context.dataset.label}: —`;
+                if (metricKey === 'volume') return `${context.dataset.label}: ${val.toLocaleString()}`;
+                return `${context.dataset.label}: ${val.toFixed(4)}`;
               },
             },
           },
         },
         scales: {
           x: {
-            grid: {
-              display: false,
-            },
+            grid: { display: false },
             ticks: {
-              font: {
-                size: 11,
-                family: 'Inter, system-ui, sans-serif',
-              },
+              font: { size: 11, family: 'Inter, system-ui, sans-serif' },
               maxRotation: 45,
               minRotation: 45,
             },
           },
           y: {
             beginAtZero: metricKey === 'volume',
-            grid: {
-              color: '#e5e7eb',
-            },
+            grid: { color: '#e5e7eb' },
             ticks: {
-              font: {
-                size: 11,
-                family: 'Inter, system-ui, sans-serif',
-              },
-              callback: function(value: any) {
-                if (metricKey === 'volume') {
-                  return (value as number).toLocaleString();
-                }
-                return (value as number).toFixed(2);
-              },
+              font: { size: 11, family: 'Inter, system-ui, sans-serif' },
+              callback: (value: any) =>
+                metricKey === 'volume'
+                  ? (value as number).toLocaleString()
+                  : (value as number).toFixed(2),
             },
           },
         },
@@ -169,11 +255,15 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
     });
 
     return () => {
-      if (chartInstanceRef.current) {
-        chartInstanceRef.current.destroy();
-      }
+      if (chartInstanceRef.current) chartInstanceRef.current.destroy();
     };
-  }, [metrics, metricKey, title, height, baselineMetrics, currentLabel, baselineLabel]);
+  }, [
+    metrics, metricKey, title, height,
+    baselineMetrics, currentLabel, baselineLabel,
+    thinFileMetrics, thickFileMetrics,
+    thinFileBaselineMetrics, thickFileBaselineMetrics,
+    segmentLabel, isDualSegment,
+  ]);
 
   return (
     <div style={{ height: `${height}px` }} className="w-full">

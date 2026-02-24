@@ -2,6 +2,9 @@
 import html2canvas from 'html2canvas';
 import pptxgen from 'pptxgenjs';
 import { BankingModel, BankingMetrics } from './bankingMetricsMock';
+import { SectionComment } from '../components/ChartCommentary';
+
+export type { SectionComment };
 
 export interface ExportOptions {
   selectedModel?: BankingModel;
@@ -16,6 +19,9 @@ export interface ExportOptions {
     variables: boolean;
   };
   format: 'pdf' | 'ppt';
+  /** Per-section commentary to embed in the export */
+  comments?: Record<string, SectionComment[]>;
+  includeComments?: boolean;
 }
 
 function waitForRender(ms: number = 300): Promise<void> {
@@ -57,6 +63,88 @@ function addPDFSectionHeader(
   pdf.setLineWidth(0.4);
   pdf.line(margin, yPos + 4, pageWidth - margin, yPos + 4);
   return yPos + 12;
+}
+
+/**
+ * Render a commentary block in the PDF for a given section's comments.
+ * Returns the new y position after the block.
+ */
+function addPDFCommentaryBlock(
+  pdf: jsPDF,
+  comments: SectionComment[],
+  y: number,
+  pageWidth: number,
+  pageHeight: number,
+  margin: number
+): number {
+  if (!comments.length) return y;
+  const contentWidth = pageWidth - margin * 2;
+
+  // Section header
+  const checkBreak = (needed: number) => {
+    if (y + needed > pageHeight - margin - 10) {
+      pdf.addPage();
+      y = margin;
+    }
+  };
+
+  checkBreak(14);
+  pdf.setFontSize(9);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(37, 99, 235);
+  pdf.text('💬 Commentary', margin, y);
+  y += 5;
+  pdf.setDrawColor(147, 197, 253);
+  pdf.setLineWidth(0.3);
+  pdf.line(margin, y, pageWidth - margin, y);
+  y += 4;
+
+  comments.forEach(c => {
+    // Estimate height needed
+    const lines = pdf.splitTextToSize(c.text, contentWidth - 8);
+    const blockH = 8 + lines.length * 4.5 + 5;
+    checkBreak(blockH);
+
+    // Light box
+    pdf.setFillColor(239, 246, 255);
+    pdf.setDrawColor(191, 219, 254);
+    pdf.setLineWidth(0.2);
+    pdf.roundedRect(margin, y, contentWidth, blockH, 1, 1, 'FD');
+
+    // Author + time
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(30, 58, 138);
+    pdf.text(c.author, margin + 3, y + 5);
+
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(100, 116, 139);
+    pdf.text(c.timestamp, margin + 3 + pdf.getStringUnitWidth(c.author) * 8 * 0.45 + 4, y + 5);
+
+    // Mention tags
+    let tagX = margin + 3;
+    let tagY = y + 10;
+    if (c.mentions.length > 0) {
+      c.mentions.forEach(m => {
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(7);
+        pdf.setTextColor(29, 78, 216);
+        pdf.text(`@${m}`, tagX, tagY);
+        tagX += pdf.getStringUnitWidth(`@${m}`) * 7 * 0.45 + 5;
+      });
+    }
+
+    // Body text
+    const textY = c.mentions.length > 0 ? tagY + 4 : y + 10;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(55, 65, 81);
+    pdf.text(lines, margin + 3, textY);
+
+    y += blockH + 2;
+  });
+
+  return y + 4;
 }
 
 export async function exportDashboardAsPDF(options: ExportOptions): Promise<void> {
@@ -182,6 +270,9 @@ export async function exportDashboardAsPDF(options: ExportOptions): Promise<void
       pdf.addImage(img, 'PNG', margin, y, contentWidth, imgH);
       y += imgH + 10;
     }
+    if (options.includeComments && options.comments?.ragStatus?.length) {
+      y = addPDFCommentaryBlock(pdf, options.comments.ragStatus, y, pageWidth, pageHeight, margin);
+    }
   }
 
   if (options.includeSections.trends) {
@@ -193,6 +284,9 @@ export async function exportDashboardAsPDF(options: ExportOptions): Promise<void
       checkBreak(imgH);
       pdf.addImage(img, 'PNG', margin, y, contentWidth, imgH);
       y += imgH + 10;
+    }
+    if (options.includeComments && options.comments?.trends?.length) {
+      y = addPDFCommentaryBlock(pdf, options.comments.trends, y, pageWidth, pageHeight, margin);
     }
   }
 
@@ -206,6 +300,9 @@ export async function exportDashboardAsPDF(options: ExportOptions): Promise<void
       pdf.addImage(img, 'PNG', margin, y, contentWidth * 0.85, imgH * 0.85);
       y += imgH * 0.85 + 10;
     }
+    if (options.includeComments && options.comments?.segments?.length) {
+      y = addPDFCommentaryBlock(pdf, options.comments.segments, y, pageWidth, pageHeight, margin);
+    }
   }
 
   if (options.includeSections.volumeBadRate) {
@@ -218,6 +315,9 @@ export async function exportDashboardAsPDF(options: ExportOptions): Promise<void
       pdf.addImage(img, 'PNG', margin, y, contentWidth * 0.85, imgH * 0.85);
       y += imgH * 0.85 + 10;
     }
+    if (options.includeComments && options.comments?.volumeBadRate?.length) {
+      y = addPDFCommentaryBlock(pdf, options.comments.volumeBadRate, y, pageWidth, pageHeight, margin);
+    }
   }
 
   if (options.includeSections.variables) {
@@ -226,6 +326,10 @@ export async function exportDashboardAsPDF(options: ExportOptions): Promise<void
     const img = await captureSection('export-variables');
     if (img) {
       pdf.addImage(img, 'PNG', margin, y, contentWidth, contentWidth * 1.1);
+      y += contentWidth * 1.1 + 8;
+    }
+    if (options.includeComments && options.comments?.variables?.length) {
+      y = addPDFCommentaryBlock(pdf, options.comments.variables, y, pageWidth, pageHeight, margin);
     }
   }
 
@@ -242,6 +346,54 @@ export async function exportDashboardAsPDF(options: ExportOptions): Promise<void
   const modelName = options.selectedModel?.name.replace(/\s+/g,'_') || 'Portfolio';
   const date = new Date().toISOString().split('T')[0];
   pdf.save(`${modelName}_Report_${date}.pdf`);
+}
+
+/**
+ * Adds a semi-transparent commentary box at the bottom of a PPT slide.
+ * Renders each comment as: [timestamp] @mention1 @mention2 — text
+ */
+function addPPTCommentaryBox(
+  pptx: pptxgen,
+  slide: pptxgen.Slide,
+  comments: SectionComment[],
+  W: number,
+  H: number
+): void {
+  if (!comments.length) return;
+  const boxH = Math.min(comments.length * 0.38 + 0.45, 2.2);
+  const y = H - 0.35 - boxH;
+
+  // Background box
+  slide.addShape(pptx.ShapeType.rect, {
+    x: 0.4, y, w: W - 0.8, h: boxH,
+    fill: { color: 'EFF6FF' },
+    line: { color: 'BFDBFE', pt: 0.5 },
+  });
+
+  // Header
+  slide.addText('💬 Commentary', {
+    x: 0.55, y: y + 0.04, w: W - 1.1, h: 0.28,
+    fontSize: 9, bold: true, color: '1D4ED8', fontFace: 'Calibri',
+  });
+
+  // Comments
+  const textRows: pptxgen.TextProps[] = [];
+  comments.forEach((c, idx) => {
+    if (idx > 0) textRows.push({ text: '\n', options: { fontSize: 5 } });
+    // Author + timestamp
+    textRows.push({ text: `${c.author}  ${c.timestamp}`, options: { fontSize: 8, bold: true, color: '1E3A8A' } });
+    // Mentions
+    if (c.mentions.length) {
+      textRows.push({ text: '  ' + c.mentions.map(m => `@${m}`).join(' '), options: { fontSize: 8, bold: true, color: '1D4ED8' } });
+    }
+    textRows.push({ text: '\n' + c.text, options: { fontSize: 8.5, color: '374151' } });
+  });
+
+  slide.addText(textRows, {
+    x: 0.55, y: y + 0.32, w: W - 1.1, h: boxH - 0.36,
+    fontSize: 8.5, color: '374151', fontFace: 'Calibri',
+    wrap: true, valign: 'top',
+  });
 }
 
 export async function exportDashboardAsPPT(options: ExportOptions): Promise<void> {
@@ -308,30 +460,45 @@ export async function exportDashboardAsPPT(options: ExportOptions): Promise<void
     const s = pptx.addSlide(); addSlideHeader(s, 'Portfolio RAG Status Distribution');
     const img = await captureSection('export-rag-status');
     if (img) s.addImage({ data:img, x:1.5, y:0.8, w:W-3.0, h:H-1.5 });
+    if (options.includeComments && options.comments?.ragStatus?.length) {
+      addPPTCommentaryBox(pptx, s, options.comments.ragStatus, W, H);
+    }
   }
 
   if (options.includeSections.trends) {
     const s = pptx.addSlide(); addSlideHeader(s, 'Performance Trends Over Time');
     const img = await captureSection('export-trends');
     if (img) s.addImage({ data:img, x:0.4, y:0.75, w:W-0.8, h:H-1.3 });
+    if (options.includeComments && options.comments?.trends?.length) {
+      addPPTCommentaryBox(pptx, s, options.comments.trends, W, H);
+    }
   }
 
   if (options.includeSections.segments) {
     const s = pptx.addSlide(); addSlideHeader(s, 'Segment Analysis');
     const img = await captureSection('export-segments');
     if (img) s.addImage({ data:img, x:1.0, y:0.8, w:W-2.0, h:H-1.4 });
+    if (options.includeComments && options.comments?.segments?.length) {
+      addPPTCommentaryBox(pptx, s, options.comments.segments, W, H);
+    }
   }
 
   if (options.includeSections.volumeBadRate) {
     const s = pptx.addSlide(); addSlideHeader(s, 'Volume vs Bad Rate');
     const img = await captureSection('export-volumeBadRate');
     if (img) s.addImage({ data:img, x:1.0, y:0.8, w:W-2.0, h:H-1.4 });
+    if (options.includeComments && options.comments?.volumeBadRate?.length) {
+      addPPTCommentaryBox(pptx, s, options.comments.volumeBadRate, W, H);
+    }
   }
 
   if (options.includeSections.variables) {
     const s = pptx.addSlide(); addSlideHeader(s, 'Variable Stability Analysis');
     const img = await captureSection('export-variables');
     if (img) s.addImage({ data:img, x:0.4, y:0.75, w:W-0.8, h:H-1.3 });
+    if (options.includeComments && options.comments?.variables?.length) {
+      addPPTCommentaryBox(pptx, s, options.comments.variables, W, H);
+    }
   }
 
   const modelName = options.selectedModel?.name.replace(/\s+/g,'_') || 'Portfolio';

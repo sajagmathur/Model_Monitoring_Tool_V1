@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Chart, registerables } from 'chart.js';
+import { THIN_COLOR, THICK_COLOR } from './BankingMetricsTrendChart';
 
 Chart.register(...registerables);
 
@@ -11,131 +12,209 @@ export interface VolumeDataPoint {
 
 interface VolumeVsBadRateChartProps {
   data: VolumeDataPoint[];
-  /** When provided (compare mode), renders side-by-side grouped bars + dual bad-rate lines */
+  /** Compare mode: renders Training vs Monitoring side-by-side */
   baselineData?: VolumeDataPoint[];
   height?: number;
+  /**
+   * "All segments" dual mode: renders Thin File + Thick File bars and lines.
+   * When both are provided, `data` is ignored.
+   */
+  thinFileData?: VolumeDataPoint[];
+  thickFileData?: VolumeDataPoint[];
+  /** Shown as chart subtitle when a single segment is active */
+  segmentLabel?: string;
 }
 
 export const VolumeVsBadRateChart: React.FC<VolumeVsBadRateChartProps> = ({
   data,
   baselineData,
   height = 300,
+  thinFileData,
+  thickFileData,
+  segmentLabel,
 }) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
 
+  const isDualSegment = !!(thinFileData?.length && thickFileData?.length);
+
   useEffect(() => {
-    if (!chartRef.current || !data.length) return;
+    if (!chartRef.current) return;
+    if (!isDualSegment && !data.length) return;
 
-    if (chartInstanceRef.current) {
-      chartInstanceRef.current.destroy();
-    }
-
+    if (chartInstanceRef.current) chartInstanceRef.current.destroy();
     const ctx = chartRef.current.getContext('2d');
     if (!ctx) return;
 
-    const labels = data.map(d => d.label);
-    const volumes = data.map(d => d.volume);
-    const badRates = data.map(d => parseFloat((d.badRate * 100).toFixed(2)));
-
-    const isCompareMode = !!baselineData && baselineData.length > 0;
-    const baselineVolumes = isCompareMode ? baselineData!.map(d => d.volume) : [];
-    const baselineBadRates = isCompareMode ? baselineData!.map(d => parseFloat((d.badRate * 100).toFixed(2))) : [];
+    const toRates = (arr: VolumeDataPoint[]) =>
+      arr.map(d => parseFloat((d.badRate * 100).toFixed(2)));
 
     const datasets: any[] = [];
+    let labels: string[];
 
-    if (isCompareMode) {
-      // Grouped bars: Training (baseline) + Monitoring (current)
+    if (isDualSegment) {
+      // ── "All segments" mode: Thin File + Thick File ───────────────────────
+      labels = thinFileData!.map(d => d.label);
       datasets.push({
-        label: 'Volume — Training',
-        data: baselineVolumes,
-        backgroundColor: '#6366f155',
-        borderColor: '#6366f1',
+        label: 'Thin File — Volume',
+        data: thinFileData!.map(d => d.volume),
+        backgroundColor: `${THIN_COLOR}88`,
+        borderColor: THIN_COLOR,
         borderWidth: 2,
         yAxisID: 'yVolume',
         type: 'bar',
-        order: 2,
+        order: 3,
       });
       datasets.push({
-        label: 'Volume — Monitoring',
-        data: volumes,
-        backgroundColor: '#3b82f699',
-        borderColor: '#3b82f6',
+        label: 'Thick File — Volume',
+        data: thickFileData!.map(d => d.volume),
+        backgroundColor: `${THICK_COLOR}88`,
+        borderColor: THICK_COLOR,
         borderWidth: 2,
         yAxisID: 'yVolume',
         type: 'bar',
-        order: 2,
+        order: 3,
       });
-      // Bad rate lines
       datasets.push({
-        label: 'Bad Rate — Training',
-        data: baselineBadRates,
+        label: 'Thin File — Bad Rate (%)',
+        data: toRates(thinFileData!),
         type: 'line',
-        borderColor: '#f59e0b',
+        borderColor: THIN_COLOR,
         backgroundColor: 'transparent',
-        borderWidth: 2,
-        borderDash: [6, 3],
+        borderWidth: 2.5,
         tension: 0.4,
         fill: false,
         yAxisID: 'yBadRate',
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: '#f59e0b',
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        pointBackgroundColor: THIN_COLOR,
         pointBorderColor: '#fff',
         pointBorderWidth: 2,
         order: 1,
       });
       datasets.push({
-        label: 'Bad Rate — Monitoring',
-        data: badRates,
+        label: 'Thick File — Bad Rate (%)',
+        data: toRates(thickFileData!),
         type: 'line',
-        borderColor: '#ef4444',
-        backgroundColor: '#ef444422',
-        borderWidth: 2,
+        borderColor: THICK_COLOR,
+        backgroundColor: 'transparent',
+        borderWidth: 2.5,
+        borderDash: [6, 3],
         tension: 0.4,
         fill: false,
         yAxisID: 'yBadRate',
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: '#ef4444',
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        pointBackgroundColor: THICK_COLOR,
         pointBorderColor: '#fff',
         pointBorderWidth: 2,
         order: 1,
       });
     } else {
-      // Single mode
-      datasets.push({
-        label: 'Volume',
-        data: volumes,
-        backgroundColor: '#3b82f699',
-        borderColor: '#3b82f6',
-        borderWidth: 2,
-        yAxisID: 'yVolume',
-        type: 'bar',
-        order: 2,
-      });
-      datasets.push({
-        label: 'Bad Rate (%)',
-        data: badRates,
-        type: 'line',
-        borderColor: '#ef4444',
-        backgroundColor: '#ef444422',
-        borderWidth: 2,
-        tension: 0.4,
-        fill: false,
-        yAxisID: 'yBadRate',
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: '#ef4444',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        order: 1,
-      });
+      labels = data.map(d => d.label);
+      const volumes   = data.map(d => d.volume);
+      const badRates  = toRates(data);
+      const isCompareMode = !!baselineData?.length;
+
+      if (isCompareMode) {
+        datasets.push({
+          label: 'Volume — Training',
+          data: baselineData!.map(d => d.volume),
+          backgroundColor: '#6366f155',
+          borderColor: '#6366f1',
+          borderWidth: 2,
+          yAxisID: 'yVolume',
+          type: 'bar',
+          order: 2,
+        });
+        datasets.push({
+          label: 'Volume — Monitoring',
+          data: volumes,
+          backgroundColor: '#3b82f699',
+          borderColor: '#3b82f6',
+          borderWidth: 2,
+          yAxisID: 'yVolume',
+          type: 'bar',
+          order: 2,
+        });
+        datasets.push({
+          label: 'Bad Rate — Training',
+          data: toRates(baselineData!),
+          type: 'line',
+          borderColor: '#f59e0b',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6, 3],
+          tension: 0.4,
+          fill: false,
+          yAxisID: 'yBadRate',
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#f59e0b',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          order: 1,
+        });
+        datasets.push({
+          label: 'Bad Rate — Monitoring',
+          data: badRates,
+          type: 'line',
+          borderColor: '#ef4444',
+          backgroundColor: '#ef444422',
+          borderWidth: 2,
+          tension: 0.4,
+          fill: false,
+          yAxisID: 'yBadRate',
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#ef4444',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          order: 1,
+        });
+      } else {
+        // Single mode
+        const segColor = segmentLabel === 'Thin File' ? THIN_COLOR
+          : segmentLabel === 'Thick File' ? THICK_COLOR : '#3b82f6';
+        datasets.push({
+          label: segmentLabel ? `Volume — ${segmentLabel}` : 'Volume',
+          data: volumes,
+          backgroundColor: `${segColor}99`,
+          borderColor: segColor,
+          borderWidth: 2,
+          yAxisID: 'yVolume',
+          type: 'bar',
+          order: 2,
+        });
+        datasets.push({
+          label: segmentLabel ? `Bad Rate — ${segmentLabel} (%)` : 'Bad Rate (%)',
+          data: badRates,
+          type: 'line',
+          borderColor: '#ef4444',
+          backgroundColor: '#ef444422',
+          borderWidth: 2,
+          tension: 0.4,
+          fill: false,
+          yAxisID: 'yBadRate',
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#ef4444',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          order: 1,
+        });
+      }
     }
+
+    const subtitleText = isDualSegment
+      ? 'All Segments — Thin File (blue bars/solid)  vs  Thick File (teal bars/dashed)'
+      : segmentLabel
+        ? `Segment: ${segmentLabel}`
+        : undefined;
 
     chartInstanceRef.current = new Chart(ctx, {
       type: 'bar',
-      data: { labels, datasets },
+      data: { labels: labels!, datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -144,20 +223,24 @@ export const VolumeVsBadRateChart: React.FC<VolumeVsBadRateChartProps> = ({
           legend: {
             position: 'top',
             labels: {
-              font: { size: 12, family: 'Inter, system-ui, sans-serif' },
-              padding: 12,
+              font: { size: 11, family: 'Inter, system-ui, sans-serif' },
+              padding: 10,
               usePointStyle: true,
             },
           },
+          title: subtitleText ? {
+            display: true,
+            text: subtitleText,
+            font: { size: 10, family: 'Inter, system-ui, sans-serif', style: 'italic' },
+            color: '#6b7280',
+            padding: { bottom: 4 },
+          } : { display: false },
           tooltip: {
             callbacks: {
               label: (context: any) => {
-                const label = context.dataset.label || '';
-                const value = context.parsed.y;
-                if (label.includes('Volume')) {
-                  return `${label}: ${value.toLocaleString()}`;
-                }
-                return `${label}: ${value.toFixed(2)}%`;
+                const lbl = context.dataset.label || '';
+                const val = context.parsed.y;
+                return lbl.includes('Volume') ? `${lbl}: ${val.toLocaleString()}` : `${lbl}: ${val.toFixed(2)}%`;
               },
             },
           },
@@ -202,11 +285,9 @@ export const VolumeVsBadRateChart: React.FC<VolumeVsBadRateChartProps> = ({
     });
 
     return () => {
-      if (chartInstanceRef.current) {
-        chartInstanceRef.current.destroy();
-      }
+      if (chartInstanceRef.current) chartInstanceRef.current.destroy();
     };
-  }, [data, baselineData, height]);
+  }, [data, baselineData, thinFileData, thickFileData, segmentLabel, height, isDualSegment]);
 
   return (
     <div style={{ height: `${height}px` }} className="w-full p-4">

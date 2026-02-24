@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlobal } from '../contexts/GlobalContext';
 import { useNotification } from '../hooks/useNotification';
-import { ChevronRight, Download, FileText, Presentation, X, CheckCircle } from 'lucide-react';
+import { ChevronRight, Download, FileText, Presentation, X, CheckCircle, Filter } from 'lucide-react';
 import { exportDashboard } from '../utils/dashboardExport';
 import { KPICard, SkeletonLoader } from '../components/DashboardWidgets';
 import ModelHealthGauge from '../components/charts/ModelHealthGauge';
@@ -17,6 +17,7 @@ import { BankingMetricsTrendChart } from '../components/charts/BankingMetricsTre
 import { SegmentComparisonChart } from '../components/charts/SegmentComparisonChart';
 import { VariableStabilityTable } from '../components/charts/VariableStabilityTable';
 import { VolumeVsBadRateChart } from '../components/charts/VolumeVsBadRateChart';
+import { ChartCommentary, SectionComment } from '../components/ChartCommentary';
 import {
   transformReportsToTimeSeries,
   aggregateModelHealth,
@@ -77,7 +78,9 @@ const Dashboard: React.FC = () => {
     segments: true,
     volumeBadRate: true,
     variables: true,
+    includeComments: true,
   });
+  const [chartComments, setChartComments] = useState<Record<string, SectionComment[]>>({});
   const [exporting, setExporting] = useState(false);
   const [viewModes, setViewModes] = useState<{
     ragStatus: 'chart' | 'table';
@@ -104,6 +107,15 @@ const Dashboard: React.FC = () => {
 
   // Volume vs Bad Rate display toggle
   const [volumeDisplayMode, setVolumeDisplayMode] = useState<'quarterly' | 'scorebands'>('quarterly');
+
+  // Restored filter bar state (portfolio, businessLine, modelType, model, timeWindow)
+  const [filters, setFilters] = useState({
+    portfolio: 'All',
+    businessLine: 'All',
+    modelType: 'All',
+    model: 'All',
+    timeWindow: 'Last 30 Days',
+  });
 
   // Auto-load sample data if no data exists
   useEffect(() => {
@@ -159,6 +171,30 @@ const Dashboard: React.FC = () => {
       localStorage.setItem('dashboard_selected_model', selectedBankingModel);
     }
   }, [selectedBankingModel]);
+
+  // Load comments from localStorage when model changes
+  useEffect(() => {
+    if (!selectedBankingModel) return;
+    const saved = localStorage.getItem(`dashboard_comments_${selectedBankingModel}`);
+    if (saved) {
+      try { setChartComments(JSON.parse(saved)); } catch { setChartComments({}); }
+    } else {
+      setChartComments({});
+    }
+  }, [selectedBankingModel]);
+
+  // Persist comments to localStorage
+  useEffect(() => {
+    if (!selectedBankingModel) return;
+    localStorage.setItem(`dashboard_comments_${selectedBankingModel}`, JSON.stringify(chartComments));
+  }, [chartComments, selectedBankingModel]);
+
+  const handleAddComment = (sectionId: string, comment: SectionComment) => {
+    setChartComments(prev => ({ ...prev, [sectionId]: [...(prev[sectionId] ?? []), comment] }));
+  };
+  const handleDeleteComment = (sectionId: string, id: string) => {
+    setChartComments(prev => ({ ...prev, [sectionId]: (prev[sectionId] ?? []).filter(c => c.id !== id) }));
+  };
 
   // Handle URL parameters for model selection (from Projects page)
   useEffect(() => {
@@ -238,8 +274,8 @@ const Dashboard: React.FC = () => {
     }
     
     // Apply portfolio filter
-    if (false) {
-      // portfolio filter removed — kept for future use
+    if (filters.portfolio !== 'All') {
+      filteredBankingMetrics = filteredBankingMetrics.filter(m => m.portfolio === filters.portfolio);
     }
     
     // Get latest vintage metrics per model
@@ -346,6 +382,7 @@ const Dashboard: React.FC = () => {
     ingestionJobs,
     bankingMetrics,
     selectedRAGFilter,
+    filters,
   ]);
 
   // ─────────────────────────────────────────────────────
@@ -394,7 +431,7 @@ const Dashboard: React.FC = () => {
     }
     const filtered = allModelMetrics.filter(m => m.segment === selectedSegment);
     return filtered.length > 0 ? filtered : allModelMetrics;
-  }, [selectedBankingModel, bankingMetrics, selectedSegment]);
+  }, [selectedBankingModel, bankingMetrics, selectedSegment, selectedDataset]);
 
   // Baseline (Training) metrics for compare mode
   const baselineFilteredMetrics = useMemo((): BankingMetrics[] => {
@@ -404,6 +441,65 @@ const Dashboard: React.FC = () => {
     const seg = selectedSegment !== 'all' ? selectedSegment : undefined;
     return generateBaselineMetrics(selectedModel, seg);
   }, [compareMode, selectedBankingModel, selectedSegment, bankingModels]);
+
+  /**
+   * In single (non-compare) mode with dataset = 'training', use generated baseline
+   * metrics so the trend charts actually reflect the selected dataset.
+   * In monitoring mode (single or compare current), use segmentFilteredMetrics.
+   */
+  const currentModeMetrics = useMemo((): BankingMetrics[] => {
+    if (!compareMode && selectedDataset === 'training') {
+      const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
+      if (!selectedModel) return [];
+      const seg = selectedSegment !== 'all' ? selectedSegment : undefined;
+      return generateBaselineMetrics(selectedModel, seg);
+    }
+    return segmentFilteredMetrics;
+  }, [compareMode, selectedDataset, selectedBankingModel, selectedSegment, bankingModels, segmentFilteredMetrics]);
+
+  // Per-segment raw metrics for dual-line "All" mode
+  const thinFileRawMetrics = useMemo((): BankingMetrics[] => {
+    if (!selectedBankingModel) return [];
+    const filtered = bankingMetrics.filter(m => m.model_id === selectedBankingModel && m.segment === 'thin_file');
+    console.log('🔍 Thin File Raw Metrics:', filtered.length, 'records for model', selectedBankingModel);
+    return filtered;
+  }, [bankingMetrics, selectedBankingModel]);
+
+  const thickFileRawMetrics = useMemo((): BankingMetrics[] => {
+    if (!selectedBankingModel) return [];
+    const filtered = bankingMetrics.filter(m => m.model_id === selectedBankingModel && m.segment === 'thick_file');
+    console.log('🔍 Thick File Raw Metrics:', filtered.length, 'records for model', selectedBankingModel);
+    return filtered;
+  }, [bankingMetrics, selectedBankingModel]);
+
+  // Check if the selected model has segment data
+  const hasDualSegmentData = thinFileRawMetrics.length > 0 && thickFileRawMetrics.length > 0;
+  const isDualSegmentMode = selectedSegment === 'all' && hasDualSegmentData;
+
+  // Human-readable label for current segment selection (undefined when "All")
+  const segmentLabel = selectedSegment === 'thin_file' ? 'Thin File'
+    : selectedSegment === 'thick_file' ? 'Thick File'
+    : undefined;
+
+  // Log segment state for debugging
+  useEffect(() => {
+    console.log('📊 Segment State:', {
+      selectedSegment,
+      hasDualSegmentData,
+      isDualSegmentMode,
+      thinCount: thinFileRawMetrics.length,
+      thickCount: thickFileRawMetrics.length,
+    });
+  }, [selectedSegment, hasDualSegmentData, isDualSegmentMode, thinFileRawMetrics.length, thickFileRawMetrics.length]);
+
+  // Filter bar options (computed from available data)
+  const filterOptions = {
+    portfolio: ['All', ...Array.from(new Set(bankingModels.map((m) => m.portfolio)))],
+    businessLine: ['All', 'Retail', 'Commercial', 'Digital', 'Cards', 'Mortgages'],
+    modelType: ['All', 'Acquisition Scorecard', 'ECM Scorecard', 'Bureau', 'Collections', 'Fraud', 'ML'],
+    model: ['All', ...registryModels.map((m) => m.name)],
+    timeWindow: ['Last 7 Days', 'Last 30 Days', 'Last 90 Days', 'Year to Date'],
+  };
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
@@ -528,6 +624,50 @@ const Dashboard: React.FC = () => {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Filter Bar: Portfolio / Business Line / Model Type / Model / Time Window */}
+        <div className={`p-4 rounded-lg border mb-4 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <Filter size={15} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
+              <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Filters</span>
+            </div>
+            <div className={`h-5 w-px ${isDark ? 'bg-slate-600' : 'bg-slate-300'}`} />
+            {(
+              [
+                { key: 'portfolio',    label: 'Portfolio',     opts: filterOptions.portfolio    },
+                { key: 'businessLine', label: 'Business Line', opts: filterOptions.businessLine },
+                { key: 'modelType',    label: 'Model Type',    opts: filterOptions.modelType    },
+                { key: 'model',        label: 'Model',         opts: filterOptions.model        },
+                { key: 'timeWindow',   label: 'Time Window',   opts: filterOptions.timeWindow   },
+              ] as const
+            ).map(({ key, label, opts }) => (
+              <div key={key} className="flex items-center gap-1.5">
+                <label className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{label}:</label>
+                <select
+                  value={filters[key]}
+                  onChange={e => setFilters(prev => ({ ...prev, [key]: e.target.value }))}
+                  className={`text-xs px-2 py-1.5 rounded border min-w-[110px] ${
+                    isDark
+                      ? 'bg-slate-700 border-slate-600 text-white'
+                      : 'bg-white border-slate-300 text-slate-800'
+                  }`}
+                >
+                  {opts.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </div>
+            ))}
+            {/* Active filter chips & clear all */}
+            {Object.entries(filters).some(([, v]) => v !== 'All' && v !== 'Last 30 Days') && (
+              <button
+                onClick={() => setFilters({ portfolio: 'All', businessLine: 'All', modelType: 'All', model: 'All', timeWindow: 'Last 30 Days' })}
+                className={`ml-auto text-xs underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'}`}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Controls Bar: Segment + Dataset / Compare Mode */}
         <div className={`p-4 rounded-lg border mb-6 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="flex flex-wrap items-center gap-6">
@@ -539,18 +679,27 @@ const Dashboard: React.FC = () => {
                   <button
                     key={seg}
                     onClick={() => setSelectedSegment(seg)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors relative ${
                       selectedSegment === seg
                         ? 'bg-blue-600 text-white'
                         : isDark
                           ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
+                    title={seg === 'all' && hasDualSegmentData ? 'Dual-segment mode: Shows Thin File & Thick File lines' : undefined}
                   >
                     {seg === 'all' ? 'All' : seg === 'thin_file' ? 'Thin File' : 'Thick File'}
+                    {seg === 'all' && hasDualSegmentData && (
+                      <span className={`ml-1.5 inline-block w-1.5 h-1.5 rounded-full ${selectedSegment === seg ? 'bg-white' : 'bg-green-500'}`} />
+                    )}
                   </button>
                 ))}
               </div>
+              {hasDualSegmentData && isDualSegmentMode && (
+                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  (Showing both segments)
+                </span>
+              )}
             </div>
 
             {/* Divider */}
@@ -796,12 +945,20 @@ const Dashboard: React.FC = () => {
                       </button>
                     )}
                   </div>
+                  <ChartCommentary
+                    sectionId="ragStatus"
+                    sectionLabel="Portfolio RAG Status"
+                    comments={chartComments['ragStatus'] ?? []}
+                    onAdd={c => handleAddComment('ragStatus', c)}
+                    onDelete={id => handleDeleteComment('ragStatus', id)}
+                    isDark={isDark}
+                  />
                 </div>
 
                 {/* Model Performance Analysis */}
                 {selectedBankingModel && (() => {
                   const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
-                  const modelMetrics = segmentFilteredMetrics;
+                  const modelMetrics = currentModeMetrics;
                   const latestMetric = [...modelMetrics].sort((a, b) => b.vintage.localeCompare(a.vintage))[0];
                   
                   return (
@@ -920,46 +1077,55 @@ const Dashboard: React.FC = () => {
 
                         {viewModes.trends === 'chart' ? (
                           <div id="export-trends" className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {latestMetric?.metrics.KS !== undefined && (
+                            {(latestMetric?.metrics.KS !== undefined || isDualSegmentMode) && (
                               <div>
                                 <div className={`text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                                   KS Statistic
                                 </div>
                                 <BankingMetricsTrendChart
-                                  metrics={modelMetrics}
+                                  metrics={isDualSegmentMode ? [] : modelMetrics}
+                                  thinFileMetrics={isDualSegmentMode ? thinFileRawMetrics : undefined}
+                                  thickFileMetrics={isDualSegmentMode ? thickFileRawMetrics : undefined}
+                                  segmentLabel={segmentLabel}
                                   metricKey="KS"
                                   height={200}
-                                  baselineMetrics={compareMode ? baselineFilteredMetrics : undefined}
+                                  baselineMetrics={compareMode && selectedSegment !== 'all' ? baselineFilteredMetrics : undefined}
                                   currentLabel={compareMode ? `KS — ${currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}` : 'KS'}
                                   baselineLabel={`KS — ${baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} (Baseline)`}
                                 />
                               </div>
                             )}
-                            {latestMetric?.metrics.PSI !== undefined && (
+                            {(latestMetric?.metrics.PSI !== undefined || isDualSegmentMode) && (
                               <div>
                                 <div className={`text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                                   PSI (Stability)
                                 </div>
                                 <BankingMetricsTrendChart
-                                  metrics={modelMetrics}
+                                  metrics={isDualSegmentMode ? [] : modelMetrics}
+                                  thinFileMetrics={isDualSegmentMode ? thinFileRawMetrics : undefined}
+                                  thickFileMetrics={isDualSegmentMode ? thickFileRawMetrics : undefined}
+                                  segmentLabel={segmentLabel}
                                   metricKey="PSI"
                                   height={200}
-                                  baselineMetrics={compareMode ? baselineFilteredMetrics : undefined}
+                                  baselineMetrics={compareMode && selectedSegment !== 'all' ? baselineFilteredMetrics : undefined}
                                   currentLabel={compareMode ? `PSI — ${currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}` : 'PSI'}
                                   baselineLabel={`PSI — ${baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} (Baseline)`}
                                 />
                               </div>
                             )}
-                            {latestMetric?.metrics.AUC !== undefined && (
+                            {(latestMetric?.metrics.AUC !== undefined || isDualSegmentMode) && (
                               <div>
                                 <div className={`text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                                   AUC (Accuracy)
                                 </div>
                                 <BankingMetricsTrendChart
-                                  metrics={modelMetrics}
+                                  metrics={isDualSegmentMode ? [] : modelMetrics}
+                                  thinFileMetrics={isDualSegmentMode ? thinFileRawMetrics : undefined}
+                                  thickFileMetrics={isDualSegmentMode ? thickFileRawMetrics : undefined}
+                                  segmentLabel={segmentLabel}
                                   metricKey="AUC"
                                   height={200}
-                                  baselineMetrics={compareMode ? baselineFilteredMetrics : undefined}
+                                  baselineMetrics={compareMode && selectedSegment !== 'all' ? baselineFilteredMetrics : undefined}
                                   currentLabel={compareMode ? `AUC — ${currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}` : 'AUC'}
                                   baselineLabel={`AUC — ${baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} (Baseline)`}
                                 />
@@ -1016,6 +1182,14 @@ const Dashboard: React.FC = () => {
                           </div>
                         )}
                       </div>
+                      <ChartCommentary
+                        sectionId="trends"
+                        sectionLabel="Performance Trends"
+                        comments={chartComments['trends'] ?? []}
+                        onAdd={c => handleAddComment('trends', c)}
+                        onDelete={id => handleDeleteComment('trends', id)}
+                        isDark={isDark}
+                      />
                     </div>
                   );
                 })()}
@@ -1052,6 +1226,23 @@ const Dashboard: React.FC = () => {
                     badRate: d.badRate,
                   }));
 
+                  // Per-segment volume data for "All" dual-segment mode
+                  const mapVol = (raw: typeof rawVol) => raw.map(d => ({
+                    label: volumeDisplayMode === 'quarterly' ? (d as any).quarter : (d as any).shortLabel,
+                    volume: d.volume,
+                    badRate: d.badRate,
+                  }));
+                  const thinFileVolumeData = selectedSegment === 'all'
+                    ? mapVol(volumeDisplayMode === 'quarterly'
+                        ? generateQuarterlyVolumeData(selectedBankingModel, 'thin_file', currentDatasetType)
+                        : generateScoreBandData(selectedBankingModel, 'thin_file', currentDatasetType))
+                    : undefined;
+                  const thickFileVolumeData = selectedSegment === 'all'
+                    ? mapVol(volumeDisplayMode === 'quarterly'
+                        ? generateQuarterlyVolumeData(selectedBankingModel, 'thick_file', currentDatasetType)
+                        : generateScoreBandData(selectedBankingModel, 'thick_file', currentDatasetType))
+                    : undefined;
+
                   return (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       {/* Segment Comparison */}
@@ -1087,6 +1278,7 @@ const Dashboard: React.FC = () => {
                               segmentData={segmentData}
                               activeSegment={selectedSegment}
                               baselineSegmentData={baselineSegDataForChart}
+                              segmentLabel={segmentLabel}
                             />
                           </div>
                         ) : (
@@ -1117,6 +1309,14 @@ const Dashboard: React.FC = () => {
                             </table>
                           </div>
                         )}
+                      <ChartCommentary
+                        sectionId="segments"
+                        sectionLabel="Segment Comparison"
+                        comments={chartComments['segments'] ?? []}
+                        onAdd={c => handleAddComment('segments', c)}
+                        onDelete={id => handleDeleteComment('segments', id)}
+                        isDark={isDark}
+                      />
                       </div>
 
                       {/* Volume vs Bad Rate */}
@@ -1169,6 +1369,9 @@ const Dashboard: React.FC = () => {
                             data={volumeData}
                             baselineData={compareMode ? baselineVolumeData : undefined}
                             height={300}
+                            thinFileData={thinFileVolumeData}
+                            thickFileData={thickFileVolumeData}
+                            segmentLabel={segmentLabel}
                           />
                         ) : (
                           <div className="overflow-auto max-h-[400px]">
@@ -1201,6 +1404,14 @@ const Dashboard: React.FC = () => {
                             </table>
                           </div>
                         )}
+                      <ChartCommentary
+                        sectionId="volumeBadRate"
+                        sectionLabel="Volume vs Bad Rate"
+                        comments={chartComments['volumeBadRate'] ?? []}
+                        onAdd={c => handleAddComment('volumeBadRate', c)}
+                        onDelete={id => handleDeleteComment('volumeBadRate', id)}
+                        isDark={isDark}
+                      />
                       </div>
                     </div>
                   );
@@ -1253,6 +1464,7 @@ const Dashboard: React.FC = () => {
                           : undefined
                         }
                         maxRows={15}
+                        segmentLabel={segmentLabel}
                       />
                     ) : (
                       <div style={{ height: '400px' }}>
@@ -1278,6 +1490,14 @@ const Dashboard: React.FC = () => {
                         />
                       </div>
                     )}
+                    <ChartCommentary
+                      sectionId="variables"
+                      sectionLabel="Variable Stability"
+                      comments={chartComments['variables'] ?? []}
+                      onAdd={c => handleAddComment('variables', c)}
+                      onDelete={id => handleDeleteComment('variables', id)}
+                      isDark={isDark}
+                    />
                   </div>
                 )}
               </div>
@@ -1347,19 +1567,21 @@ const Dashboard: React.FC = () => {
                 </label>
                 <button
                   onClick={() => {
-                    const allSelected = Object.values(exportSections).every(v => v);
-                    setExportSections({
+                    const sectionKeys = ['kpis', 'ragStatus', 'trends', 'segments', 'volumeBadRate', 'variables'] as const;
+                    const allSelected = sectionKeys.every(k => exportSections[k]);
+                    setExportSections(prev => ({
+                      ...prev,
                       kpis: !allSelected,
                       ragStatus: !allSelected,
                       trends: !allSelected,
                       segments: !allSelected,
                       volumeBadRate: !allSelected,
                       variables: !allSelected,
-                    });
+                    }));
                   }}
                   className="text-sm text-blue-600 hover:text-blue-700"
                 >
-                  {Object.values(exportSections).every(v => v) ? 'Deselect All' : 'Select All'}
+                  {(['kpis', 'ragStatus', 'trends', 'segments', 'volumeBadRate', 'variables'] as const).every(k => exportSections[k]) ? 'Deselect All' : 'Select All'}
                 </button>
               </div>
               <div className="space-y-2">
@@ -1384,6 +1606,15 @@ const Dashboard: React.FC = () => {
                     <span className={isDark ? 'text-slate-200' : 'text-slate-800'}>{label}</span>
                   </label>
                 ))}
+                <label className="flex items-center cursor-pointer mt-3 pt-3 border-t border-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={exportSections.includeComments}
+                    onChange={(e) => setExportSections(prev => ({ ...prev, includeComments: e.target.checked }))}
+                    className="mr-2"
+                  />
+                  <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Include Commentary</span>
+                </label>
               </div>
             </div>
 
@@ -1418,6 +1649,8 @@ const Dashboard: React.FC = () => {
                       modelMetrics,
                       latestMetric: latestMetric || undefined,
                       includeSections: exportSections,
+                      comments: chartComments,
+                      includeComments: exportSections.includeComments,
                     });
 
                     // Show success notification

@@ -7,12 +7,15 @@ interface VariableStabilityTableProps {
   maxRows?: number;
   /** When provided (compare mode), shows Baseline PSI and delta columns */
   baselineVariables?: VariableStability[];
+  /** Shown as a coloured badge next to the Variable column header */
+  segmentLabel?: string;
 }
 
 export const VariableStabilityTable: React.FC<VariableStabilityTableProps> = ({ 
   variables,
   maxRows = 20,
   baselineVariables,
+  segmentLabel,
 }) => {
   // Sort by PSI descending (most unstable first)
   const sortedVariables = useMemo(() => {
@@ -72,7 +75,20 @@ export const VariableStabilityTable: React.FC<VariableStabilityTableProps> = ({
         <thead className="bg-gray-50 sticky top-0 z-10">
           <tr>
             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200">
-              Variable
+              <div className="flex items-center gap-2">
+                Variable
+                {segmentLabel && (
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                    segmentLabel === 'Thin File'
+                      ? 'bg-blue-100 text-blue-800'
+                      : segmentLabel === 'Thick File'
+                        ? 'bg-teal-100 text-teal-800'
+                        : 'bg-gray-100 text-gray-700'
+                  }`}>
+                    {segmentLabel}
+                  </span>
+                )}
+              </div>
             </th>
             {isCompareMode && (
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b-2 border-gray-200">

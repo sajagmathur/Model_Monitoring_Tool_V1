@@ -112,6 +112,20 @@ function seededRandom(): number {
   return seed / 233280;
 }
 
+/**
+ * Deterministic hash → seed value from a string key.
+ * Ensures each generator produces stable output for the same inputs,
+ * regardless of how many other generators were called before it.
+ */
+function hashSeed(key: string): number {
+  let h = 5381;
+  for (let i = 0; i < key.length; i++) {
+    h = ((h << 5) + h) ^ key.charCodeAt(i);
+    h |= 0; // keep 32-bit int
+  }
+  return (Math.abs(h) % 200000) + 10;
+}
+
 function randBetween(min: number, max: number): number {
   return min + seededRandom() * (max - min);
 }
@@ -244,11 +258,34 @@ export function generateMetricsTimeSeries(
     const segments = model.segments || [undefined];
     
     segments.forEach((segment) => {
+      // Apply segment-specific performance adjustments
+      // Thick file typically performs better (more credit history data available)
+      // Thin file typically performs worse (limited credit history)
+      let segmentKSAdjust = 0;
+      let segmentPSIMultiplier = 1.0;
+      
+      if (segment === 'thin_file') {
+        segmentKSAdjust = -0.08; // Lower KS for thin file (worse discrimination)
+        segmentPSIMultiplier = 1.3; // Higher PSI (less stable)
+      } else if (segment === 'thick_file') {
+        segmentKSAdjust = +0.06; // Higher KS for thick file (better discrimination)
+        segmentPSIMultiplier = 0.8; // Lower PSI (more stable)
+      }
+      
       const adjustedKS = hasTrend 
-        ? baseKS + (trendDirection * trendStrength * idx)
-        : baseKS + randBetween(-0.02, 0.02);
+        ? baseKS + segmentKSAdjust + (trendDirection * trendStrength * idx)
+        : baseKS + segmentKSAdjust + randBetween(-0.02, 0.02);
+      
+      // Use hashSeed to ensure deterministic but different random sequences per segment
+      seed = hashSeed(`${model.model_id}-${vintage}-${segment || 'default'}`);
       
       const modelMetrics = generateMetricsForType(model.model_type, adjustedKS);
+      
+      // Apply segment-specific PSI adjustment
+      if (modelMetrics.PSI !== undefined) {
+        modelMetrics.PSI = Math.max(0.01, Math.min(0.25, modelMetrics.PSI * segmentPSIMultiplier));
+      }
+      
       const volume = randInt(5000, 50000);
       
       const metricEntry: BankingMetrics = {
@@ -279,6 +316,7 @@ export function generateSegmentMetrics(
   vintage: string,
   dataset: 'training' | 'monitoring' = 'monitoring'
 ): SegmentMetrics {
+  seed = hashSeed(`seg-${modelId}-${vintage}-${dataset}`);
   const ksDelta = dataset === 'training' ? 0.05 : 0;
   const psiCap = dataset === 'training' ? 0.05 : 0.20;
   return {
@@ -316,6 +354,7 @@ export function generateVariableStability(
   vintage: string,
   dataset: 'training' | 'monitoring' = 'monitoring'
 ): VariableStability[] {
+  seed = hashSeed(`var-${modelId}-${vintage}-${dataset}`);
   const variables = [
     'credit_score', 'debt_to_income', 'age', 'income', 'employment_length',
     'num_accounts', 'total_balance', 'credit_utilization', 'payment_history',
@@ -493,12 +532,30 @@ export function generateBaselineMetrics(
   seed = (modelSeed % 800) + 99;
 
   return vintages.map((vintage, idx) => {
+    // Apply segment-specific performance adjustments
+    let segmentKSAdjust = 0;
+    let segmentPSIMultiplier = 1.0;
+    
+    if (segment === 'thin_file') {
+      segmentKSAdjust = -0.08; // Lower KS for thin file
+      segmentPSIMultiplier = 1.3; // Higher PSI
+    } else if (segment === 'thick_file') {
+      segmentKSAdjust = +0.06; // Higher KS for thick file
+      segmentPSIMultiplier = 0.8; // Lower PSI
+    }
+    
     // Training has higher base KS (well-performing), low PSI (reference period)
-    const baseKS = randBetween(0.40, 0.54);
+    const baseKS = randBetween(0.40, 0.54) + segmentKSAdjust;
+    
+    // Use hashSeed for deterministic segment-specific randomness
+    seed = hashSeed(`baseline-${model.model_id}-${vintage}-${segment || 'default'}`);
+    
     const adjustedKS = baseKS + randBetween(-0.01, 0.01); // very stable
     const metrics = generateMetricsForType(model.model_type, adjustedKS);
+    
     // Force low PSI — training is the reference so drift = 0
-    metrics.PSI = parseFloat(Math.max(0.005, randBetween(0.005, 0.04)).toFixed(4));
+    metrics.PSI = parseFloat(Math.max(0.005, randBetween(0.005, 0.04) * segmentPSIMultiplier).toFixed(4));
+    
     return {
       model_id: model.model_id,
       portfolio: model.portfolio,

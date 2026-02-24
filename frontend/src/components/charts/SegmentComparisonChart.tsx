@@ -11,13 +11,16 @@ interface SegmentComparisonChartProps {
   activeSegment?: 'thin_file' | 'thick_file' | 'all';
   /** When provided (compare mode), renders lighter baseline bars alongside current */
   baselineSegmentData?: SegmentMetrics;
+  /** Explicit label shown as chart subtitle */
+  segmentLabel?: string;
 }
 
-export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({ 
+export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
   segmentData,
   metricKeys = ['KS', 'PSI', 'AUC', 'bad_rate'],
   activeSegment = 'all',
   baselineSegmentData,
+  segmentLabel,
 }) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
@@ -44,11 +47,15 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
     const ctx = chartRef.current.getContext('2d');
     if (!ctx) return;
 
-    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+    // Consistent segment colours: Thin File = blue, Thick File = teal
+    const segColor = (seg: { segment: string }) =>
+      seg.segment === 'thin_file' ? '#3b82f6'
+      : seg.segment === 'thick_file' ? '#14b8a6'
+      : '#10b981';
 
     // Build current datasets
-    const datasets = visibleSegments.map((seg, idx) => {
-      const color = colors[idx % colors.length];
+    const datasets = visibleSegments.map((seg) => {
+      const color = segColor(seg);
       return {
         label: `${seg.label} (Monitoring)`,
         data: metricKeys.map(key => seg.metrics[key] || 0),
@@ -60,8 +67,8 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
 
     // Add baseline datasets when in compare mode
     if (visibleBaseline.length > 0) {
-      visibleBaseline.forEach((seg, idx) => {
-        const color = colors[idx % colors.length];
+      visibleBaseline.forEach((seg) => {
+        const color = segColor(seg);
         datasets.push({
           label: `${seg.label} (Training)`,
           data: metricKeys.map(key => seg.metrics[key] || 0),
@@ -92,6 +99,19 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
               padding: 15,
               usePointStyle: true,
             },
+          },
+          title: {
+            display: true,
+            text: segmentLabel
+              ? `Segment: ${segmentLabel}`
+              : activeSegment === 'all'
+                ? 'All Segments — Thin File (blue) vs Thick File (teal)'
+                : activeSegment === 'thin_file'
+                  ? 'Thin File Only'
+                  : 'Thick File Only',
+            font: { size: 11, family: 'Inter, system-ui, sans-serif', style: 'italic' },
+            color: '#6b7280',
+            padding: { bottom: 6 },
           },
           tooltip: {
             callbacks: {
@@ -139,7 +159,7 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
         chartInstanceRef.current.destroy();
       }
     };
-  }, [segmentData, metricKeys, activeSegment, baselineSegmentData]);
+  }, [segmentData, metricKeys, activeSegment, baselineSegmentData, segmentLabel]);
 
   return (
     <div className="h-full w-full p-4">
