@@ -230,6 +230,9 @@ const TopBarEnhanced: React.FC = () => {
     if (msg.includes('gini')) {
       return 'Gini coefficient = 2×AUC − 1, ranging from 0 to 1. Values above 0.6 are good. It represents the area between the Lorenz curve and the diagonal, indicating model lift over random.';
     }
+    if (msg.includes('rob')) {
+      return '**ROB (Rank Order Break):**\nMeasures when a model\'s predictions deviate from expected rank ordering on new data. ROB indicates potential model degradation or distribution shift.\n\n• **Low ROB**: Model maintains consistent ranking\n• **High ROB**: Model predictions diverging from baseline behavior\n\nROB is critical for detecting when models no longer discriminate properly between good and bad cases.';
+    }
     if ((msg.includes('model') || msg.includes('which')) && msg.includes('perform')) {
       return '**ACQ-RET-002** (ML) shows the best overall performance with KS=0.523 and AUC=0.876. **FRD-TXN-001** (Fraud) excels with KS=0.623 and 89% fraud detection rate. All models maintain stable PSI values.';
     }
@@ -252,9 +255,9 @@ const TopBarEnhanced: React.FC = () => {
       return '**Fraud Model (FRD-TXN-001):**\n• KS: 0.623 (excellent)\n• AUC: 0.912 (outstanding)\n• Fraud detection rate: 89.45%\n• False positive rate: 2.34% (very low)\n• PSI: 0.019 (very stable)\n\nBest performing model in the portfolio.';
     }
     if (msg.includes('hello') || msg.includes('hi') || msg.includes('help')) {
-      return 'Hello! I am your Model Monitoring assistant. I can help you with:\n• **Metrics**: KS, PSI, AUC, Gini\n• **Models**: Which models need attention?\n• **RAG Status**: What do the colour indicators mean?\n• **Portfolios**: Compare portfolio performance\n• **Trends**: Drift and performance over time\n\nWhat would you like to know?';
+      return 'Hello! I am your Model Monitoring assistant. I can help you with:\n• **Metrics**: KS, PSI, AUC, Gini, ROB\n• **Models**: Which models need attention?\n• **RAG Status**: What do the colour indicators mean?\n• **Portfolios**: Compare portfolio performance\n• **Trends**: Drift and performance over time\n\nWhat would you like to know?';
     }
-    return `I understand you are asking about "${message}". I can discuss:\n• KS, PSI, AUC metrics\n• Model performance comparisons\n• RAG status meanings\n• Portfolio analysis\n• Models needing attention\n\nTry: "Which models need attention?" or "Compare portfolios"`;
+    return `I understand you are asking about "${message}". I can discuss:\n• KS, PSI, AUC, Gini, ROB metrics\n• Model performance comparisons\n• RAG status meanings\n• Portfolio analysis\n• Models needing attention\n\nTry: "Which models need attention?" or "What is ROB?"`;
   };
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -392,6 +395,7 @@ const TopBarEnhanced: React.FC = () => {
                     'What does RAG status mean?',
                     'Compare portfolios',
                     'Explain KS and PSI',
+                    'What is ROB?',
                   ].map((q) => (
                     <button
                       key={q}
