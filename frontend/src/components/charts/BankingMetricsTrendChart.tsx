@@ -10,7 +10,8 @@ export const THICK_COLOR = '#14b8a6'; // teal
 
 interface BankingMetricsTrendChartProps {
   metrics: BankingMetrics[];
-  metricKey: 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'Gini' | 'CA_at_10' | 'volume';
+  metricKey: 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'Gini' | 'CA_at_10' | 'volume'
+    | 'accuracy' | 'precision' | 'recall' | 'f1_score' | 'HRL';
   title?: string;
   height?: number;
   /** When provided, renders a second dashed series for baseline comparison */
@@ -65,14 +66,19 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
 
     const metricColor = () => {
       switch (metricKey) {
-        case 'KS':       return '#3b82f6';
-        case 'PSI':      return '#f59e0b';
-        case 'AUC':      return '#10b981';
-        case 'bad_rate': return '#ef4444';
-        case 'Gini':     return '#8b5cf6';
-        case 'CA_at_10': return '#06b6d4';
-        case 'volume':   return '#6366f1';
-        default:         return '#6b7280';
+        case 'KS':        return '#3b82f6';
+        case 'PSI':       return '#f59e0b';
+        case 'AUC':       return '#10b981';
+        case 'bad_rate':  return '#ef4444';
+        case 'Gini':      return '#8b5cf6';
+        case 'CA_at_10':  return '#06b6d4';
+        case 'volume':    return '#6366f1';
+        case 'accuracy':  return '#22c55e';
+        case 'precision': return '#f97316';
+        case 'recall':    return '#ec4899';
+        case 'f1_score':  return '#a855f7';
+        case 'HRL':       return '#14b8a6';
+        default:          return '#6b7280';
       }
     };
 
@@ -116,34 +122,36 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
         datasets.push({
           label: 'Thin File — Baseline',
           data: extract(thinFileBaselineMetrics),
-          borderColor: THIN_COLOR,
+          borderColor: '#f59e0b',           // amber — distinct from Thin Current (blue)
           backgroundColor: 'transparent',
           borderWidth: 2,
-          borderDash: [6, 3],
+          borderDash: [8, 4],
           tension: 0.4,
           fill: false,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-          pointBackgroundColor: THIN_COLOR,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#f59e0b',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
+          pointStyle: 'triangle',
         });
       }
       if (thickFileBaselineMetrics?.length) {
         datasets.push({
           label: 'Thick File — Baseline',
           data: extract(thickFileBaselineMetrics),
-          borderColor: THICK_COLOR,
+          borderColor: '#f97316',           // orange — distinct from Thick Current (teal)
           backgroundColor: 'transparent',
           borderWidth: 2,
-          borderDash: [6, 3],
+          borderDash: [8, 4],
           tension: 0.4,
           fill: false,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-          pointBackgroundColor: THICK_COLOR,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#f97316',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
+          pointStyle: 'rectRot',
         });
       }
     } else {
@@ -174,26 +182,34 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
         datasets.push({
           label: baselineLabel,
           data: extract(baselineMetrics!),
-          borderColor: '#9ca3af',
+          borderColor: '#f59e0b',           // amber — clearly distinct from all segment & metric colors
           backgroundColor: 'transparent',
           borderWidth: 2,
-          borderDash: [6, 3],
+          borderDash: [8, 4],
           tension: 0.4,
           fill: false,
           pointRadius: 4,
           pointHoverRadius: 6,
-          pointBackgroundColor: '#9ca3af',
+          pointBackgroundColor: '#f59e0b',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
+          pointStyle: 'triangle',
         });
       }
     }
 
-    const subtitleText = isDualSegment
-      ? 'All Segments — Thin File (blue)  vs  Thick File (teal)'
-      : segmentLabel
-        ? `Segment: ${segmentLabel}`
-        : undefined;
+    const hasDualBaseline = !!(thinFileBaselineMetrics?.length || thickFileBaselineMetrics?.length);
+    const subtitleText = (isDualSegment && hasDualBaseline)
+      ? 'All Segments: Current → Thin (blue) / Thick (teal)   │   Baseline → Thin (amber ▲) / Thick (orange ◆)'
+      : isDualSegment
+        ? 'All Segments — Thin File (blue)  vs  Thick File (teal)'
+        : (segmentLabel && !!baselineMetrics?.length)
+          ? `Segment: ${segmentLabel}   │   Current (solid line) vs Baseline (amber ▲ dashed)`
+          : segmentLabel
+            ? `Segment: ${segmentLabel}`
+            : !!baselineMetrics?.length
+              ? 'All Segments — Current (solid line)  vs  Baseline (amber ▲ dashed)'
+              : undefined;
 
     chartInstanceRef.current = new Chart(ctx, {
       type: 'line',

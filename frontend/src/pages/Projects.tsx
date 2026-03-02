@@ -44,6 +44,7 @@ interface ModelMetadata {
   type: 'Classification' | 'Regression' | 'Time Series';
   riskTier: 'High' | 'Medium' | 'Low';
   status: 'Champion' | 'Challenger' | 'Benchmark';
+  domain?: string;
 
   // Governance Tab
   approvalDate: string;
@@ -132,6 +133,7 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
     type: 'Classification',
     riskTier: 'Medium',
     status: 'Challenger',
+    domain: '',
     approvalDate: '',
     reviewer: '',
     expiryDate: '',
@@ -328,6 +330,7 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
       type: 'Classification',
       riskTier: 'Medium',
       status: 'Challenger',
+      domain: '',
       approvalDate: '',
       reviewer: '',
       expiryDate: '',
@@ -720,6 +723,43 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                           <option>Challenger</option>
                           <option>Benchmark</option>
                         </select>
+                      </div>
+
+                      {/* Domain Field */}
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Domain</label>
+                        <div className="flex gap-2">
+                          <select
+                            value={['', 'Banking', 'Insurance', 'Marketing', 'Healthcare', 'Retail', 'Telecommunications', 'Manufacturing', 'Other'].includes(metadata.domain ?? '') ? (metadata.domain ?? '') : 'Other'}
+                            onChange={(e) => {
+                              if (e.target.value === 'Other') {
+                                setMetadata({ ...metadata, domain: '' });
+                              } else {
+                                setMetadata({ ...metadata, domain: e.target.value });
+                              }
+                            }}
+                            className={`flex-1 px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                          >
+                            <option value="">-- Select Domain --</option>
+                            <option value="Banking">Banking</option>
+                            <option value="Insurance">Insurance</option>
+                            <option value="Marketing">Marketing</option>
+                            <option value="Healthcare">Healthcare</option>
+                            <option value="Retail">Retail</option>
+                            <option value="Telecommunications">Telecommunications</option>
+                            <option value="Manufacturing">Manufacturing</option>
+                            <option value="Other">Other (custom)</option>
+                          </select>
+                          {(metadata.domain === '' || !['Banking', 'Insurance', 'Marketing', 'Healthcare', 'Retail', 'Telecommunications', 'Manufacturing'].includes(metadata.domain ?? '')) && (
+                            <input
+                              type="text"
+                              value={metadata.domain ?? ''}
+                              onChange={(e) => setMetadata({ ...metadata, domain: e.target.value })}
+                              placeholder="Enter custom domain..."
+                              className={`flex-1 px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                            />
+                          )}
+                        </div>
                       </div>
                     </>
                   )}
@@ -3840,6 +3880,7 @@ export default function Projects() {
                         // Add to global registry with file information
                         createRegistryModel({
                           name: metadata.modelName,
+                          model_id: metadata.modelId || undefined,
                           version: metadata.modelVersion,
                           projectId: selectedProject.id,
                           modelType: metadata.type.toLowerCase() as 'classification' | 'regression' | 'clustering' | 'nlp' | 'custom',
@@ -3847,6 +3888,7 @@ export default function Projects() {
                           stage: metadata.environment.toLowerCase() as 'dev' | 'staging' | 'production',
                           status: 'active',
                           uploadedFile: (metadata as any).uploadedFile,
+                          domain: metadata.domain || undefined,
                         });
                       }}
                     />

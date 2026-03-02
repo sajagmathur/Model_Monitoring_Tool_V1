@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlobal } from '../contexts/GlobalContext';
 import { useNotification } from '../hooks/useNotification';
-import { ChevronRight, Download, FileText, Presentation, X, CheckCircle, Filter } from 'lucide-react';
+import { ChevronRight, Download, FileText, Presentation, X, CheckCircle, Filter, ChevronDown } from 'lucide-react';
 import { exportDashboard } from '../utils/dashboardExport';
 import { KPICard, SkeletonLoader } from '../components/DashboardWidgets';
 import ModelHealthGauge from '../components/charts/ModelHealthGauge';
@@ -36,6 +36,11 @@ import {
   calculateRAGStatus,
   type BankingMetrics,
 } from '../utils/bankingMetricsMock';
+import ROBChart from '../components/charts/ROBChart';
+import ConfusionMatrixChart from '../components/charts/ConfusionMatrixChart';
+import VariableLevelChart from '../components/charts/VariableLevelChart';
+import { METRIC_DESCRIPTIONS, DEFAULT_SELECTED_METRICS } from '../utils/metricDescriptions';
+import { exportDashboardToExcel } from '../utils/excelExport';
 
 interface Alert {
   id: string;
@@ -70,7 +75,6 @@ const Dashboard: React.FC = () => {
   const [selectedRAGFilter, setSelectedRAGFilter] = useState<'all' | 'green' | 'amber' | 'red'>('all');
   const [showExportModal, setShowExportModal] = useState(false);
   const [showProjectsBanner, setShowProjectsBanner] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'pdf' | 'ppt'>('pdf');
   const [exportSections, setExportSections] = useState({
     kpis: true,
     ragStatus: true,
@@ -82,6 +86,27 @@ const Dashboard: React.FC = () => {
   });
   const [chartComments, setChartComments] = useState<Record<string, SectionComment[]>>({});
   const [exporting, setExporting] = useState(false);
+
+  // Multi-select metric dropdown
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>(DEFAULT_SELECTED_METRICS);
+  const [metricDropdownOpen, setMetricDropdownOpen] = useState(false);
+  const [tooltipMetric, setTooltipMetric] = useState<string | null>(null);
+
+  // Unified export modal
+  const [exportTab, setExportTab] = useState<'pdf' | 'ppt' | 'excel'>('pdf');
+  const [exportKPIs, setExportKPIs] = useState<string[]>(['KS', 'PSI', 'AUC', 'Gini', 'bad_rate', 'HRL']);
+
+  const AVAILABLE_DASHBOARD_METRICS = [
+    'KS', 'PSI', 'AUC', 'Gini', 'bad_rate', 'CA_at_10',
+    'accuracy', 'precision', 'recall', 'f1_score', 'HRL', 'ROB', 'ConfusionMatrix',
+  ];
+
+  // Vintage range filter for trend charts
+  const [selectedVintages, setSelectedVintages] = useState<string[]>([]);
+
+  // Variable level analysis
+  const [selectedVariable, setSelectedVariable] = useState<string>('');
+
   const [viewModes, setViewModes] = useState<{
     ragStatus: 'chart' | 'table';
     trends: 'chart' | 'table';
@@ -413,12 +438,17 @@ const Dashboard: React.FC = () => {
             segment: undefined,
             volume: totalVol,
             metrics: {
-              KS: wavg(thin.metrics.KS, thick.metrics.KS),
-              PSI: wavg(thin.metrics.PSI, thick.metrics.PSI),
-              AUC: wavg(thin.metrics.AUC, thick.metrics.AUC),
-              Gini: wavg(thin.metrics.Gini, thick.metrics.Gini),
-              bad_rate: wavg(thin.metrics.bad_rate, thick.metrics.bad_rate),
-              CA_at_10: wavg(thin.metrics.CA_at_10, thick.metrics.CA_at_10),
+              KS:        wavg(thin.metrics.KS,        thick.metrics.KS),
+              PSI:       wavg(thin.metrics.PSI,       thick.metrics.PSI),
+              AUC:       wavg(thin.metrics.AUC,       thick.metrics.AUC),
+              Gini:      wavg(thin.metrics.Gini,      thick.metrics.Gini),
+              bad_rate:  wavg(thin.metrics.bad_rate,  thick.metrics.bad_rate),
+              CA_at_10:  wavg(thin.metrics.CA_at_10,  thick.metrics.CA_at_10),
+              accuracy:  wavg(thin.metrics.accuracy,  thick.metrics.accuracy),
+              precision: wavg(thin.metrics.precision, thick.metrics.precision),
+              recall:    wavg(thin.metrics.recall,    thick.metrics.recall),
+              f1_score:  wavg(thin.metrics.f1_score,  thick.metrics.f1_score),
+              HRL:       wavg(thin.metrics.HRL,       thick.metrics.HRL),
             },
             rag_status: calculateRAGStatus(
               wavg(thin.metrics.KS, thick.metrics.KS),
@@ -430,7 +460,10 @@ const Dashboard: React.FC = () => {
       return unseg.length > 0 ? unseg : allModelMetrics;
     }
     const filtered = allModelMetrics.filter(m => m.segment === selectedSegment);
-    return filtered.length > 0 ? filtered : allModelMetrics;
+    if (filtered.length > 0) return filtered;
+    // Fallback: never mix segment types — return only unsegmented records
+    const unsegmentedFallback = allModelMetrics.filter(m => !m.segment);
+    return unsegmentedFallback.length > 0 ? unsegmentedFallback : [];
   }, [selectedBankingModel, bankingMetrics, selectedSegment, selectedDataset]);
 
   // Baseline (Training) metrics for compare mode
@@ -472,6 +505,21 @@ const Dashboard: React.FC = () => {
     return filtered;
   }, [bankingMetrics, selectedBankingModel]);
 
+  // Per-segment baseline metrics (for compare mode + dual-segment charts)
+  const thinFileBaselineM = useMemo((): BankingMetrics[] => {
+    if (!compareMode || !selectedBankingModel) return [];
+    const model = bankingModels.find(m => m.model_id === selectedBankingModel);
+    if (!model) return [];
+    return generateBaselineMetrics(model, 'thin_file');
+  }, [compareMode, selectedBankingModel, bankingModels]);
+
+  const thickFileBaselineM = useMemo((): BankingMetrics[] => {
+    if (!compareMode || !selectedBankingModel) return [];
+    const model = bankingModels.find(m => m.model_id === selectedBankingModel);
+    if (!model) return [];
+    return generateBaselineMetrics(model, 'thick_file');
+  }, [compareMode, selectedBankingModel, bankingModels]);
+
   // Check if the selected model has segment data
   const hasDualSegmentData = thinFileRawMetrics.length > 0 && thickFileRawMetrics.length > 0;
   const isDualSegmentMode = selectedSegment === 'all' && hasDualSegmentData;
@@ -491,6 +539,12 @@ const Dashboard: React.FC = () => {
       thickCount: thickFileRawMetrics.length,
     });
   }, [selectedSegment, hasDualSegmentData, isDualSegmentMode, thinFileRawMetrics.length, thickFileRawMetrics.length]);
+
+  // When compare mode is activated, always default to "all segments" so we
+  // show a clean Current vs Baseline 2-line comparison across all charts.
+  useEffect(() => {
+    if (compareMode) setSelectedSegment('all');
+  }, [compareMode]);
 
   // Filter bar options (computed from available data)
   const filterOptions = {
@@ -529,30 +583,31 @@ const Dashboard: React.FC = () => {
               {/* Model Selector */}
               {bankingModels.length > 0 && (
                 <div className="flex items-center gap-2">
-                  <label className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  <label className={`text-sm font-medium whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                     Select Model:
                   </label>
                   <select
                     value={selectedBankingModel}
                     onChange={(e) => setSelectedBankingModel(e.target.value)}
-                    className={`px-4 py-2 rounded-lg border text-sm font-medium min-w-[280px] ${
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium max-w-[280px] truncate ${
                       isDark
                         ? 'bg-slate-700 border-slate-600 text-white'
                         : 'bg-white border-slate-300 text-slate-900'
                     }`}
+                    title={bankingModels.find(m => m.model_id === selectedBankingModel)?.name ?? ''}
                   >
                     {bankingModels.map((model) => {
+                      const latestV = [...new Set(bankingMetrics.map(m => m.vintage))].sort().reverse()[0];
                       const latestMetric = bankingMetrics.find(
-                        m => m.model_id === model.model_id && 
-                        m.vintage === [...new Set(bankingMetrics.map(m => m.vintage))].sort().reverse()[0]
+                        m => m.model_id === model.model_id && m.vintage === latestV
                       );
-                      const ragBadge = latestMetric?.rag_status === 'green' ? '🟢' 
-                        : latestMetric?.rag_status === 'amber' ? '🟡' 
+                      const ragBadge = latestMetric?.rag_status === 'green' ? '🟢'
+                        : latestMetric?.rag_status === 'amber' ? '🟡'
                         : latestMetric?.rag_status === 'red' ? '🔴' : '';
-                      
+                      const ver = (model as any).version ?? 'v1';
                       return (
                         <option key={model.model_id} value={model.model_id}>
-                          {ragBadge} {model.name} ({model.portfolio})
+                          {ragBadge} {model.name} – {model.model_id} – {ver} ({model.portfolio})
                         </option>
                       );
                     })}
@@ -572,10 +627,10 @@ const Dashboard: React.FC = () => {
                 ⟳ Reload Data
               </button>
               <button 
-                onClick={() => setShowExportModal(true)}
+                onClick={() => { setExportTab('pdf'); setShowExportModal(true); }}
                 disabled={!selectedBankingModel}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                title={!selectedBankingModel ? "Select a model to export" : "Export model report"}
+                title={!selectedBankingModel ? "Select a model to export" : "Export model report (PDF / PPT / Excel)"}
               >
                 <Download size={18} />
                 Export Report
@@ -786,52 +841,108 @@ const Dashboard: React.FC = () => {
           <div className="space-y-8">
             {/* Model Metrics Section */}
             {bankingModels.length > 0 ? (
+              <>
               <div className="space-y-6">
-                {/* Model Portfolio KPIs */}
-                <div>
-                  <h2 className={`text-2xl font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                    📊 Model Portfolio
+                {/* Model Summary Table */}
+                <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <h2 className={`text-xl font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    📊 Model Portfolio Overview
                   </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                      <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Avg KS</div>
-                      <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                        {dashboardData.bankingKPIs.avgKS.toFixed(3)}
+                  {bankingModels.length > 0 ? (() => {
+                    // Build one row per model using latest-vintage metrics (deduplicated)
+                    const allVintages = [...new Set(bankingMetrics.map(m => m.vintage))].sort().reverse();
+                    const portfolioRows = bankingModels.map(model => {
+                      const modelMetrics = bankingMetrics.filter(m => m.model_id === model.model_id);
+                      const latestVint = allVintages.find(v => modelMetrics.some(m => m.vintage === v));
+                      const latestM = modelMetrics.find(m => m.vintage === latestVint);
+                      return { model, metric: latestM };
+                    }).filter(r => r.metric);
+
+                    const getOtherMetric = (m: BankingMetrics) => {
+                      if (m.metrics.CA_at_10 !== undefined) return `CA@10: ${m.metrics.CA_at_10.toFixed(3)}`;
+                      if (m.metrics.fraud_detection_rate !== undefined) return `FDR: ${m.metrics.fraud_detection_rate.toFixed(3)}`;
+                      if (m.metrics.recovery_rate !== undefined) return `RR: ${m.metrics.recovery_rate.toFixed(3)}`;
+                      if (m.metrics.HRL !== undefined) return `HRL: ${m.metrics.HRL.toFixed(3)}`;
+                      if (m.metrics.accuracy !== undefined) return `Acc: ${m.metrics.accuracy.toFixed(3)}`;
+                      return '–';
+                    };
+
+                    return (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className={`${isDark ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Model ID</th>
+                              <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Model Name</th>
+                              <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Portfolio</th>
+                              <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Type</th>
+                              <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Latest Vintage</th>
+                              <th className="px-3 py-2 text-right font-semibold">KS</th>
+                              <th className="px-3 py-2 text-right font-semibold">PSI</th>
+                              <th className="px-3 py-2 text-right font-semibold">AUC</th>
+                              <th className="px-3 py-2 text-left font-semibold">Other</th>
+                              <th className="px-3 py-2 text-center font-semibold">Status</th>
+                              <th className="px-3 py-2 text-center font-semibold"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {portfolioRows.map(({ model, metric: m }, idx) => (
+                              <tr
+                                key={model.model_id}
+                                className={`border-b ${isDark ? 'border-slate-700 hover:bg-slate-700/50' : 'border-slate-100 hover:bg-slate-50'} ${selectedBankingModel === model.model_id ? (isDark ? 'bg-blue-900/20' : 'bg-blue-50') : ''}`}
+                              >
+                                <td className={`px-3 py-2 font-mono text-xs font-semibold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+                                  {model.model_id}
+                                </td>
+                                <td className={`px-3 py-2 font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                                  {model.name}
+                                </td>
+                                <td className={`px-3 py-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{m!.portfolio}</td>
+                                <td className={`px-3 py-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{m!.model_type}</td>
+                                <td className={`px-3 py-2 font-mono text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m!.vintage}</td>
+                                <td className={`px-3 py-2 text-right font-mono font-semibold ${m!.metrics.KS !== undefined ? (m!.metrics.KS >= 0.35 ? 'text-green-500' : m!.metrics.KS >= 0.25 ? 'text-amber-500' : 'text-red-500') : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>
+                                  {m!.metrics.KS?.toFixed(4) ?? '–'}
+                                </td>
+                                <td className={`px-3 py-2 text-right font-mono font-semibold ${m!.metrics.PSI !== undefined ? (m!.metrics.PSI < 0.10 ? 'text-green-500' : m!.metrics.PSI < 0.25 ? 'text-amber-500' : 'text-red-500') : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>
+                                  {m!.metrics.PSI?.toFixed(4) ?? '–'}
+                                </td>
+                                <td className={`px-3 py-2 text-right font-mono font-semibold ${m!.metrics.AUC !== undefined ? (m!.metrics.AUC >= 0.75 ? 'text-green-500' : m!.metrics.AUC >= 0.65 ? 'text-amber-500' : 'text-red-500') : (isDark ? 'text-slate-400' : 'text-slate-500')}`}>
+                                  {m!.metrics.AUC?.toFixed(4) ?? '–'}
+                                </td>
+                                <td className={`px-3 py-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{getOtherMetric(m!)}</td>
+                                <td className="px-3 py-2 text-center">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${m!.rag_status === 'green' ? 'bg-green-100 text-green-700' : m!.rag_status === 'amber' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${m!.rag_status === 'green' ? 'bg-green-500' : m!.rag_status === 'amber' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                                    {m!.rag_status?.toUpperCase() ?? '—'}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedBankingModel(model.model_id);
+                                      setTimeout(() => document.getElementById('export-model-section')?.scrollIntoView({ behavior: 'smooth' }), 100);
+                                    }}
+                                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded font-medium"
+                                  >
+                                    Detail
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {portfolioRows.length === 0 && (
+                          <div className={`text-center py-8 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                            No model data available.
+                          </div>
+                        )}
                       </div>
-                      <div className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                        Target: &gt; 0.35
-                      </div>
+                    );
+                  })() : (
+                    <div className={`text-center py-8 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      No models available. Import models via the Projects workflow.
                     </div>
-                    <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                      <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Avg PSI</div>
-                      <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                        {dashboardData.bankingKPIs.avgPSI.toFixed(3)}
-                      </div>
-                      <div className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                        Target: &lt; 0.10
-                      </div>
-                    </div>
-                    <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                      <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Avg AUC</div>
-                      <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                        {dashboardData.bankingKPIs.avgAUC.toFixed(3)}
-                      </div>
-                      <div className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                        Target: &gt; 0.75
-                      </div>
-                    </div>
-                    <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                      <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Models</div>
-                      <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                        {dashboardData.bankingKPIs.totalModels}
-                      </div>
-                      <div className={`text-xs flex gap-1 mt-1`}>
-                        <span className="text-green-500">●{dashboardData.bankingKPIs.greenModels}</span>
-                        <span className="text-amber-500">●{dashboardData.bankingKPIs.amberModels}</span>
-                        <span className="text-red-500">●{dashboardData.bankingKPIs.redModels}</span>
-                      </div>
-                    </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Portfolio RAG Status */}
@@ -959,6 +1070,36 @@ const Dashboard: React.FC = () => {
                 {selectedBankingModel && (() => {
                   const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
                   const modelMetrics = currentModeMetrics;
+                  // Apply vintage range filter if user has selected specific vintages
+                  const filteredByVintage = selectedVintages.length > 0
+                    ? modelMetrics.filter(m => selectedVintages.includes(m.vintage))
+                    : modelMetrics;
+                  // Vintage-filtered per-segment series (for dual segment mode)
+                  const thinFiltered = selectedVintages.length > 0
+                    ? thinFileRawMetrics.filter(m => selectedVintages.includes(m.vintage))
+                    : thinFileRawMetrics;
+                  const thickFiltered = selectedVintages.length > 0
+                    ? thickFileRawMetrics.filter(m => selectedVintages.includes(m.vintage))
+                    : thickFileRawMetrics;
+                  // Common props spread onto every BankingMetricsTrendChart in this section.
+                  // In compare mode we ALWAYS render exactly 2 lines:
+                  //   solid   = Current  (aggregated all-segment weighted average)
+                  //   dashed  = Baseline (aggregated all-segment training baseline)
+                  // Dual-segment (4-line) mode is only used when NOT in compare mode.
+                  const showDual = !compareMode && isDualSegmentMode;
+                  const cProps = {
+                    metrics: compareMode ? filteredByVintage : (showDual ? [] : filteredByVintage),
+                    thinFileMetrics: showDual ? thinFiltered : undefined,
+                    thickFileMetrics: showDual ? thickFiltered : undefined,
+                    thinFileBaselineMetrics: undefined,   // never in compare mode
+                    thickFileBaselineMetrics: undefined,  // never in compare mode
+                    baselineMetrics: compareMode && baselineFilteredMetrics.length > 0
+                      ? baselineFilteredMetrics
+                      : undefined,
+                    segmentLabel,
+                    currentLabel: compareMode ? 'Current (Monitoring)' : undefined,
+                    baselineLabel: compareMode ? 'Baseline (Training)' : undefined,
+                  };
                   const latestMetric = [...modelMetrics].sort((a, b) => b.vintage.localeCompare(a.vintage))[0];
                   
                   return (
@@ -1043,15 +1184,145 @@ const Dashboard: React.FC = () => {
                             </div>
                           </div>
                         )}
+                        {latestMetric?.metrics.accuracy !== undefined && (
+                          <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Accuracy</div>
+                            <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{latestMetric.metrics.accuracy.toFixed(3)}</div>
+                          </div>
+                        )}
+                        {latestMetric?.metrics.precision !== undefined && (
+                          <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Precision</div>
+                            <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{latestMetric.metrics.precision.toFixed(3)}</div>
+                          </div>
+                        )}
+                        {latestMetric?.metrics.recall !== undefined && (
+                          <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Recall</div>
+                            <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{latestMetric.metrics.recall.toFixed(3)}</div>
+                          </div>
+                        )}
+                        {latestMetric?.metrics.f1_score !== undefined && (
+                          <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>F1 Score</div>
+                            <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{latestMetric.metrics.f1_score.toFixed(3)}</div>
+                          </div>
+                        )}
+                        {latestMetric?.metrics.HRL !== undefined && (
+                          <div className={`p-3 rounded border ${isDark ? 'bg-teal-900/30 border-teal-700' : 'bg-teal-50 border-teal-200'}`}>
+                            <div className={`text-xs font-medium ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>HRL</div>
+                            <div className={`text-lg font-bold ${latestMetric.metrics.HRL >= 0.70 ? 'text-green-500' : latestMetric.metrics.HRL >= 0.55 ? 'text-amber-500' : 'text-red-500'}`}>
+                              {latestMetric.metrics.HRL.toFixed(3)}
+                            </div>
+                            <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Hit Rate at Level</div>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Metric Trends */}
+                      {/* Metric Selector + Trend Charts */}
                       <div className="mb-4">
-                        <div className="flex items-center justify-between mb-3">
+                        {/* Vintage Range Selector */}
+                        {(() => {
+                          const availVintages = [...new Set(modelMetrics.map(m => m.vintage))].sort();
+                          if (availVintages.length < 2) return null;
+                          return (
+                            <div className={`flex flex-wrap items-center gap-3 mb-3 p-2 rounded-lg border text-xs ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                              <span className={`font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Vintage filter:</span>
+                              <div className="flex gap-1 flex-wrap">
+                                <button
+                                  onClick={() => setSelectedVintages([])}
+                                  className={`px-2 py-0.5 rounded-full font-medium ${selectedVintages.length === 0 ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-600 text-slate-300 hover:bg-slate-500' : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'}`}
+                                >All</button>
+                                {availVintages.map(v => (
+                                  <button
+                                    key={v}
+                                    onClick={() => setSelectedVintages(prev =>
+                                      prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]
+                                    )}
+                                    className={`px-2 py-0.5 rounded-full font-medium ${selectedVintages.includes(v) ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-600 text-slate-300 hover:bg-slate-500' : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'}`}
+                                  >{v}</button>
+                                ))}
+                              </div>
+                              {selectedVintages.length > 0 && (
+                                <span className={`ml-auto ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                  {selectedVintages.length} vintage{selectedVintages.length > 1 ? 's' : ''} selected
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                           <h4 className={`text-md font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
                             Performance Trends Over Time
                           </h4>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* Multi-Select Metric Dropdown */}
+                            <div className="relative">
+                              <button
+                                onClick={() => { setMetricDropdownOpen(v => !v); setTooltipMetric(null); }}
+                                className={`px-3 py-1 rounded text-sm flex items-center gap-1.5 border ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+                              >
+                                Select Metrics ({selectedMetrics.length})
+                                <ChevronDown size={14} />
+                              </button>
+                              {metricDropdownOpen && (
+                                <div className={`absolute right-0 top-full mt-1 z-30 w-80 rounded-lg border shadow-xl p-3 ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-200'}`}
+                                  onMouseLeave={() => {}}>
+                                  <p className={`text-xs font-semibold uppercase tracking-wide mb-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                    Select metrics to display — click ? for details
+                                  </p>
+                                  <div className="space-y-1 max-h-52 overflow-y-auto mb-2">
+                                    {AVAILABLE_DASHBOARD_METRICS.map(key => {
+                                      const desc = METRIC_DESCRIPTIONS[key];
+                                      return (
+                                        <div key={key} className="flex items-center gap-1">
+                                          <label className={`flex items-center gap-2 flex-1 cursor-pointer py-1 px-1.5 rounded ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}`}>
+                                            <input
+                                              type="checkbox"
+                                              checked={selectedMetrics.includes(key)}
+                                              onChange={() => setSelectedMetrics(prev =>
+                                                prev.includes(key) ? prev.filter(m => m !== key) : [...prev, key]
+                                              )}
+                                              className="rounded"
+                                            />
+                                            <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{desc?.label ?? key}</span>
+                                          </label>
+                                          <button
+                                            onClick={() => setTooltipMetric(tooltipMetric === key ? null : key)}
+                                            className={`text-xs w-5 h-5 rounded-full border font-bold flex items-center justify-center flex-shrink-0 ${
+                                              tooltipMetric === key
+                                                ? 'bg-blue-600 text-white border-blue-600'
+                                                : isDark ? 'border-slate-500 text-slate-400 hover:border-blue-400 hover:text-blue-400' : 'border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600'
+                                            }`}
+                                            title="View metric description"
+                                          >?</button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  {tooltipMetric && METRIC_DESCRIPTIONS[tooltipMetric] && (
+                                    <div className={`p-3 rounded-lg border text-xs ${isDark ? 'bg-slate-700/80 border-slate-600' : 'bg-blue-50 border-blue-200'}`}>
+                                      <div className={`font-semibold mb-1 ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>{METRIC_DESCRIPTIONS[tooltipMetric].label}</div>
+                                      <code className={`block text-xs mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{METRIC_DESCRIPTIONS[tooltipMetric].formula}</code>
+                                      <p className={isDark ? 'text-slate-300' : 'text-slate-700'}>{METRIC_DESCRIPTIONS[tooltipMetric].overview}</p>
+                                      {METRIC_DESCRIPTIONS[tooltipMetric].thresholds && (
+                                        <div className="mt-2 space-y-0.5">
+                                          <div className="text-green-600">🟢 {METRIC_DESCRIPTIONS[tooltipMetric].thresholds!.green}</div>
+                                          <div className="text-amber-600">🟡 {METRIC_DESCRIPTIONS[tooltipMetric].thresholds!.amber}</div>
+                                          <div className="text-red-600">🔴 {METRIC_DESCRIPTIONS[tooltipMetric].thresholds!.red}</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  <div className="flex gap-2 mt-2 pt-2 border-t border-slate-200">
+                                    <button onClick={() => setSelectedMetrics(AVAILABLE_DASHBOARD_METRICS)} className="text-xs text-blue-600 hover:underline">All</button>
+                                    <button onClick={() => setSelectedMetrics([])} className="text-xs text-slate-500 hover:underline">None</button>
+                                    <button onClick={() => setSelectedMetrics(DEFAULT_SELECTED_METRICS)} className="text-xs text-slate-500 hover:underline">Default</button>
+                                    <button onClick={() => setMetricDropdownOpen(false)} className="ml-auto text-xs text-slate-500 hover:underline">Close</button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                             <button
                               onClick={() => setViewModes({...viewModes, trends: 'chart'})}
                               className={`px-3 py-1 rounded text-sm ${
@@ -1077,58 +1348,32 @@ const Dashboard: React.FC = () => {
 
                         {viewModes.trends === 'chart' ? (
                           <div id="export-trends" className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {(latestMetric?.metrics.KS !== undefined || isDualSegmentMode) && (
-                              <div>
-                                <div className={`text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                  KS Statistic
-                                </div>
-                                <BankingMetricsTrendChart
-                                  metrics={isDualSegmentMode ? [] : modelMetrics}
-                                  thinFileMetrics={isDualSegmentMode ? thinFileRawMetrics : undefined}
-                                  thickFileMetrics={isDualSegmentMode ? thickFileRawMetrics : undefined}
-                                  segmentLabel={segmentLabel}
-                                  metricKey="KS"
-                                  height={200}
-                                  baselineMetrics={compareMode && selectedSegment !== 'all' ? baselineFilteredMetrics : undefined}
-                                  currentLabel={compareMode ? `KS — ${currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}` : 'KS'}
-                                  baselineLabel={`KS — ${baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} (Baseline)`}
-                                />
+                            {([
+                              { key: 'KS',        label: 'KS Statistic',           show: latestMetric?.metrics.KS !== undefined || isDualSegmentMode },
+                              { key: 'PSI',       label: 'PSI (Stability)',         show: latestMetric?.metrics.PSI !== undefined || isDualSegmentMode },
+                              { key: 'AUC',       label: 'AUC (Accuracy)',          show: latestMetric?.metrics.AUC !== undefined || isDualSegmentMode },
+                              { key: 'Gini',      label: 'Gini Coefficient',        show: latestMetric?.metrics.Gini !== undefined },
+                              { key: 'bad_rate',  label: 'Bad Rate',                show: latestMetric?.metrics.bad_rate !== undefined },
+                              { key: 'CA_at_10',  label: 'Capture Rate @ 10%',     show: true },
+                              { key: 'accuracy',  label: 'Accuracy',                show: true },
+                              { key: 'precision', label: 'Precision',               show: true },
+                              { key: 'recall',    label: 'Recall',                  show: true },
+                              { key: 'f1_score',  label: 'F1 Score',                show: true },
+                              { key: 'HRL',       label: 'Hit Rate at Level (HRL)', show: true, teal: true },
+                            ] as const).filter(({ key, show }) => selectedMetrics.includes(key as string) && show)
+                              .map(({ key, label, teal }: any) => (
+                              <div key={key}>
+                                <div className={`text-sm font-medium mb-2 ${
+                                  teal
+                                    ? (isDark ? 'text-teal-300' : 'text-teal-700')
+                                    : (isDark ? 'text-slate-300' : 'text-slate-700')
+                                }`}>{label}</div>
+                                <BankingMetricsTrendChart {...cProps} metricKey={key} height={200} />
                               </div>
-                            )}
-                            {(latestMetric?.metrics.PSI !== undefined || isDualSegmentMode) && (
-                              <div>
-                                <div className={`text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                  PSI (Stability)
-                                </div>
-                                <BankingMetricsTrendChart
-                                  metrics={isDualSegmentMode ? [] : modelMetrics}
-                                  thinFileMetrics={isDualSegmentMode ? thinFileRawMetrics : undefined}
-                                  thickFileMetrics={isDualSegmentMode ? thickFileRawMetrics : undefined}
-                                  segmentLabel={segmentLabel}
-                                  metricKey="PSI"
-                                  height={200}
-                                  baselineMetrics={compareMode && selectedSegment !== 'all' ? baselineFilteredMetrics : undefined}
-                                  currentLabel={compareMode ? `PSI — ${currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}` : 'PSI'}
-                                  baselineLabel={`PSI — ${baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} (Baseline)`}
-                                />
-                              </div>
-                            )}
-                            {(latestMetric?.metrics.AUC !== undefined || isDualSegmentMode) && (
-                              <div>
-                                <div className={`text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                  AUC (Accuracy)
-                                </div>
-                                <BankingMetricsTrendChart
-                                  metrics={isDualSegmentMode ? [] : modelMetrics}
-                                  thinFileMetrics={isDualSegmentMode ? thinFileRawMetrics : undefined}
-                                  thickFileMetrics={isDualSegmentMode ? thickFileRawMetrics : undefined}
-                                  segmentLabel={segmentLabel}
-                                  metricKey="AUC"
-                                  height={200}
-                                  baselineMetrics={compareMode && selectedSegment !== 'all' ? baselineFilteredMetrics : undefined}
-                                  currentLabel={compareMode ? `AUC — ${currentDataset.charAt(0).toUpperCase() + currentDataset.slice(1)}` : 'AUC'}
-                                  baselineLabel={`AUC — ${baselineDataset.charAt(0).toUpperCase() + baselineDataset.slice(1)} (Baseline)`}
-                                />
+                            ))}
+                            {selectedMetrics.length === 0 && (
+                              <div className={`col-span-3 text-center py-8 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                No metrics selected. Use the "Select Metrics" dropdown above to choose which charts to display.
                               </div>
                             )}
                           </div>
@@ -1190,6 +1435,52 @@ const Dashboard: React.FC = () => {
                         onDelete={id => handleDeleteComment('trends', id)}
                         isDark={isDark}
                       />
+
+                      {/* ROB Chart */}
+                      {selectedMetrics.includes('ROB') && (
+                        <div className={`mt-6 p-4 rounded-lg border ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="flex items-center gap-2 mb-3">
+                            <h4 className={`text-md font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                              Risk-Ordered Band (ROB) Chart — Bad Rate vs Score Band
+                            </h4>
+                            <button
+                              onClick={() => setTooltipMetric(tooltipMetric === 'ROB' ? null : 'ROB')}
+                              className={`text-xs w-5 h-5 rounded-full border font-bold flex items-center justify-center flex-shrink-0 ${tooltipMetric === 'ROB' ? 'bg-blue-600 text-white border-blue-600' : isDark ? 'border-slate-500 text-slate-400 hover:border-blue-400 hover:text-blue-400' : 'border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600'}`}
+                            >?</button>
+                          </div>
+                          {tooltipMetric === 'ROB' && (
+                            <div className={`mb-4 p-3 rounded-lg border text-xs ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-blue-50 border-blue-200'}`}>
+                              <p className={`font-semibold mb-1 ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>{METRIC_DESCRIPTIONS.ROB.label}</p>
+                              <code className={`block mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{METRIC_DESCRIPTIONS.ROB.formula}</code>
+                              <p className={isDark ? 'text-slate-300' : 'text-slate-700'}>{METRIC_DESCRIPTIONS.ROB.overview}</p>
+                            </div>
+                          )}
+                          <ROBChart isDark={isDark} />
+                        </div>
+                      )}
+
+                      {/* Confusion Matrix + Classification Metrics */}
+                      {selectedMetrics.includes('ConfusionMatrix') && (
+                        <div className={`mt-6 p-4 rounded-lg border ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="flex items-center gap-2 mb-3">
+                            <h4 className={`text-md font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                              Confusion Matrix &amp; Classification Metrics
+                            </h4>
+                            <button
+                              onClick={() => setTooltipMetric(tooltipMetric === 'ConfusionMatrix' ? null : 'ConfusionMatrix')}
+                              className={`text-xs w-5 h-5 rounded-full border font-bold flex items-center justify-center flex-shrink-0 ${tooltipMetric === 'ConfusionMatrix' ? 'bg-blue-600 text-white border-blue-600' : isDark ? 'border-slate-500 text-slate-400 hover:border-blue-400 hover:text-blue-400' : 'border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-600'}`}
+                            >?</button>
+                          </div>
+                          {tooltipMetric === 'ConfusionMatrix' && (
+                            <div className={`mb-4 p-3 rounded-lg border text-xs ${isDark ? 'bg-slate-800 border-slate-600' : 'bg-blue-50 border-blue-200'}`}>
+                              <p className={`font-semibold mb-1 ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>{METRIC_DESCRIPTIONS.ConfusionMatrix.label}</p>
+                              <code className={`block mb-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{METRIC_DESCRIPTIONS.ConfusionMatrix.formula}</code>
+                              <p className={isDark ? 'text-slate-300' : 'text-slate-700'}>{METRIC_DESCRIPTIONS.ConfusionMatrix.overview}</p>
+                            </div>
+                          )}
+                          <ConfusionMatrixChart latestMetric={latestMetric} isDark={isDark} />
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -1241,6 +1532,18 @@ const Dashboard: React.FC = () => {
                     ? mapVol(volumeDisplayMode === 'quarterly'
                         ? generateQuarterlyVolumeData(selectedBankingModel, 'thick_file', currentDatasetType)
                         : generateScoreBandData(selectedBankingModel, 'thick_file', currentDatasetType))
+                    : undefined;
+
+                  // Baseline per-segment volume data for All+compare mode
+                  const thinFileBaselineVolData = (compareMode && selectedSegment === 'all')
+                    ? mapVol(volumeDisplayMode === 'quarterly'
+                        ? generateQuarterlyVolumeData(selectedBankingModel, 'thin_file', baselineDataset)
+                        : generateScoreBandData(selectedBankingModel, 'thin_file', baselineDataset))
+                    : undefined;
+                  const thickFileBaselineVolData = (compareMode && selectedSegment === 'all')
+                    ? mapVol(volumeDisplayMode === 'quarterly'
+                        ? generateQuarterlyVolumeData(selectedBankingModel, 'thick_file', baselineDataset)
+                        : generateScoreBandData(selectedBankingModel, 'thick_file', baselineDataset))
                     : undefined;
 
                   return (
@@ -1371,6 +1674,8 @@ const Dashboard: React.FC = () => {
                             height={300}
                             thinFileData={thinFileVolumeData}
                             thickFileData={thickFileVolumeData}
+                            thinFileBaselineData={thinFileBaselineVolData}
+                            thickFileBaselineData={thickFileBaselineVolData}
                             segmentLabel={segmentLabel}
                           />
                         ) : (
@@ -1468,14 +1773,10 @@ const Dashboard: React.FC = () => {
                       />
                     ) : (
                       <div style={{ height: '400px' }}>
-                        <BankingMetricsTrendChart
-                          metrics={generateVariableStability(
-                            selectedBankingModel,
-                            dashboardData.latestMetrics[0]?.vintage || '2024-12',
-                            compareMode ? currentDataset : selectedDataset
-                          )
-                            .slice(0, 10)
-                            .map((v) => ({
+                        {(() => {
+                          const latestVintage = dashboardData.latestMetrics[0]?.vintage || '2024-12';
+                          const mapVarToMetrics = (vars: ReturnType<typeof generateVariableStability>) =>
+                            vars.slice(0, 10).map((v) => ({
                               model_id: selectedBankingModel,
                               portfolio: '',
                               model_type: '',
@@ -1483,11 +1784,27 @@ const Dashboard: React.FC = () => {
                               volume: 0,
                               metrics: { PSI: v.psi },
                               computed_at: '',
-                            }))}
-                          metricKey="PSI"
-                          title="Top 10 Variables by PSI"
-                          height={400}
-                        />
+                            }));
+                          return (
+                            <BankingMetricsTrendChart
+                              metrics={mapVarToMetrics(generateVariableStability(
+                                selectedBankingModel, latestVintage,
+                                compareMode ? currentDataset : selectedDataset
+                              ))}
+                              metricKey="PSI"
+                              title="Top 10 Variables by PSI"
+                              height={400}
+                              segmentLabel={segmentLabel}
+                              currentLabel={compareMode ? `Current PSI (${currentDataset})` : undefined}
+                              baselineLabel={compareMode ? `Baseline PSI (${baselineDataset})` : undefined}
+                              baselineMetrics={compareMode
+                                ? mapVarToMetrics(generateVariableStability(
+                                    selectedBankingModel, latestVintage, baselineDataset
+                                  ))
+                                : undefined}
+                            />
+                          );
+                        })()}
                       </div>
                     )}
                     <ChartCommentary
@@ -1501,6 +1818,50 @@ const Dashboard: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Variable Level Analysis */}
+              {selectedBankingModel && (
+                <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      🔍 Variable Level Analysis
+                    </h3>
+                    <span className={`text-xs px-2 py-1 rounded ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                      Distribution shift &amp; PSI trend per variable
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mb-5">
+                    <label className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Select Variable:</label>
+                    <select
+                      value={selectedVariable}
+                      onChange={e => setSelectedVariable(e.target.value)}
+                      className={`px-3 py-1.5 rounded border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                    >
+                      <option value="">— choose a variable —</option>
+                      {generateVariableStability(
+                        selectedBankingModel,
+                        dashboardData.latestMetrics[0]?.vintage || '2024-12',
+                        selectedDataset
+                      ).map(v => (
+                        <option key={v.variable} value={v.variable}>{v.variable}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {selectedVariable ? (
+                    <VariableLevelChart
+                      modelId={selectedBankingModel}
+                      variable={selectedVariable}
+                      vintage={dashboardData.latestMetrics[0]?.vintage || '2024-12'}
+                      isDark={isDark}
+                    />
+                  ) : (
+                    <div className={`text-center py-10 rounded-lg border-2 border-dashed ${isDark ? 'border-slate-600 text-slate-400' : 'border-slate-300 text-slate-500'}`}>
+                      Select a variable above to view its distribution comparison and PSI trend.
+                    </div>
+                  )}
+                </div>
+              )}
+              </>
             ) : (
               <div className={`text-center py-12 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                 <p className="text-lg">No banking models found. Please load sample data.</p>
@@ -1510,176 +1871,191 @@ const Dashboard: React.FC = () => {
         )}
       </div>
 
-      {/* Export Modal */}
+      {/* ===== Unified Export Modal (PDF | PowerPoint | Excel) ===== */}
       {showExportModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-lg p-6 max-w-md w-full mx-4 shadow-xl`}>
+          <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-lg p-6 max-w-lg w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto`}>
+            {/* Header */}
             <div className="flex justify-between items-center mb-4">
-              <h3 className={`text-xl font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                Export Report
-              </h3>
-              <button
-                onClick={() => setShowExportModal(false)}
-                className={`${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'}`}
-              >
+              <h3 className={`text-xl font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Export Report</h3>
+              <button onClick={() => setShowExportModal(false)} className={isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'}>
                 <X size={24} />
               </button>
             </div>
-
-            {/* Format Selection */}
-            <div className="mb-6">
-              <label className={`block text-sm font-medium mb-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                Export Format
-              </label>
-              <div className="flex gap-4">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="pdf"
-                    checked={exportFormat === 'pdf'}
-                    onChange={(e) => setExportFormat(e.target.value as 'pdf' | 'ppt')}
-                    className="mr-2"
-                  />
-                  <FileText size={20} className="mr-1" />
-                  <span className={isDark ? 'text-slate-200' : 'text-slate-800'}>PDF</span>
-                </label>
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="ppt"
-                    checked={exportFormat === 'ppt'}
-                    onChange={(e) => setExportFormat(e.target.value as 'pdf' | 'ppt')}
-                    className="mr-2"
-                  />
-                  <Presentation size={20} className="mr-1" />
-                  <span className={isDark ? 'text-slate-200' : 'text-slate-800'}>PowerPoint</span>
-                </label>
-              </div>
+            {/* 3-Tab selector: PDF | PowerPoint | Excel */}
+            <div className={`flex border-b mb-5 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+              {([
+                { id: 'pdf',   label: '📄 PDF',        icon: <FileText size={15} className="mr-1" /> },
+                { id: 'ppt',   label: '📊 PowerPoint', icon: <Presentation size={15} className="mr-1" /> },
+                { id: 'excel', label: '📗 Excel',       icon: <Download size={15} className="mr-1" /> },
+              ] as const).map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setExportTab(t.id)}
+                  className={`flex items-center px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    exportTab === t.id
+                      ? 'border-blue-600 text-blue-600'
+                      : `border-transparent ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'}`
+                  }`}
+                >
+                  {t.icon}{t.label.replace(/^[^ ]+ /, '')}
+                </button>
+              ))}
             </div>
+
+            {/* Model name context */}
+            <p className={`text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              Exporting report for <strong>{bankingModels.find(m => m.model_id === selectedBankingModel)?.name || '—'}</strong>
+              {exportTab === 'excel' ? ' (data tables as workbook sheets)' : ''}.
+            </p>
 
             {/* Section Selection */}
-            <div className="mb-6">
-              <div className="flex justify-between items-center mb-3">
-                <label className={`block text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Include Sections
-                </label>
+            <div className="mb-5">
+              <div className="flex justify-between items-center mb-2">
+                <label className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Include Sections</label>
                 <button
                   onClick={() => {
-                    const sectionKeys = ['kpis', 'ragStatus', 'trends', 'segments', 'volumeBadRate', 'variables'] as const;
-                    const allSelected = sectionKeys.every(k => exportSections[k]);
-                    setExportSections(prev => ({
-                      ...prev,
-                      kpis: !allSelected,
-                      ragStatus: !allSelected,
-                      trends: !allSelected,
-                      segments: !allSelected,
-                      volumeBadRate: !allSelected,
-                      variables: !allSelected,
-                    }));
+                    const keys = ['kpis', 'ragStatus', 'trends', 'segments', 'volumeBadRate', 'variables'] as const;
+                    const allOn = keys.every(k => exportSections[k]);
+                    setExportSections(prev => ({ ...prev, kpis: !allOn, ragStatus: !allOn, trends: !allOn, segments: !allOn, volumeBadRate: !allOn, variables: !allOn }));
                   }}
-                  className="text-sm text-blue-600 hover:text-blue-700"
+                  className="text-xs text-blue-600 hover:underline"
                 >
-                  {(['kpis', 'ragStatus', 'trends', 'segments', 'volumeBadRate', 'variables'] as const).every(k => exportSections[k]) ? 'Deselect All' : 'Select All'}
+                  {(['kpis','ragStatus','trends','segments','volumeBadRate','variables'] as const).every(k => exportSections[k]) ? 'Deselect All' : 'Select All'}
                 </button>
               </div>
-              <div className="space-y-2">
-                {[
-                  { key: 'kpis', label: 'Model KPIs' },
-                  { key: 'ragStatus', label: 'RAG Status' },
-                  { key: 'trends', label: 'Performance Trends' },
-                  { key: 'segments', label: 'Segment Analysis' },
-                  { key: 'volumeBadRate', label: 'Volume vs Bad Rate' },
-                  { key: 'variables', label: 'Variable Stability' },
-                ].map(({ key, label }) => (
-                  <label key={key} className="flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={exportSections[key as keyof typeof exportSections]}
-                      onChange={(e) => setExportSections(prev => ({
-                        ...prev,
-                        [key]: e.target.checked
-                      }))}
-                      className="mr-2"
-                    />
-                    <span className={isDark ? 'text-slate-200' : 'text-slate-800'}>{label}</span>
+              <div className="grid grid-cols-2 gap-1">
+                {([
+                  { key: 'kpis',         label: 'Model KPIs' },
+                  { key: 'ragStatus',    label: 'RAG Status' },
+                  { key: 'trends',       label: 'Performance Trends' },
+                  { key: 'segments',     label: 'Segment Analysis' },
+                  { key: 'volumeBadRate',label: 'Volume vs Bad Rate' },
+                  { key: 'variables',    label: 'Variable Stability' },
+                ] as const).map(({ key, label }) => (
+                  <label key={key} className={`flex items-center gap-2 cursor-pointer py-1 px-2 rounded ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}`}>
+                    <input type="checkbox" checked={exportSections[key]} onChange={e => setExportSections(prev => ({ ...prev, [key]: e.target.checked }))} className="rounded" />
+                    <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{label}</span>
                   </label>
                 ))}
-                <label className="flex items-center cursor-pointer mt-3 pt-3 border-t border-slate-200">
-                  <input
-                    type="checkbox"
-                    checked={exportSections.includeComments}
-                    onChange={(e) => setExportSections(prev => ({ ...prev, includeComments: e.target.checked }))}
-                    className="mr-2"
-                  />
-                  <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Include Commentary</span>
-                </label>
+              </div>
+              <label className={`flex items-center gap-2 cursor-pointer py-1 px-2 rounded mt-1 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}`}>
+                <input type="checkbox" checked={exportSections.includeComments} onChange={e => setExportSections(prev => ({ ...prev, includeComments: e.target.checked }))} className="rounded" />
+                <span className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Include Commentary</span>
+              </label>
+            </div>
+
+            {/* KPI / Metric Selection */}
+            <div className="mb-5">
+              <div className="flex justify-between items-center mb-2">
+                <label className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Select Metrics</label>
+                <div className="flex gap-3">
+                  <button onClick={() => setExportKPIs(AVAILABLE_DASHBOARD_METRICS.filter(k => !['ROB','ConfusionMatrix'].includes(k)))} className="text-xs text-blue-600 hover:underline">All</button>
+                  <button onClick={() => setExportKPIs([])} className="text-xs text-slate-500 hover:underline">None</button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-1 max-h-44 overflow-y-auto">
+                {AVAILABLE_DASHBOARD_METRICS.map(key => (
+                  <label key={key} className={`flex items-center gap-2 cursor-pointer py-1 px-2 rounded ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}`}>
+                    <input
+                      type="checkbox"
+                      checked={exportKPIs.includes(key)}
+                      onChange={() => setExportKPIs(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])}
+                      className="rounded"
+                    />
+                    <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{METRIC_DESCRIPTIONS[key]?.label ?? key}</span>
+                  </label>
+                ))}
               </div>
             </div>
 
-            {/* Export Button */}
+            {/* Action buttons */}
             <div className="flex gap-3">
               <button
                 onClick={() => setShowExportModal(false)}
-                className={`flex-1 px-4 py-2 rounded-lg ${
-                  isDark 
-                    ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' 
-                    : 'bg-slate-200 text-slate-800 hover:bg-slate-300'
-                }`}
+                className={`flex-1 px-4 py-2 rounded-lg ${isDark ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-slate-200 text-slate-800 hover:bg-slate-300'}`}
               >
                 Cancel
               </button>
               <button
                 onClick={async () => {
                   if (!selectedBankingModel) return;
-                  
-                  setExporting(true);
-                  try {
-                    const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
-                    const modelMetrics = segmentFilteredMetrics;
-                    const latestVintage = [...new Set(bankingMetrics.map(m => m.vintage))].sort().reverse()[0];
-                    const latestMetric =
-                      segmentFilteredMetrics.find(m => m.vintage === latestVintage) ??
-                      bankingMetrics.find(m => m.model_id === selectedBankingModel && m.vintage === latestVintage);
-
-                    await exportDashboard({
-                      format: exportFormat,
-                      selectedModel: selectedModel || undefined,
-                      modelMetrics,
-                      latestMetric: latestMetric || undefined,
-                      includeSections: exportSections,
-                      comments: chartComments,
-                      includeComments: exportSections.includeComments,
-                    });
-
-                    // Show success notification
-                    if (showNotification) {
+                  if (exportTab === 'excel') {
+                    const model = bankingModels.find(m => m.model_id === selectedBankingModel);
+                    if (!model) return;
+                    setExporting(true);
+                    try {
+                      const latestVintage = [...new Set(bankingMetrics.map(m => m.vintage))].sort().reverse()[0];
+                      const latestM = segmentFilteredMetrics.find(m => m.vintage === latestVintage) ?? bankingMetrics.find(m => m.model_id === selectedBankingModel && m.vintage === latestVintage);
+                      const allModelMetrics = bankingMetrics.filter(m => m.model_id === selectedBankingModel);
+                      // Capture chart DOM sections as PNGs for embedding in the workbook
+                      const captureChart = async (id: string): Promise<string | undefined> => {
+                        try {
+                          const el = document.getElementById(id);
+                          if (!el) return undefined;
+                          const h2c = (await import('html2canvas')).default;
+                          const canvas = await h2c(el, { backgroundColor: '#ffffff', scale: 1.5, useCORS: true });
+                          return canvas.toDataURL('image/png', 0.9);
+                        } catch { return undefined; }
+                      };
+                      const [trendsImg, segImg, volImg, varImg] = await Promise.all([
+                        captureChart('export-trends'),
+                        captureChart('export-segments'),
+                        captureChart('export-volumeBadRate'),
+                        captureChart('export-variables'),
+                      ]);
+                      await exportDashboardToExcel({
+                        model,
+                        allMetrics: allModelMetrics,
+                        latestMetric: latestM,
+                        selectedKPIs: exportKPIs,
+                        modelVersion: (model as any).version,
+                        baselineMetrics: baselineFilteredMetrics.length > 0 ? baselineFilteredMetrics : undefined,
+                        chartImages: { trends: trendsImg, segments: segImg, volumeBadRate: volImg, variables: varImg },
+                      });
+                      showNotification('Excel report downloaded!', 'success');
+                      setShowExportModal(false);
+                    } catch (err) {
+                      console.error('Excel export failed:', err);
+                      showNotification('Excel export failed. Please try again.', 'error');
+                    } finally {
+                      setExporting(false);
+                    }
+                  } else {
+                    setExporting(true);
+                    try {
+                      const selectedModel = bankingModels.find(m => m.model_id === selectedBankingModel);
+                      const latestVintage = [...new Set(bankingMetrics.map(m => m.vintage))].sort().reverse()[0];
+                      const latestMetric = segmentFilteredMetrics.find(m => m.vintage === latestVintage) ?? bankingMetrics.find(m => m.model_id === selectedBankingModel && m.vintage === latestVintage);
+                      await exportDashboard({
+                        format: exportTab as 'pdf' | 'ppt',
+                        selectedModel: selectedModel || undefined,
+                        modelMetrics: segmentFilteredMetrics,
+                        latestMetric: latestMetric || undefined,
+                        includeSections: exportSections,
+                        comments: chartComments,
+                        includeComments: exportSections.includeComments,
+                        selectedKPIs: exportKPIs,
+                      });
                       showNotification('Report exported successfully!', 'success');
-                    }
-                    setShowExportModal(false);
-                  } catch (error) {
-                    console.error('Export failed:', error);
-                    if (showNotification) {
+                      setShowExportModal(false);
+                    } catch (err) {
+                      console.error('Export failed:', err);
                       showNotification('Export failed. Please try again.', 'error');
+                    } finally {
+                      setExporting(false);
                     }
-                  } finally {
-                    setExporting(false);
                   }
                 }}
-                disabled={exporting || !Object.values(exportSections).some(v => v)}
-                className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                disabled={exporting || exportKPIs.length === 0}
+                className={`flex-1 px-4 py-2 rounded-lg text-white flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed ${
+                  exportTab === 'excel' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
                 {exporting ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                    Generating...
-                  </>
+                  <><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />Generating…</>
                 ) : (
-                  <>
-                    <Download size={18} />
-                    Export {exportFormat.toUpperCase()}
-                  </>
+                  <><Download size={18} />Export {exportTab === 'excel' ? '.xlsx' : exportTab.toUpperCase()}</>
                 )}
               </button>
             </div>

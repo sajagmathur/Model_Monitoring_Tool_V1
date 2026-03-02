@@ -6,10 +6,9 @@ import {
   VariableStability,
   DecileData,
   FeatureImportance,
-  generateCompleteBankingDataset 
 } from '../utils/bankingMetricsMock';
 import { 
-  syncRegistryModelsToDashboard,
+  syncRegistryModelsToDashboard as buildBankingDataFromRegistry,
   mergeRegistryModelsWithExisting 
 } from '../utils/modelMetricsMapper';
 
@@ -96,6 +95,7 @@ export interface PreparationJob {
 export interface RegistryModel {
   id: string;
   name: string;
+  model_id?: string;  // User-entered model identifier (e.g. MODEL-437264)
   version: string;
   projectId: string;
   codeId?: string;
@@ -110,6 +110,7 @@ export interface RegistryModel {
   stage: 'dev' | 'staging' | 'production';
   status: 'active' | 'inactive';
   createdAt: string;
+  domain?: string;
 }
 
 export interface DeploymentJob {
@@ -529,6 +530,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       {
         id: modelId1,
         name: 'Credit_Card_Model',
+        model_id: 'MODEL-437264',
         version: '1.0.0',
         projectId,
         modelType: 'classification',
@@ -546,6 +548,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       {
         id: modelId2,
         name: 'Credit_Card_Model_v2',
+        model_id: 'MODEL-437265',
         version: '2.0.0',
         projectId,
         modelType: 'classification',
@@ -878,8 +881,8 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       },
     ];
 
-    // Generate banking metrics dataset
-    const { models: bankingModels, metrics: bankingMetrics } = generateCompleteBankingDataset();
+    // Derive banking models/metrics from registry models only
+    const { bankingModels, bankingMetrics } = buildBankingDataFromRegistry(sampleModels);
 
     return {
       ...initialState,
@@ -945,9 +948,9 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             bankingMetrics: parsed.bankingMetrics || [],
           };
           
-          // If banking data is missing, generate it
+          // If banking data is missing, derive from registry models
           if (!mergedState.bankingModels.length || !mergedState.bankingMetrics.length) {
-            const { models: bankingModels, metrics: bankingMetrics } = generateCompleteBankingDataset();
+            const { bankingModels, bankingMetrics } = buildBankingDataFromRegistry(mergedState.registryModels);
             mergedState.bankingModels = bankingModels;
             mergedState.bankingMetrics = bankingMetrics;
           }
@@ -1029,9 +1032,9 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             bankingMetrics: parsed.bankingMetrics || [],
           };
           
-          // If banking data is missing, generate it
+          // If banking data is missing, derive from registry models
           if (!mergedState.bankingModels.length || !mergedState.bankingMetrics.length) {
-            const { models: bankingModels, metrics: bankingMetrics } = generateCompleteBankingDataset();
+            const { bankingModels, bankingMetrics } = buildBankingDataFromRegistry(mergedState.registryModels);
             mergedState.bankingModels = bankingModels;
             mergedState.bankingMetrics = bankingMetrics;
           }
@@ -1747,9 +1750,9 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   const refreshBankingData = () => {
-    const { models: bankingModels, metrics: bankingMetrics } = generateCompleteBankingDataset();
+    const { bankingModels, bankingMetrics } = buildBankingDataFromRegistry(state.registryModels);
     setState(prev => ({ ...prev, bankingModels, bankingMetrics }));
-    console.log('🔄 Banking data refreshed:', { models: bankingModels.length, metrics: bankingMetrics.length });
+    console.log('🔄 Banking data refreshed from registry:', { models: bankingModels.length, metrics: bankingMetrics.length });
   };
 
   // Sync RegistryModels to Dashboard Banking Data

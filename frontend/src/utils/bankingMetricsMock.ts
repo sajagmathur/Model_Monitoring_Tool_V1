@@ -9,6 +9,7 @@ export interface BankingModel {
   model_type: string;
   name: string;
   segments?: string[];
+  version?: string;
 }
 
 export interface BankingMetrics {
@@ -45,6 +46,8 @@ export interface BankingMetrics {
     precision?: number;
     recall?: number;
     f1_score?: number;
+    // Classification-specific
+    HRL?: number;  // Hit Rate at Level – % of bads captured at defined score threshold
   };
   computed_at: string;
   rag_status?: 'green' | 'amber' | 'red';
@@ -199,22 +202,35 @@ export function generateBankingModels(count: number = 20): BankingModel[] {
 /**
  * Generate metrics for a specific model type
  */
+// Registry model type names that map to scorecard/ML behaviour
+const SCORECARD_TYPES = new Set([
+  'Acquisition Scorecard', 'ECM Scorecard', 'Bureau', 'ML',
+  // Registry-mapped display names (from modelMetricsMapper.ts mapModelType)
+  'Risk-Based Pricing', 'Credit Decisioning', 'Custom Scorecard', 'Predictive Model',
+]);
+// Registry model type names that should also generate classification metrics
+// (mirrors which types modelMetricsMapper generates accuracy/precision/recall/f1/HRL for)
+const CLASSIFICATION_TYPES = new Set([
+  'ML', 'Risk-Based Pricing', 'Credit Decisioning', 'Predictive Model',
+]);
+
 function generateMetricsForType(modelType: string, baseKS: number = 0.4): BankingMetrics['metrics'] {
   const metrics: BankingMetrics['metrics'] = {};
-  
-  if (modelType === 'Acquisition Scorecard' || modelType === 'ECM Scorecard' || modelType === 'Bureau' || modelType === 'ML') {
+
+  if (SCORECARD_TYPES.has(modelType)) {
     metrics.KS = Math.max(0.15, Math.min(0.65, baseKS + randBetween(-0.08, 0.08)));
     metrics.PSI = Math.max(0.01, randBetween(0.02, 0.20));
     metrics.AUC = Math.max(0.60, Math.min(0.95, 0.65 + metrics.KS * 0.5 + randBetween(-0.05, 0.05)));
     metrics.Gini = metrics.AUC * 2 - 1;
     metrics.CA_at_10 = Math.max(0.15, Math.min(0.45, metrics.KS * 0.7 + randBetween(-0.05, 0.05)));
     metrics.bad_rate = Math.max(0.02, Math.min(0.15, randBetween(0.04, 0.10)));
-    
-    if (modelType === 'ML') {
-      metrics.accuracy = Math.max(0.75, Math.min(0.95, 0.85 + randBetween(-0.08, 0.08)));
+
+    if (CLASSIFICATION_TYPES.has(modelType)) {
+      metrics.accuracy  = Math.max(0.75, Math.min(0.95, 0.85 + randBetween(-0.08, 0.08)));
       metrics.precision = Math.max(0.70, Math.min(0.92, 0.80 + randBetween(-0.08, 0.08)));
-      metrics.recall = Math.max(0.65, Math.min(0.90, 0.75 + randBetween(-0.08, 0.08)));
-      metrics.f1_score = 2 * (metrics.precision * metrics.recall) / (metrics.precision + metrics.recall);
+      metrics.recall    = Math.max(0.65, Math.min(0.90, 0.75 + randBetween(-0.08, 0.08)));
+      metrics.f1_score  = 2 * (metrics.precision * metrics.recall) / (metrics.precision + metrics.recall);
+      metrics.HRL       = Math.max(0.40, Math.min(0.90, metrics.KS * 0.8 + randBetween(-0.05, 0.05)));
     }
   } else if (modelType === 'Collections') {
     metrics.roll_rate_30 = Math.max(0.02, Math.min(0.12, randBetween(0.03, 0.09)));

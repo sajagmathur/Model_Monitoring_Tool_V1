@@ -22,10 +22,95 @@ export interface ExportOptions {
   /** Per-section commentary to embed in the export */
   comments?: Record<string, SectionComment[]>;
   includeComments?: boolean;
+  /** KPI keys selected in the export modal — used to annotate charts */
+  selectedKPIs?: string[];
 }
 
 function waitForRender(ms: number = 300): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ─── Metric guide data used in PDF & PPT ─────────────────────────────────────
+const METRIC_GUIDE: Record<string, { label: string; formula: string; green: string; amber: string; red: string }> = {
+  KS:        { label: 'KS Statistic',           formula: 'max(TPR − FPR)',                   green: '> 0.35',  amber: '0.25–0.35', red: '< 0.25' },
+  PSI:       { label: 'PSI',                    formula: 'Σ(Actual%−Exp%)×ln(Actual%/Exp%)', green: '< 0.10',  amber: '0.10–0.25', red: '> 0.25' },
+  AUC:       { label: 'AUC-ROC',                formula: 'Area under ROC curve',              green: '> 0.75',  amber: '0.65–0.75', red: '< 0.65' },
+  Gini:      { label: 'Gini',                   formula: '2 × AUC − 1',                      green: '> 0.50',  amber: '0.30–0.50', red: '< 0.30' },
+  bad_rate:  { label: 'Bad Rate',               formula: 'Bads / Total',                     green: '±15% base', amber: '15–30%',   red: '>30%'   },
+  CA_at_10:  { label: 'Capture Rate @ 10%',     formula: 'Bads top10% / Total Bads',         green: '> 0.30',  amber: '0.20–0.30', red: '< 0.20' },
+  accuracy:  { label: 'Accuracy',               formula: '(TP+TN)/Total',                    green: '> 0.85',  amber: '0.70–0.85', red: '< 0.70' },
+  precision: { label: 'Precision',              formula: 'TP/(TP+FP)',                       green: '> 0.80',  amber: '0.65–0.80', red: '< 0.65' },
+  recall:    { label: 'Recall',                 formula: 'TP/(TP+FN)',                       green: '> 0.75',  amber: '0.60–0.75', red: '< 0.60' },
+  f1_score:  { label: 'F1 Score',               formula: '2×(P×R)/(P+R)',                    green: '> 0.72',  amber: '0.60–0.72', red: '< 0.60' },
+  HRL:       { label: 'Hit Rate at Level (HRL)', formula: 'Bads above threshold / Total Bads', green: '> 0.70', amber: '0.55–0.70', red: '< 0.55' },
+};
+
+/**
+ * Renders a compact metric guide table in the PDF.
+ * Returns the new y-position after the block.
+ */
+function addPDFMetricGuide(
+  pdf: jsPDF,
+  kpis: string[],
+  y: number,
+  pageWidth: number,
+  pageHeight: number,
+  margin: number
+): number {
+  const validKpis = kpis.filter(k => METRIC_GUIDE[k]);
+  if (!validKpis.length) return y;
+
+  const contentWidth = pageWidth - margin * 2;
+  const checkBreak = (needed: number) => {
+    if (y + needed > pageHeight - margin - 10) { pdf.addPage(); y = margin; }
+  };
+
+  checkBreak(12);
+  pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(71, 85, 105);
+  pdf.text('Metric Reference', margin, y);
+  y += 4;
+
+  const colW = [38, 52, 22, 22, 22];
+  const rowH = 6;
+
+  // Header row
+  checkBreak(rowH);
+  const headers = ['Metric', 'Formula', '🟢 Green', '🟡 Amber', '🔴 Red'];
+  const hColors: [number,number,number][] = [[30,58,138],[30,58,138],[22,163,74],[217,119,6],[220,38,38]];
+  let cx = margin;
+  headers.forEach((h, i) => {
+    pdf.setFillColor(...hColors[i]); pdf.rect(cx, y, colW[i], rowH, 'F');
+    pdf.setFont('helvetica','bold'); pdf.setFontSize(7.5); pdf.setTextColor(255,255,255);
+    pdf.text(h, cx + 2, y + 4.2);
+    cx += colW[i];
+  });
+  y += rowH;
+
+  validKpis.forEach((k, idx) => {
+    checkBreak(rowH);
+    const info = METRIC_GUIDE[k];
+    const bg: [number,number,number] = idx % 2 === 0 ? [248,250,252] : [255,255,255];
+    pdf.setFillColor(...bg);
+    pdf.rect(margin, y, colW.reduce((a,b) => a+b, 0), rowH, 'F');
+    pdf.setDrawColor(226,232,240); pdf.setLineWidth(0.15);
+    pdf.line(margin, y+rowH, margin + colW.reduce((a,b)=>a+b,0), y+rowH);
+
+    let cx2 = margin;
+    const cells = [info.label, info.formula, info.green, info.amber, info.red];
+    cells.forEach((cell, ci) => {
+      pdf.setFont('helvetica', ci === 0 ? 'bold' : 'normal');
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(ci === 2 ? 22 : ci === 3 ? 120 : ci === 4 ? 185 : 55,
+                       ci === 2 ? 163 : ci === 3 ? 53 : ci === 4 ? 28 : 65,
+                       ci === 2 ? 74 : ci === 3 ? 6 : ci === 4 ? 38 : 81);
+      const maxW = colW[ci] - 3;
+      const txt = pdf.splitTextToSize(cell, maxW)[0] ?? cell; // single line, truncate
+      pdf.text(txt, cx2 + 2, y + 4.2);
+      cx2 += colW[ci];
+    });
+    y += rowH;
+  });
+  return y + 5;
 }
 
 async function captureSection(elementId: string): Promise<string | null> {
@@ -278,6 +363,10 @@ export async function exportDashboardAsPDF(options: ExportOptions): Promise<void
   if (options.includeSections.trends) {
     checkBreak(20);
     y = addPDFSectionHeader(pdf, '3. Performance Trends Over Time', y, pageWidth, margin);
+    // Metric guide table above the chart
+    if (options.selectedKPIs?.length) {
+      y = addPDFMetricGuide(pdf, options.selectedKPIs.filter(k => !['ROB','ConfusionMatrix'].includes(k)), y, pageWidth, pageHeight, margin);
+    }
     const img = await captureSection('export-trends');
     if (img) {
       const imgH = contentWidth * 0.42;
@@ -467,8 +556,29 @@ export async function exportDashboardAsPPT(options: ExportOptions): Promise<void
 
   if (options.includeSections.trends) {
     const s = pptx.addSlide(); addSlideHeader(s, 'Performance Trends Over Time');
+    // Metric description reference box on the slide
+    if (options.selectedKPIs?.length) {
+      const kpiList = options.selectedKPIs.filter(k => METRIC_GUIDE[k]);
+      if (kpiList.length > 0) {
+        const guideLines: pptxgen.TextProps[] = [
+          { text: 'Metric Reference  ', options: { bold: true, color: '1E3A8A', fontSize: 9 } },
+          { text: '\n', options: {} },
+        ];
+        kpiList.forEach((k, i) => {
+          const g = METRIC_GUIDE[k];
+          const sep = i > 0 ? '  ·  ' : '';
+          guideLines.push({ text: `${sep}${g.label}: ${g.formula}  🟢${g.green}  🟡${g.amber}  🔴${g.red}`, options: { fontSize: 8, color: '374151' } });
+          if ((i + 1) % 3 === 0) guideLines.push({ text: '\n', options: {} });
+        });
+        s.addText(guideLines, {
+          x: 0.4, y: 0.68, w: W - 0.8, h: 0.62,
+          fontFace: 'Calibri', fontSize: 8, color: '374151', wrap: true,
+          fill: { color: 'F0F9FF' }, line: { color: 'BFDBFE', pt: 0.5 },
+        });
+      }
+    }
     const img = await captureSection('export-trends');
-    if (img) s.addImage({ data:img, x:0.4, y:0.75, w:W-0.8, h:H-1.3 });
+    if (img) s.addImage({ data:img, x:0.4, y:1.38, w:W-0.8, h:H-2.05 });
     if (options.includeComments && options.comments?.trends?.length) {
       addPPTCommentaryBox(pptx, s, options.comments.trends, W, H);
     }

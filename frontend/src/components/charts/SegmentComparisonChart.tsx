@@ -68,12 +68,13 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
     // Add baseline datasets when in compare mode
     if (visibleBaseline.length > 0) {
       visibleBaseline.forEach((seg) => {
-        const color = segColor(seg);
+        // Warm amber/orange for baseline bars — clearly distinct from cool blue/teal monitoring bars
+        const baselineColor = seg.segment === 'thin_file' ? '#f59e0b' : '#f97316';
         datasets.push({
           label: `${seg.label} (Training)`,
           data: metricKeys.map(key => seg.metrics[key] || 0),
-          backgroundColor: `${color}33`,
-          borderColor: `${color}88`,
+          backgroundColor: `${baselineColor}99`,
+          borderColor: baselineColor,
           borderWidth: 2,
         });
       });
@@ -102,13 +103,18 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
           },
           title: {
             display: true,
-            text: segmentLabel
-              ? `Segment: ${segmentLabel}`
-              : activeSegment === 'all'
-                ? 'All Segments — Thin File (blue) vs Thick File (teal)'
-                : activeSegment === 'thin_file'
-                  ? 'Thin File Only'
-                  : 'Thick File Only',
+            text: (() => {
+              const isCompare = visibleBaseline.length > 0;
+              if (activeSegment === 'all') {
+                return isCompare
+                  ? 'All Segments: Monitoring (blue/teal)  │  Training Baseline (amber/orange)'
+                  : 'All Segments — Thin File (blue) vs Thick File (teal)';
+              }
+              const segName = activeSegment === 'thin_file' ? 'Thin File' : 'Thick File';
+              return isCompare
+                ? `${segName}: Monitoring (blue) vs Training Baseline (amber)`
+                : (segmentLabel ? `Segment: ${segmentLabel}` : `${segName} Only`);
+            })(),
             font: { size: 11, family: 'Inter, system-ui, sans-serif', style: 'italic' },
             color: '#6b7280',
             padding: { bottom: 6 },
