@@ -180,11 +180,12 @@ const AppRoutes: React.FC = () => {
  * Root App Component with Providers
  */
 export default function AppRouter() {
-  const basename = import.meta.env.MODE === 'production' 
-    ? window.location.pathname.split('/').length > 2 
-      ? '/' + window.location.pathname.split('/')[1]
-      : '/'
-    : '/';
+  // Use Vite's injected BASE_URL (derived from vite.config.ts `base` option).
+  // Strip trailing slash — BrowserRouter's basename must NOT end with '/'.
+  // e.g. '/' → '' (root), '/model-monitoring-studio/' → '/model-monitoring-studio'
+  const basename = import.meta.env.BASE_URL === '/'
+    ? ''
+    : import.meta.env.BASE_URL.replace(/\/$/, '');
   
   try {
     return (

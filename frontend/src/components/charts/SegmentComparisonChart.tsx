@@ -80,13 +80,15 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
       });
     }
 
-    chartInstanceRef.current = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: metricKeys,
-        datasets,
-      },
-      options: {
+    const rafId = requestAnimationFrame(() => {
+      if (!chartRef.current) return;
+      chartInstanceRef.current = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: metricKeys,
+          datasets,
+        },
+        options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
@@ -160,7 +162,10 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
       },
     });
 
+    });
+
     return () => {
+      cancelAnimationFrame(rafId);
       if (chartInstanceRef.current) {
         chartInstanceRef.current.destroy();
       }

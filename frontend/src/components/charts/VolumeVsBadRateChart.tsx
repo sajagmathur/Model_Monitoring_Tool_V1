@@ -234,10 +234,12 @@ export const VolumeVsBadRateChart: React.FC<VolumeVsBadRateChartProps> = ({
           ? `Segment: ${segmentLabel}`
           : undefined;
 
-    chartInstanceRef.current = new Chart(ctx, {
-      type: 'bar',
-      data: { labels: labels!, datasets },
-      options: {
+    const rafId = requestAnimationFrame(() => {
+      if (!chartRef.current) return;
+      chartInstanceRef.current = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: labels!, datasets },
+        options: {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
@@ -306,7 +308,10 @@ export const VolumeVsBadRateChart: React.FC<VolumeVsBadRateChartProps> = ({
       },
     });
 
+    });
+
     return () => {
+      cancelAnimationFrame(rafId);
       if (chartInstanceRef.current) chartInstanceRef.current.destroy();
     };
   }, [data, baselineData, thinFileData, thickFileData, thinFileBaselineData, thickFileBaselineData, segmentLabel, height, isDualSegment]);

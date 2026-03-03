@@ -211,10 +211,12 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
               ? 'All Segments — Current (solid line)  vs  Baseline (amber ▲ dashed)'
               : undefined;
 
-    chartInstanceRef.current = new Chart(ctx, {
-      type: 'line',
-      data: { labels, datasets },
-      options: {
+    const rafId = requestAnimationFrame(() => {
+      if (!chartRef.current) return;
+      chartInstanceRef.current = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
@@ -268,9 +270,11 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
           },
         },
       },
+      });
     });
 
     return () => {
+      cancelAnimationFrame(rafId);
       if (chartInstanceRef.current) chartInstanceRef.current.destroy();
     };
   }, [
