@@ -341,39 +341,61 @@ const ModelDetail: React.FC = () => {
     : generateScoreBandData(selectedBankingModel, selectedSegment, currentDatasetType)
         .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate }));
 
-  // Baseline data (compare mode)
-  const baselineVolumeData = compareMode
-    ? (volumeDisplayMode === 'quarterly'
-        ? metricsToVolData(baselineFilteredMetrics)
-        : generateScoreBandData(selectedBankingModel, selectedSegment, baselineDataset)
-            .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate })))
-    : undefined;
-
-  // Thin / thick file data for All Segments dual mode
-  const thinFileVolumeData = selectedSegment === 'all'
+  // Thin / thick file data for All Segments dual mode (only used when NOT in compare mode)
+  const thinFileVolumeData = (!compareMode && selectedSegment === 'all')
     ? (volumeDisplayMode === 'quarterly'
         ? metricsToVolData(thinFiltered)
         : generateScoreBandData(selectedBankingModel, 'thin_file', currentDatasetType)
             .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate })))
     : undefined;
-  const thickFileVolumeData = selectedSegment === 'all'
+  const thickFileVolumeData = (!compareMode && selectedSegment === 'all')
     ? (volumeDisplayMode === 'quarterly'
         ? metricsToVolData(thickFiltered)
         : generateScoreBandData(selectedBankingModel, 'thick_file', currentDatasetType)
             .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate })))
     : undefined;
-  const thinFileBaselineVolData = (compareMode && selectedSegment === 'all')
-    ? (volumeDisplayMode === 'quarterly'
+
+  // Baseline data (compare mode).
+  // For "All Segments" + compare: aggregate thin + thick baselines into one combined series
+  // so the chart can show a clean Monitoring vs Baseline comparison without dual-segment
+  // complexity. For a specific segment (or models with no segments): use simple baseline.
+  const baselineVolumeData = useMemo(() => {
+    if (!compareMode) return undefined;
+
+    if (selectedSegment === 'all') {
+      // Attempt to build combined thin+thick baseline
+      const thinBase = volumeDisplayMode === 'quarterly'
         ? metricsToVolData(thinFileBaselineM)
         : generateScoreBandData(selectedBankingModel, 'thin_file', baselineDataset)
-            .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate })))
-    : undefined;
-  const thickFileBaselineVolData = (compareMode && selectedSegment === 'all')
-    ? (volumeDisplayMode === 'quarterly'
+            .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate }));
+      const thickBase = volumeDisplayMode === 'quarterly'
         ? metricsToVolData(thickFileBaselineM)
         : generateScoreBandData(selectedBankingModel, 'thick_file', baselineDataset)
-            .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate })))
-    : undefined;
+            .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate }));
+
+      if (thinBase.length > 0 && thickBase.length > 0) {
+        // Weighted-average merge into single combined baseline series
+        return thinBase.map((t, i) => {
+          const k = thickBase[i] ?? { volume: 0, badRate: 0, label: t.label };
+          const vol = t.volume + k.volume;
+          const br = vol > 0 ? (t.badRate * t.volume + k.badRate * k.volume) / vol : 0;
+          return { label: t.label, volume: vol, badRate: parseFloat(br.toFixed(4)) };
+        });
+      }
+      // Fallback: unsegmented baseline for models without thin/thick split
+      return volumeDisplayMode === 'quarterly'
+        ? metricsToVolData(baselineFilteredMetrics)
+        : generateScoreBandData(selectedBankingModel, selectedSegment, baselineDataset)
+            .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate }));
+    }
+
+    // Specific segment compare
+    return volumeDisplayMode === 'quarterly'
+      ? metricsToVolData(baselineFilteredMetrics)
+      : generateScoreBandData(selectedBankingModel, selectedSegment, baselineDataset)
+          .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate }));
+  }, [compareMode, selectedSegment, volumeDisplayMode, thinFileBaselineM, thickFileBaselineM,
+      baselineFilteredMetrics, selectedBankingModel, baselineDataset]);
 
   // ── AI Summary generator ─────────────────────────────────────────────────────
   const ks    = latestMetric?.metrics.KS;
@@ -807,12 +829,10 @@ const ModelDetail: React.FC = () => {
                           {key === 'volume_bad_rate' ? (
                             <VolumeVsBadRateChart
                               data={volumeData}
-                              baselineData={compareMode ? baselineVolumeData : undefined}
+                              baselineData={baselineVolumeData}
                               height={280}
                               thinFileData={thinFileVolumeData}
                               thickFileData={thickFileVolumeData}
-                              thinFileBaselineData={compareMode ? thinFileBaselineVolData : undefined}
-                              thickFileBaselineData={compareMode ? thickFileBaselineVolData : undefined}
                               segmentLabel={segmentLabel}
                             />
                           ) : key === 'change_in_KS' ? (
