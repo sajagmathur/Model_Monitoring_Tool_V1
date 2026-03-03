@@ -13,7 +13,7 @@ const Logo: React.FC<LogoProps> = ({ size = 'md' }) => {
 
   return (
     <img
-      src="/logo.png"
+      src={`${import.meta.env.BASE_URL}logo.png`}
       alt="Logo"
       className={`${sizes[size]} object-contain rounded-lg shadow-lg`}
     />
