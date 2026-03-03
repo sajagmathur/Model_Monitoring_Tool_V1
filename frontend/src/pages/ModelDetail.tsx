@@ -811,6 +811,8 @@ const ModelDetail: React.FC = () => {
                               height={280}
                               thinFileData={thinFileVolumeData}
                               thickFileData={thickFileVolumeData}
+                              thinFileBaselineData={compareMode ? thinFileBaselineVolData : undefined}
+                              thickFileBaselineData={compareMode ? thickFileBaselineVolData : undefined}
                               segmentLabel={segmentLabel}
                             />
                           ) : key === 'change_in_KS' ? (
