@@ -28,6 +28,7 @@ import Datasets from './pages/Datasets';
 import Reports from './pages/Reports';
 import Scheduling from './pages/Scheduling';
 import Logs from './pages/Logs';
+import ModelDetail from './pages/ModelDetail';
 
 /**
  * Session Warning Banner Component
@@ -154,6 +155,7 @@ const AppRoutes: React.FC = () => {
     <MainLayout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/dashboard/model/:modelId" element={<ModelDetail />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/model-repository" element={<ModelRegistry />} />
         <Route path="/data-quality" element={<DataQuality />} />

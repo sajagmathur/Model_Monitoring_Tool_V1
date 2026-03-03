@@ -128,14 +128,14 @@ export const METRIC_DESCRIPTIONS: Record<string, MetricDescription> = {
     higherIsBetter: true,
   },
   ROB: {
-    label: 'Risk-Ordered Band (ROB) Chart',
-    formula: 'Bad Rate per Score Band = Bad Count / Total Count in Band',
+    label: 'Rank Order Break (ROB) Chart',
+    formula: 'ROB = |Monitoring Node Rank − Reference Node Rank| where rank is assigned by descending bad rate',
     overview:
-      'The ROB chart plots bad rate across ordered score bands (0.0–1.0 probability of default or risk). Well-functioning models show a monotonically increasing bad rate as scores increase, confirming the model correctly rank-orders risk. Non-monotonic patterns indicate calibration or segmentation issues.',
+      'The Rank Order Break chart compares node bad-rate rankings between a reference vintage and a monitoring vintage. A ROB occurs when a node\'s rank in the monitoring period differs from its reference rank — indicating the model no longer correctly separates risk. The total ROB % = (number of nodes with rank inversions) / (total nodes) × 100.',
     thresholds: {
-      green: 'Monotonically increasing bad rate across bands',
-      amber: 'Minor inversions in 1–2 bands',
-      red: 'Multiple non-monotonic inversions',
+      green: 'ROB = 0% — Perfect rank ordering maintained',
+      amber: 'ROB 1–25% — Minor rank inversions, review recommended',
+      red: 'ROB > 25% — Significant rank disorder, escalate to Model Governance',
     },
     higherIsBetter: undefined,
   },
@@ -147,14 +147,14 @@ export const METRIC_DESCRIPTIONS: Record<string, MetricDescription> = {
     higherIsBetter: undefined,
   },
   HRL: {
-    label: 'Hit Rate at Level (HRL)',
+    label: 'Hit Rate Lift (HRL) — Fraud Models',
     formula: 'HRL = Bads captured above score threshold / Total Bads',
     overview:
-      'Hit Rate at Level measures the proportion of actual bad accounts captured by the model when a fixed score threshold (level) is applied. It quantifies the operational effectiveness of the model at a specific cut-off — e.g., what fraction of future defaults are flagged before they occur. HRL is critical for deployment: a high HRL at a given threshold means fewer missed-bad losses.',
+      'Hit Rate Lift (formerly Hit Rate at Level) measures the proportion of actual fraudulent or bad accounts captured by the model when a fixed score threshold is applied. Applicable to fraud detection models. A high HRL at a given threshold means fewer missed-fraud losses and higher operational effectiveness.',
     thresholds: {
-      green: '> 0.70 — High capture at threshold level',
-      amber: '0.55 – 0.70 — Moderate capture, review threshold',
-      red: '< 0.55 — Low capture, model may need recalibration',
+      green: '> 70% — High capture at threshold level',
+      amber: '55% – 70% — Moderate capture, review threshold',
+      red: '< 55% — Low capture, model may need recalibration',
     },
     higherIsBetter: true,
   },
@@ -162,5 +162,5 @@ export const METRIC_DESCRIPTIONS: Record<string, MetricDescription> = {
 
 export const ALL_METRIC_KEYS = Object.keys(METRIC_DESCRIPTIONS);
 
-export const DEFAULT_SELECTED_METRICS = ['KS', 'PSI', 'AUC'];
+export const DEFAULT_SELECTED_METRICS = ['volume_bad_rate', 'KS', 'PSI', 'AUC', 'Gini', 'bad_rate', 'CA_at_10', 'ROB', 'ConfusionMatrix'];
 

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, ChevronDown, ChevronUp, Plus, X, AtSign } from 'lucide-react';
+import { MessageSquare, ChevronDown, ChevronUp, Plus, X, AtSign, Sparkles } from 'lucide-react';
 
 export interface SectionComment {
   id: string;
@@ -39,6 +39,7 @@ interface ChartCommentaryProps {
   onAdd: (comment: SectionComment) => void;
   onDelete: (id: string) => void;
   isDark?: boolean;
+  aiSuggestion?: string;  // AI-generated text the user can use as a starting point
 }
 
 export const ChartCommentary: React.FC<ChartCommentaryProps> = ({
@@ -48,11 +49,13 @@ export const ChartCommentary: React.FC<ChartCommentaryProps> = ({
   onAdd,
   onDelete,
   isDark = false,
+  aiSuggestion,
 }) => {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [selectedMentions, setSelectedMentions] = useState<string[]>([]);
   const [showTeamPicker, setShowTeamPicker] = useState(false);
+  const [aiExpanded, setAiExpanded] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   // Close picker when clicking outside
@@ -143,6 +146,41 @@ export const ChartCommentary: React.FC<ChartCommentaryProps> = ({
                   <p className={`text-sm ${text} leading-relaxed`}>{c.text}</p>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* AI Generated Summary */}
+          {aiSuggestion && (
+            <div className={`mt-3 rounded-lg border ${isDark ? 'bg-indigo-950/30 border-indigo-700/50' : 'bg-indigo-50 border-indigo-200'}`}>
+              <button
+                onClick={() => setAiExpanded(v => !v)}
+                className={`w-full flex items-center justify-between px-3 py-2 text-xs font-semibold ${isDark ? 'text-indigo-300 hover:text-indigo-200' : 'text-indigo-700 hover:text-indigo-900'}`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Sparkles size={12} />
+                  ✨ AI Generated Summary
+                </span>
+                {aiExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+              {aiExpanded && (
+                <div className={`px-3 pb-3 border-t ${isDark ? 'border-indigo-700/40' : 'border-indigo-200'}`}>
+                  <p className={`text-xs mt-2 leading-relaxed ${isDark ? 'text-indigo-200' : 'text-indigo-800'}`}>{aiSuggestion}</p>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={() => { setDraft(aiSuggestion); setAiExpanded(false); }}
+                      className="text-xs px-3 py-1 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 font-medium"
+                    >
+                      Use This
+                    </button>
+                    <button
+                      onClick={() => { setDraft(prev => prev ? prev + '\n\n' + aiSuggestion : aiSuggestion); setAiExpanded(false); }}
+                      className={`text-xs px-3 py-1 rounded-full border font-medium ${isDark ? 'border-indigo-600 text-indigo-300 hover:bg-indigo-900/40' : 'border-indigo-400 text-indigo-700 hover:bg-indigo-100'}`}
+                    >
+                      Append
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

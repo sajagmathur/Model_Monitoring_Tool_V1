@@ -11,7 +11,7 @@ export const THICK_COLOR = '#14b8a6'; // teal
 interface BankingMetricsTrendChartProps {
   metrics: BankingMetrics[];
   metricKey: 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'Gini' | 'CA_at_10' | 'volume'
-    | 'accuracy' | 'precision' | 'recall' | 'f1_score' | 'HRL';
+    | 'accuracy' | 'precision' | 'recall' | 'f1_score' | 'HRL' | 'change_in_KS';
   title?: string;
   height?: number;
   /** When provided, renders a second dashed series for baseline comparison */
@@ -57,7 +57,9 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
       [...arr].sort((a, b) => a.vintage.localeCompare(b.vintage));
     const extract = (arr: BankingMetrics[]) =>
       sortBy(arr).map(m =>
-        metricKey === 'volume' ? m.volume : (m.metrics[metricKey] ?? null)
+        metricKey === 'volume' ? m.volume
+        : metricKey === 'change_in_KS' ? ((m.metrics as any).change_in_KS ?? null)
+        : (m.metrics[metricKey] ?? null)
       );
 
     if (chartInstanceRef.current) chartInstanceRef.current.destroy();
@@ -89,76 +91,28 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
     const datasets: any[] = [];
 
     if (isDualSegment) {
-      // ── "All" mode: two solid lines, one per segment ──────────────────────
+      // ── "All Segments" mode: ONE combined line ─────────────────────────
+      const combinedData = metrics.length > 0 ? metrics : thinFileMetrics!;
+      const allColor = '#6366f1';
       datasets.push({
-        label: 'Thin File',
-        data: extract(thinFileMetrics!),
-        borderColor: THIN_COLOR,
-        backgroundColor: `${THIN_COLOR}33`,
+        label: 'All Segments',
+        data: extract(combinedData),
+        borderColor: allColor,
+        backgroundColor: `${allColor}22`,
         borderWidth: 2.5,
         tension: 0.4,
         fill: false,
         pointRadius: 4,
         pointHoverRadius: 6,
-        pointBackgroundColor: THIN_COLOR,
+        pointBackgroundColor: allColor,
         pointBorderColor: '#fff',
         pointBorderWidth: 2,
       });
-      datasets.push({
-        label: 'Thick File',
-        data: extract(thickFileMetrics!),
-        borderColor: THICK_COLOR,
-        backgroundColor: `${THICK_COLOR}33`,
-        borderWidth: 2.5,
-        tension: 0.4,
-        fill: false,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: THICK_COLOR,
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-      });
-      if (thinFileBaselineMetrics?.length) {
-        datasets.push({
-          label: 'Thin File — Baseline',
-          data: extract(thinFileBaselineMetrics),
-          borderColor: '#f59e0b',           // amber — distinct from Thin Current (blue)
-          backgroundColor: 'transparent',
-          borderWidth: 2,
-          borderDash: [8, 4],
-          tension: 0.4,
-          fill: false,
-          pointRadius: 4,
-          pointHoverRadius: 6,
-          pointBackgroundColor: '#f59e0b',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-          pointStyle: 'triangle',
-        });
-      }
-      if (thickFileBaselineMetrics?.length) {
-        datasets.push({
-          label: 'Thick File — Baseline',
-          data: extract(thickFileBaselineMetrics),
-          borderColor: '#f97316',           // orange — distinct from Thick Current (teal)
-          backgroundColor: 'transparent',
-          borderWidth: 2,
-          borderDash: [8, 4],
-          tension: 0.4,
-          fill: false,
-          pointRadius: 4,
-          pointHoverRadius: 6,
-          pointBackgroundColor: '#f97316',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-          pointStyle: 'rectRot',
-        });
-      }
     } else {
       // ── Single-segment / aggregate mode ───────────────────────────────────
       const isCompareMode = !!baselineMetrics?.length;
-      const color = segmentLabel === 'Thin File' ? THIN_COLOR
-        : segmentLabel === 'Thick File' ? THICK_COLOR
+      const color = segmentLabel === 'Current' ? THIN_COLOR
+        : segmentLabel === 'Delinquent' ? THICK_COLOR
         : metricColor();
       const lbl = isCompareMode
         ? currentLabel
@@ -198,11 +152,9 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
       }
     }
 
-    const hasDualBaseline = !!(thinFileBaselineMetrics?.length || thickFileBaselineMetrics?.length);
-    const subtitleText = (isDualSegment && hasDualBaseline)
-      ? 'All Segments: Current → Thin (blue) / Thick (teal)   │   Baseline → Thin (amber ▲) / Thick (orange ◆)'
-      : isDualSegment
-        ? 'All Segments — Thin File (blue)  vs  Thick File (teal)'
+    const hasDualBaseline = false;
+    const subtitleText = isDualSegment
+      ? 'All Segments — combined view (indigo line)'
         : (segmentLabel && !!baselineMetrics?.length)
           ? `Segment: ${segmentLabel}   │   Current (solid line) vs Baseline (amber ▲ dashed)`
           : segmentLabel
@@ -243,6 +195,9 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
                 const val = context.parsed.y;
                 if (val === null) return `${context.dataset.label}: —`;
                 if (metricKey === 'volume') return `${context.dataset.label}: ${val.toLocaleString()}`;
+                const isPct = ['KS','accuracy','precision','recall','f1_score','HRL','bad_rate'].includes(metricKey);
+                if (isPct) return `${context.dataset.label}: ${(val * 100).toFixed(1)}%`;
+                if (metricKey === 'change_in_KS') return `${context.dataset.label}: ${val >= 0 ? '+' : ''}${val.toFixed(1)}%`;
                 return `${context.dataset.label}: ${val.toFixed(4)}`;
               },
             },
@@ -262,10 +217,13 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
             grid: { color: '#e5e7eb' },
             ticks: {
               font: { size: 11, family: 'Inter, system-ui, sans-serif' },
-              callback: (value: any) =>
-                metricKey === 'volume'
-                  ? (value as number).toLocaleString()
-                  : (value as number).toFixed(2),
+              callback: (value: any) => {
+                if (metricKey === 'volume') return (value as number).toLocaleString();
+                const isPct = ['KS','accuracy','precision','recall','f1_score','HRL','bad_rate'].includes(metricKey);
+                if (isPct) return `${((value as number) * 100).toFixed(1)}%`;
+                if (metricKey === 'change_in_KS') return `${(value as number) >= 0 ? '+' : ''}${(value as number).toFixed(1)}%`;
+                return (value as number).toFixed(2);
+              },
             },
           },
         },

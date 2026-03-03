@@ -4,6 +4,9 @@ import { BankingMetrics } from '../../utils/bankingMetricsMock';
 interface ConfusionMatrixChartProps {
   latestMetric?: BankingMetrics;
   isDark?: boolean;
+  viewMode?: 'chart' | 'table';
+  /** When true (during export capture), renders both heatmap and metrics table simultaneously */
+  forceBoth?: boolean;
 }
 
 interface CMValues {
@@ -62,7 +65,7 @@ function deriveConfusionMatrix(metrics: BankingMetrics['metrics']): CMValues {
   };
 }
 
-const ConfusionMatrixChart: React.FC<ConfusionMatrixChartProps> = ({ latestMetric, isDark = false }) => {
+const ConfusionMatrixChart: React.FC<ConfusionMatrixChartProps> = ({ latestMetric, isDark = false, viewMode = 'chart', forceBoth = false }) => {
   const cm = latestMetric ? deriveConfusionMatrix(latestMetric.metrics) : {
     tp: 78, fp: 14, fn: 22, tn: 886,
     precision: 0.848, recall: 0.780, f1: 0.813,
@@ -164,6 +167,7 @@ const ConfusionMatrixChart: React.FC<ConfusionMatrixChartProps> = ({ latestMetri
   return (
     <div className="space-y-6">
       {/* Confusion Matrix Heatmap */}
+      {(viewMode !== 'table' || forceBoth) && (
       <div>
         <div className="flex items-start gap-6">
           <div>
@@ -242,9 +246,10 @@ const ConfusionMatrixChart: React.FC<ConfusionMatrixChartProps> = ({ latestMetri
           </div>
         </div>
       </div>
+      )}
 
-      {/* Classification Metrics Table */}
-      <div>
+      {/* Classification Metrics Table — only shown in table mode (or during export) */}
+      {(viewMode !== 'chart' || forceBoth) && <div>
         <p className={`text-xs font-semibold mb-3 uppercase tracking-wide ${subCls}`}>
           Classification Metrics
         </p>
@@ -290,7 +295,7 @@ const ConfusionMatrixChart: React.FC<ConfusionMatrixChartProps> = ({ latestMetri
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
     </div>
   );
 };

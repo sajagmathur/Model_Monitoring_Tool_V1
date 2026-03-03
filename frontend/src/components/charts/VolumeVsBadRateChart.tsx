@@ -16,8 +16,8 @@ interface VolumeVsBadRateChartProps {
   baselineData?: VolumeDataPoint[];
   height?: number;
   /**
-   * "All segments" dual mode: renders Thin File + Thick File bars and lines.
-   * When both are provided, `data` is ignored.
+   * "All segments" dual mode: renders a single combined All Segments bar + bad-rate line.
+   * When both are provided, `data` (combined aggregate) is used if available.
    */
   thinFileData?: VolumeDataPoint[];
   thickFileData?: VolumeDataPoint[];
@@ -61,44 +61,47 @@ export const VolumeVsBadRateChart: React.FC<VolumeVsBadRateChartProps> = ({
     let labels: string[];
 
     if (isDualSegment && (thinFileBaselineData?.length || thickFileBaselineData?.length)) {
-      // ── "All segments" + Compare mode: 8 series ───────────────────────
-      labels = thinFileData!.map(d => d.label);
-      datasets.push({ label: 'Thin File Current — Volume',  data: thinFileData!.map(d => d.volume),  backgroundColor: `${THIN_COLOR}88`,  borderColor: THIN_COLOR,  borderWidth: 2, yAxisID: 'yVolume', type: 'bar', order: 3 });
-      datasets.push({ label: 'Thick File Current — Volume', data: thickFileData!.map(d => d.volume), backgroundColor: `${THICK_COLOR}88`, borderColor: THICK_COLOR, borderWidth: 2, yAxisID: 'yVolume', type: 'bar', order: 3 });
-      if (thinFileBaselineData?.length)  datasets.push({ label: 'Thin File Baseline — Volume',  data: thinFileBaselineData.map(d => d.volume),  backgroundColor: '#f59e0b44', borderColor: '#f59e0b', borderWidth: 2, yAxisID: 'yVolume', type: 'bar', order: 3 });
-      if (thickFileBaselineData?.length) datasets.push({ label: 'Thick File Baseline — Volume', data: thickFileBaselineData.map(d => d.volume), backgroundColor: '#f9731644', borderColor: '#f97316', borderWidth: 2, yAxisID: 'yVolume', type: 'bar', order: 3 });
-      datasets.push({ label: 'Thin File Current — Bad Rate (%)',  data: toRates(thinFileData!),  type: 'line', borderColor: THIN_COLOR,  backgroundColor: 'transparent', borderWidth: 2.5, tension: 0.4, fill: false, yAxisID: 'yBadRate', pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: THIN_COLOR,  pointBorderColor: '#fff', pointBorderWidth: 2, order: 1 });
-      datasets.push({ label: 'Thick File Current — Bad Rate (%)', data: toRates(thickFileData!), type: 'line', borderColor: THICK_COLOR, backgroundColor: 'transparent', borderWidth: 2.5, borderDash: [6, 3], tension: 0.4, fill: false, yAxisID: 'yBadRate', pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: THICK_COLOR, pointBorderColor: '#fff', pointBorderWidth: 2, order: 1 });
-      if (thinFileBaselineData?.length)  datasets.push({ label: 'Thin File Baseline — Bad Rate (%)',  data: toRates(thinFileBaselineData),  type: 'line', borderColor: '#f59e0b', backgroundColor: 'transparent', borderWidth: 2, borderDash: [8, 4], tension: 0.4, fill: false, yAxisID: 'yBadRate', pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: '#f59e0b', pointBorderColor: '#fff', pointBorderWidth: 2, pointStyle: 'triangle', order: 1 });
-      if (thickFileBaselineData?.length) datasets.push({ label: 'Thick File Baseline — Bad Rate (%)', data: toRates(thickFileBaselineData), type: 'line', borderColor: '#f97316', backgroundColor: 'transparent', borderWidth: 2, borderDash: [8, 4], tension: 0.4, fill: false, yAxisID: 'yBadRate', pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: '#f97316', pointBorderColor: '#fff', pointBorderWidth: 2, pointStyle: 'rectRot', order: 1 });
+      // ── "All segments" + Compare mode: ONE combined Monitoring vs ONE combined Baseline ──
+      const combinedMon = data.length > 0 ? data : thinFileData!;
+      // Aggregate thinFile + thickFile baselines into a single combined series
+      const combinedBase: VolumeDataPoint[] = (() => {
+        if (thinFileBaselineData?.length && thickFileBaselineData?.length) {
+          return thinFileBaselineData.map((t, i) => {
+            const k = thickFileBaselineData[i] ?? { volume: 0, badRate: 0, label: t.label };
+            const vol = t.volume + k.volume;
+            const br = vol > 0 ? (t.badRate * t.volume + k.badRate * k.volume) / vol : 0;
+            return { label: t.label, volume: vol, badRate: parseFloat(br.toFixed(4)) };
+          });
+        }
+        return thinFileBaselineData ?? thickFileBaselineData ?? [];
+      })();
+      const allColor = '#6366f1';
+      const baseColor = '#f59e0b';
+      labels = combinedMon.map(d => d.label);
+      datasets.push({ label: 'All Segments — Volume (Monitoring)', data: combinedMon.map(d => d.volume), backgroundColor: `${allColor}55`, borderColor: allColor, borderWidth: 2, yAxisID: 'yVolume', type: 'bar', order: 3 });
+      if (combinedBase.length) datasets.push({ label: 'All Segments — Volume (Baseline)', data: combinedBase.map(d => d.volume), backgroundColor: `${baseColor}44`, borderColor: baseColor, borderWidth: 2, yAxisID: 'yVolume', type: 'bar', order: 3 });
+      datasets.push({ label: 'All Segments — Bad Rate — Monitoring (%)', data: toRates(combinedMon), type: 'line', borderColor: allColor, backgroundColor: 'transparent', borderWidth: 2.5, tension: 0.4, fill: false, yAxisID: 'yBadRate', pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: allColor, pointBorderColor: '#fff', pointBorderWidth: 2, order: 1 });
+      if (combinedBase.length) datasets.push({ label: 'All Segments — Bad Rate — Baseline (%)', data: toRates(combinedBase), type: 'line', borderColor: baseColor, backgroundColor: 'transparent', borderWidth: 2, borderDash: [8, 4], tension: 0.4, fill: false, yAxisID: 'yBadRate', pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: baseColor, pointBorderColor: '#fff', pointBorderWidth: 2, order: 1 });
     } else if (isDualSegment) {
-      // ── "All segments" mode: Thin File + Thick File ───────────────────────
-      labels = thinFileData!.map(d => d.label);
+      // ── "All segments" mode: ONE combined bar + ONE bad-rate line ──────────
+      const combinedVol = data.length > 0 ? data : thinFileData!;
+      const allColor = '#6366f1';
+      labels = combinedVol.map(d => d.label);
       datasets.push({
-        label: 'Thin File — Volume',
-        data: thinFileData!.map(d => d.volume),
-        backgroundColor: `${THIN_COLOR}88`,
-        borderColor: THIN_COLOR,
+        label: 'All Segments — Volume',
+        data: combinedVol.map(d => d.volume),
+        backgroundColor: `${allColor}55`,
+        borderColor: allColor,
         borderWidth: 2,
         yAxisID: 'yVolume',
         type: 'bar',
         order: 3,
       });
       datasets.push({
-        label: 'Thick File — Volume',
-        data: thickFileData!.map(d => d.volume),
-        backgroundColor: `${THICK_COLOR}88`,
-        borderColor: THICK_COLOR,
-        borderWidth: 2,
-        yAxisID: 'yVolume',
-        type: 'bar',
-        order: 3,
-      });
-      datasets.push({
-        label: 'Thin File — Bad Rate (%)',
-        data: toRates(thinFileData!),
+        label: 'All Segments — Bad Rate (%)',
+        data: toRates(combinedVol),
         type: 'line',
-        borderColor: THIN_COLOR,
+        borderColor: allColor,
         backgroundColor: 'transparent',
         borderWidth: 2.5,
         tension: 0.4,
@@ -106,25 +109,7 @@ export const VolumeVsBadRateChart: React.FC<VolumeVsBadRateChartProps> = ({
         yAxisID: 'yBadRate',
         pointRadius: 5,
         pointHoverRadius: 7,
-        pointBackgroundColor: THIN_COLOR,
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        order: 1,
-      });
-      datasets.push({
-        label: 'Thick File — Bad Rate (%)',
-        data: toRates(thickFileData!),
-        type: 'line',
-        borderColor: THICK_COLOR,
-        backgroundColor: 'transparent',
-        borderWidth: 2.5,
-        borderDash: [6, 3],
-        tension: 0.4,
-        fill: false,
-        yAxisID: 'yBadRate',
-        pointRadius: 5,
-        pointHoverRadius: 7,
-        pointBackgroundColor: THICK_COLOR,
+        pointBackgroundColor: allColor,
         pointBorderColor: '#fff',
         pointBorderWidth: 2,
         order: 1,
@@ -193,8 +178,8 @@ export const VolumeVsBadRateChart: React.FC<VolumeVsBadRateChartProps> = ({
         });
       } else {
         // Single mode
-        const segColor = segmentLabel === 'Thin File' ? THIN_COLOR
-          : segmentLabel === 'Thick File' ? THICK_COLOR : '#3b82f6';
+        const segColor = segmentLabel === 'Current' ? THIN_COLOR
+          : segmentLabel === 'Delinquent' ? THICK_COLOR : '#3b82f6';
         datasets.push({
           label: segmentLabel ? `Volume — ${segmentLabel}` : 'Volume',
           data: volumes,
@@ -227,9 +212,9 @@ export const VolumeVsBadRateChart: React.FC<VolumeVsBadRateChartProps> = ({
 
     const hasDualBaseline = !!(thinFileBaselineData?.length || thickFileBaselineData?.length);
     const subtitleText = (isDualSegment && hasDualBaseline)
-      ? 'All Segments: Current → Thin (blue) / Thick (teal)  │  Baseline → Thin (amber ▲) / Thick (orange ◆)'
+      ? 'All Segments — Monitoring (indigo) vs Baseline (amber)'
       : isDualSegment
-        ? 'All Segments — Thin File (blue bars/solid)  vs  Thick File (teal bars/dashed)'
+        ? 'All Segments — combined view (indigo)'
         : segmentLabel
           ? `Segment: ${segmentLabel}`
           : undefined;

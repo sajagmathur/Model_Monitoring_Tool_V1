@@ -4,9 +4,11 @@ import { SegmentMetrics } from '../../utils/bankingMetricsMock';
 
 Chart.register(...registerables);
 
+type SegmentMetricKey = 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'accuracy' | 'precision' | 'recall' | 'f1_score' | 'HRL' | 'Gini' | 'CA_at_10';
+
 interface SegmentComparisonChartProps {
   segmentData: SegmentMetrics;
-  metricKeys?: ('KS' | 'PSI' | 'AUC' | 'bad_rate')[];
+  metricKeys?: SegmentMetricKey[];
   /** When set, filters the chart to only show that segment's bar group */
   activeSegment?: 'thin_file' | 'thick_file' | 'all';
   /** When provided (compare mode), renders lighter baseline bars alongside current */
@@ -17,7 +19,7 @@ interface SegmentComparisonChartProps {
 
 export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
   segmentData,
-  metricKeys = ['KS', 'PSI', 'AUC', 'bad_rate'],
+  metricKeys = ['KS', 'PSI', 'AUC', 'bad_rate'] as SegmentMetricKey[],
   activeSegment = 'all',
   baselineSegmentData,
   segmentLabel,
@@ -58,7 +60,7 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
       const color = segColor(seg);
       return {
         label: `${seg.label} (Monitoring)`,
-        data: metricKeys.map(key => seg.metrics[key] || 0),
+        data: metricKeys.map(key => (seg.metrics as any)[key] || 0),
         backgroundColor: `${color}99`,
         borderColor: color,
         borderWidth: 2,
@@ -72,7 +74,7 @@ export const SegmentComparisonChart: React.FC<SegmentComparisonChartProps> = ({
         const baselineColor = seg.segment === 'thin_file' ? '#f59e0b' : '#f97316';
         datasets.push({
           label: `${seg.label} (Training)`,
-          data: metricKeys.map(key => seg.metrics[key] || 0),
+          data: metricKeys.map(key => (seg.metrics as any)[key] || 0),
           backgroundColor: `${baselineColor}99`,
           borderColor: baselineColor,
           borderWidth: 2,

@@ -341,7 +341,7 @@ export function generateSegmentMetrics(
     segments: [
       {
         segment: 'thin_file',
-        label: 'Thin File',
+        label: 'Current',
         volume: randInt(8000, 20000),
         metrics: {
           ...generateMetricsForType('Acquisition Scorecard', randBetween(0.32 + ksDelta, 0.42 + ksDelta)),
@@ -350,7 +350,7 @@ export function generateSegmentMetrics(
       },
       {
         segment: 'thick_file',
-        label: 'Thick File',
+        label: 'Delinquent',
         volume: randInt(15000, 35000),
         metrics: {
           ...generateMetricsForType('Acquisition Scorecard', randBetween(0.42 + ksDelta, 0.52 + ksDelta)),

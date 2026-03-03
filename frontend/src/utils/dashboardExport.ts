@@ -14,6 +14,8 @@ export interface ExportOptions {
     kpis: boolean;
     ragStatus: boolean;
     trends: boolean;
+    rob?: boolean;
+    confusionMatrix?: boolean;
     segments: boolean;
     volumeBadRate: boolean;
     variables: boolean;
