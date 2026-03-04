@@ -297,10 +297,20 @@ const ModelDetail: React.FC = () => {
     segmentLabel,
     currentLabel: compareMode ? 'Current (Monitoring)' : undefined,
     baselineLabel: compareMode ? 'Baseline (Training)' : undefined,
+    compareMode,
+    allVintagesSorted: compareMode ? [...new Set(modelMetrics.map(m => m.vintage))].sort() : undefined,
+    trainingLatestVintage: compareMode ? referenceVintage : undefined,
+    monitoringLatestVintage: compareMode ? latestVintageOverall : undefined,
   };
 
   const latestMetric = [...modelMetrics].sort((a, b) => b.vintage.localeCompare(a.vintage))[0];
   const availVintages = [...new Set(modelMetrics.map(m => m.vintage))].sort();
+
+  // Q-label mapping for compare mode (Q1 = earliest/reference vintage)
+  const qLabelMap: Record<string, string> = Object.fromEntries(
+    availVintages.map((v, i) => [v, `Q${i + 1}`])
+  );
+  const qLabel = compareMode ? (v: string) => qLabelMap[v] ?? v : undefined;
 
   // Reference KS and Change-in-KS data for trend chart
   const referenceKSValue = useMemo(() => {
@@ -329,28 +339,30 @@ const ModelDetail: React.FC = () => {
   // all other trend charts (filteredByVintage etc.) so vintage selection is always in sync.
   // In scorebands mode: use score-band generator (bands have no vintage concept).
 
-  /** Convert a BankingMetrics array (sorted by vintage) → VolumeDataPoint array */
-  const metricsToVolData = (arr: typeof filteredByVintage) =>
+  /** Convert a BankingMetrics array (sorted by vintage) → VolumeDataPoint array.
+   *  Optional labelFn transforms the vintage string (e.g. for Q-label substitution).
+   */
+  const metricsToVolData = (arr: typeof filteredByVintage, labelFn?: (v: string) => string) =>
     [...arr]
       .sort((a, b) => a.vintage.localeCompare(b.vintage))
-      .map(d => ({ label: d.vintage, volume: d.volume, badRate: d.metrics.bad_rate ?? 0 }));
+      .map(d => ({ label: labelFn ? labelFn(d.vintage) : d.vintage, volume: d.volume, badRate: d.metrics.bad_rate ?? 0 }));
 
   // Monitoring data
   const volumeData = volumeDisplayMode === 'quarterly'
-    ? metricsToVolData(filteredByVintage)
+    ? metricsToVolData(filteredByVintage, qLabel)
     : generateScoreBandData(selectedBankingModel, selectedSegment, currentDatasetType)
         .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate }));
 
   // Thin / thick file data for All Segments dual mode (only used when NOT in compare mode)
   const thinFileVolumeData = (!compareMode && selectedSegment === 'all')
     ? (volumeDisplayMode === 'quarterly'
-        ? metricsToVolData(thinFiltered)
+        ? metricsToVolData(thinFiltered, qLabel)
         : generateScoreBandData(selectedBankingModel, 'thin_file', currentDatasetType)
             .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate })))
     : undefined;
   const thickFileVolumeData = (!compareMode && selectedSegment === 'all')
     ? (volumeDisplayMode === 'quarterly'
-        ? metricsToVolData(thickFiltered)
+        ? metricsToVolData(thickFiltered, qLabel)
         : generateScoreBandData(selectedBankingModel, 'thick_file', currentDatasetType)
             .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate })))
     : undefined;
@@ -396,6 +408,11 @@ const ModelDetail: React.FC = () => {
           .map(d => ({ label: d.shortLabel, volume: d.volume, badRate: d.badRate }));
   }, [compareMode, selectedSegment, volumeDisplayMode, thinFileBaselineM, thickFileBaselineM,
       baselineFilteredMetrics, selectedBankingModel, baselineDataset]);
+
+  // In compare mode, apply Q-labels to baselineVolumeData labels so they match volumeData labels
+  const baselineVolumeDataDisplay = (compareMode && baselineVolumeData)
+    ? baselineVolumeData.map(d => ({ ...d, label: qLabelMap[d.label] ?? d.label }))
+    : baselineVolumeData;
 
   // ── AI Summary generator ─────────────────────────────────────────────────────
   const ks    = latestMetric?.metrics.KS;
@@ -690,28 +707,36 @@ const ModelDetail: React.FC = () => {
             {/* Vintage Range Selector */}
             {availVintages.length >= 2 && (
               <div className={`flex flex-wrap items-center gap-3 mb-3 p-2 rounded-lg border text-xs ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <span className={`font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Vintage filter:</span>
+                <span className={`font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {compareMode ? 'Quarter filter:' : 'Vintage filter:'}
+                </span>
                 <div className="flex gap-1 flex-wrap">
                   <button
                     onClick={() => setSelectedVintages([])}
                     className={`px-2 py-0.5 rounded-full font-medium ${selectedVintages.length === 0 ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-600 text-slate-300 hover:bg-slate-500' : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'}`}
                   >All</button>
-                  {/* Reference vintage first */}
-                  {[referenceVintage, ...availVintages.filter(v => v !== referenceVintage)].map(v => (
-                    <button
-                      key={v}
-                      onClick={() => setSelectedVintages(prev =>
-                        prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]
-                      )}
-                      className={`px-2 py-0.5 rounded-full font-medium ${selectedVintages.includes(v) ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-600 text-slate-300 hover:bg-slate-500' : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'}`}
-                    >
-                      {v}{v === referenceVintage ? ' (Ref)' : v === latestVintageOverall ? ' ★' : ''}
-                    </button>
-                  ))}
+                  {/* Reference vintage first; in compare mode show Q-labels */}
+                  {[referenceVintage, ...availVintages.filter(v => v !== referenceVintage)].map(v => {
+                    const displayLabel = compareMode
+                      ? `${qLabelMap[v] ?? v}${v === referenceVintage ? ' (Ref)' : v === latestVintageOverall ? ' ★' : ''}`
+                      : `${v}${v === referenceVintage ? ' (Ref)' : v === latestVintageOverall ? ' ★' : ''}`;
+                    return (
+                      <button
+                        key={v}
+                        onClick={() => setSelectedVintages(prev =>
+                          prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]
+                        )}
+                        title={compareMode ? `${qLabelMap[v] ?? v} = ${v}` : v}
+                        className={`px-2 py-0.5 rounded-full font-medium ${selectedVintages.includes(v) ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-600 text-slate-300 hover:bg-slate-500' : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'}`}
+                      >
+                        {displayLabel}
+                      </button>
+                    );
+                  })}
                 </div>
                 {selectedVintages.length > 0 && (
                   <span className={`ml-auto ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {selectedVintages.length} vintage{selectedVintages.length > 1 ? 's' : ''} selected
+                    {selectedVintages.length} {compareMode ? 'quarter' : 'vintage'}{selectedVintages.length > 1 ? 's' : ''} selected
                   </span>
                 )}
               </div>
@@ -827,14 +852,28 @@ const ModelDetail: React.FC = () => {
                         <div key={key} className={key === 'volume_bad_rate' ? 'md:col-span-3' : ''}>
                           <div className={`text-sm font-medium mb-2 ${spec.teal ? (isDark ? 'text-teal-300' : 'text-teal-700') : (isDark ? 'text-slate-300' : 'text-slate-700')}`}>{spec.label}</div>
                           {key === 'volume_bad_rate' ? (
-                            <VolumeVsBadRateChart
-                              data={volumeData}
-                              baselineData={baselineVolumeData}
-                              height={280}
-                              thinFileData={thinFileVolumeData}
-                              thickFileData={thickFileVolumeData}
-                              segmentLabel={segmentLabel}
-                            />
+                            <>
+                              <VolumeVsBadRateChart
+                                data={volumeData}
+                                baselineData={baselineVolumeDataDisplay}
+                                height={280}
+                                thinFileData={thinFileVolumeData}
+                                thickFileData={thickFileVolumeData}
+                                segmentLabel={segmentLabel}
+                              />
+                              {compareMode && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginTop: '6px', paddingLeft: '4px' }}>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#f59e0b', fontWeight: 600 }}>
+                                    <svg width="22" height="8" viewBox="0 0 22 8"><line x1="0" y1="4" x2="22" y2="4" stroke="#f59e0b" strokeWidth="2" strokeDasharray="6,3" /></svg>
+                                    Training (Baseline) — Latest Vintage: {referenceVintage}
+                                  </span>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#3b82f6', fontWeight: 600 }}>
+                                    <svg width="22" height="8" viewBox="0 0 22 8"><line x1="0" y1="4" x2="22" y2="4" stroke="#3b82f6" strokeWidth="2" /></svg>
+                                    Monitoring (Current) — Latest Vintage: {latestVintageOverall}
+                                  </span>
+                                </div>
+                              )}
+                            </>
                           ) : key === 'change_in_KS' ? (
                             <BankingMetricsTrendChart
                               metrics={changeInKSMetrics}

@@ -256,7 +256,7 @@ const Dashboard: React.FC = () => {
             <div className={`h-5 w-px ${isDark ? 'bg-slate-600' : 'bg-slate-300'}`} />
             {(
               [
-                { key: 'businessLine', label: 'Business Line', opts: filterOptions.businessLine },
+                { key: 'businessLine', label: 'Product', opts: filterOptions.businessLine },
                 { key: 'modelType',    label: 'Model Type',    opts: filterOptions.modelType    },
                 { key: 'model',        label: 'Model',         opts: filterOptions.model        },
                 { key: 'timeWindow',   label: 'Time Window',   opts: filterOptions.timeWindow   },
@@ -320,9 +320,9 @@ const Dashboard: React.FC = () => {
                           <button
                             onClick={() => setFilters(prev => ({ ...prev, businessLine: prev.businessLine === 'All' ? 'All' : 'All' }))}
                             className="flex items-center gap-1 hover:underline"
-                            title="Filter by business line"
+                            title="Filter by product"
                           >
-                            Business Line
+                            Product
                           </button>
                         </th>
                         <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Type</th>

@@ -28,6 +28,15 @@ interface BankingMetricsTrendChartProps {
   thickFileBaselineMetrics?: BankingMetrics[];
   /** Shown as a subtitle badge when exactly one segment is active */
   segmentLabel?: string;
+  /**
+   * Compare mode: when true, x-axis labels are shown as Q1, Q2, …
+   * allVintagesSorted provides the full ordered list for building the mapping.
+   */
+  compareMode?: boolean;
+  allVintagesSorted?: string[];
+  /** Displayed in the vintage legend footer when compareMode is true */
+  trainingLatestVintage?: string;
+  monitoringLatestVintage?: string;
 }
 
 export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> = ({
@@ -43,6 +52,10 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
   thinFileBaselineMetrics,
   thickFileBaselineMetrics,
   segmentLabel,
+  compareMode = false,
+  allVintagesSorted,
+  trainingLatestVintage,
+  monitoringLatestVintage,
 }) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
@@ -84,9 +97,17 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
       }
     };
 
-    const labels = isDualSegment
+    // Build vintage → Q-label map for compare mode x-axis
+    const vintToQ = (v: string): string => {
+      if (!compareMode || !allVintagesSorted?.length) return v;
+      const idx = allVintagesSorted.indexOf(v);
+      return idx >= 0 ? `Q${idx + 1}` : v;
+    };
+
+    const labels = (isDualSegment
       ? sortBy(thinFileMetrics!).map(m => m.vintage)
-      : sortBy(metrics).map(m => m.vintage);
+      : sortBy(metrics).map(m => m.vintage)
+    ).map(vintToQ);
 
     const datasets: any[] = [];
 
@@ -241,11 +262,43 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
     thinFileMetrics, thickFileMetrics,
     thinFileBaselineMetrics, thickFileBaselineMetrics,
     segmentLabel, isDualSegment,
+    compareMode, allVintagesSorted,
   ]);
 
+  const showVintageLegend = compareMode && (trainingLatestVintage || monitoringLatestVintage);
+
   return (
-    <div style={{ height: `${height}px` }} className="w-full">
-      <canvas ref={chartRef}></canvas>
+    <div className="w-full">
+      <div style={{ height: `${height}px` }}>
+        <canvas ref={chartRef}></canvas>
+      </div>
+      {showVintageLegend && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px',
+          marginTop: '6px', paddingLeft: '4px',
+        }}>
+          {trainingLatestVintage && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#f59e0b', fontWeight: 600 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                <svg width="22" height="8" viewBox="0 0 22 8">
+                  <line x1="0" y1="4" x2="22" y2="4" stroke="#f59e0b" strokeWidth="2" strokeDasharray="6,3" />
+                </svg>
+              </span>
+              Training (Baseline) — Latest Vintage: {trainingLatestVintage}
+            </span>
+          )}
+          {monitoringLatestVintage && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#3b82f6', fontWeight: 600 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                <svg width="22" height="8" viewBox="0 0 22 8">
+                  <line x1="0" y1="4" x2="22" y2="4" stroke="#3b82f6" strokeWidth="2" />
+                </svg>
+              </span>
+              Monitoring (Current) — Latest Vintage: {monitoringLatestVintage}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 };

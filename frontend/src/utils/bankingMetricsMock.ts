@@ -206,12 +206,12 @@ export function generateBankingModels(count: number = 20): BankingModel[] {
 const SCORECARD_TYPES = new Set([
   'Acquisition Scorecard', 'ECM Scorecard', 'Bureau', 'ML',
   // Registry-mapped display names (from modelMetricsMapper.ts mapModelType)
-  'Risk-Based Pricing', 'Credit Decisioning', 'Custom Scorecard', 'Predictive Model',
+  'Classification', 'Risk-Based Pricing', 'Credit Decisioning', 'Custom Scorecard', 'Predictive Model',
 ]);
 // Registry model type names that should also generate classification metrics
 // (mirrors which types modelMetricsMapper generates accuracy/precision/recall/f1/HRL for)
 const CLASSIFICATION_TYPES = new Set([
-  'ML', 'Risk-Based Pricing', 'Credit Decisioning', 'Predictive Model',
+  'ML', 'Classification', 'Risk-Based Pricing', 'Credit Decisioning', 'Predictive Model',
 ]);
 
 function generateMetricsForType(modelType: string, baseKS: number = 0.4): BankingMetrics['metrics'] {

@@ -28,7 +28,7 @@ function mapStageToPortfolio(stage: string): string {
  */
 function mapModelType(modelType: string): string {
   const typeMap: Record<string, string> = {
-    'classification': 'Risk-Based Pricing',
+    'classification': 'Classification',
     'regression': 'Credit Decisioning',
     'clustering': 'Segmentation Model',
     'nlp': 'Text Analytics',
