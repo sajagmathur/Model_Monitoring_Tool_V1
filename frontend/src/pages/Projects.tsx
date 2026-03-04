@@ -1250,7 +1250,6 @@ const DataQualityStep: React.FC<{
 
     for (const dataset of allDatasets) {
       setCurrentAnalyzingDataset(dataset.id);
-      await new Promise(resolve => setTimeout(resolve, 1500));
 
       // Get REAL columns from uploaded dataset (UploadedDataset.columnsList)
       const columns = (dataset as any).columnsList && Array.isArray((dataset as any).columnsList) && (dataset as any).columnsList.length > 0
@@ -1298,9 +1297,6 @@ const DataQualityStep: React.FC<{
     if (Object.keys(metricsMap).length === 0 || !selectedModel) return;
 
     setGeneratingPDF(true);
-    
-    // Simulate PDF generation
-    await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Separate baseline (original) and resolved datasets
     const baselineDatasetIds: string[] = [];
@@ -1448,7 +1444,6 @@ const DataQualityStep: React.FC<{
                     // Mark issues as resolved in metricsMap
                     for (const issue of issues) {
                       setCurrentResolvingIndex(metricsMap[datasetId].issues.findIndex((i: any) => i.variable === issue.variable));
-                      await new Promise(resolve => setTimeout(resolve, 1500));
                       
                       setMetricsMap(prev => {
                         const updated = { ...prev };
@@ -4127,7 +4122,7 @@ export default function Projects() {
                               navigate('/');
                               console.log('⚠️ No model found in workflow, navigating to dashboard');
                             }
-                          }, 1000); // Brief delay to show completion message
+                          }, 200); // Brief delay to show completion message
                         }
                       }}
                     />
