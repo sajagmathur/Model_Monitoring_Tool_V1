@@ -134,6 +134,8 @@ const pctiles = (arr: number[]) => {
 const PCT_METRICS = new Set(['KS','accuracy','precision','recall','f1_score','HRL','bad_rate']);
 const fmtVal = (key: string, v: number): string =>
   PCT_METRICS.has(key) ? (v*100).toFixed(1)+'%' : v.toFixed(3);
+const pctTick = (key: string) => (v: any) =>
+  PCT_METRICS.has(key) ? ((v as number)*100).toFixed(1)+'%' : (v as number).toFixed(3);
 
 // ─── Chart Render Functions ───────────────────────────────────────────────────
 
@@ -147,7 +149,7 @@ function mkTheme(dark: boolean) {
 function renderRanking(rows: ChartRow[], sl: SlicerState, cvs: HTMLCanvasElement, ref: React.MutableRefObject<Chart|null>, dark: boolean) {
   destroyChart(ref); const {text,grid}=mkTheme(dark); const key=sl.primaryMetric;
   const s=[...rows].map(r=>({name:r.model.name.length>18?r.model.name.slice(0,16)+'…':r.model.name,val:getVal(r.metric,key)??0})).sort((a,b)=>key==='PSI'||key==='bad_rate'?a.val-b.val:b.val-a.val);
-  ref.current=new Chart(cvs,{type:'bar',data:{labels:s.map(r=>r.name),datasets:[{label:METRIC_LABELS[key]??key,data:s.map(r=>r.val),backgroundColor:s.map(r=>ragColor(key,r.val)),borderRadius:6}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:(item)=>`${METRIC_LABELS[key]??key}: ${fmtVal(key,item.parsed.x??0)}`}}},scales:{x:{ticks:{color:text},grid:{color:grid}},y:{ticks:{color:text,font:{size:11}},grid:{display:false}}}}});
+  ref.current=new Chart(cvs,{type:'bar',data:{labels:s.map(r=>r.name),datasets:[{label:METRIC_LABELS[key]??key,data:s.map(r=>r.val),backgroundColor:s.map(r=>ragColor(key,r.val)),borderRadius:6}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:(item)=>`${METRIC_LABELS[key]??key}: ${fmtVal(key,item.parsed.x??0)}`}}},scales:{x:{ticks:{color:text,callback:(v:any)=>PCT_METRICS.has(key)?((v as number)*100).toFixed(1)+'%':(v as number).toFixed(3)},grid:{color:grid}},y:{ticks:{color:text,font:{size:11}},grid:{display:false}}}}});
 }
 
 function renderComparison(rows: ChartRow[], sl: SlicerState, cvs: HTMLCanvasElement, ref: React.MutableRefObject<Chart|null>, dark: boolean) {
@@ -180,7 +182,7 @@ function renderVintageCohort(allM: BankingMetrics[], models: BankingModel[], sl:
   const overall=allM.filter(m=>m.model_id===modelId&&!m.segment);
   const datasets: Record<string,unknown>[]=[{type:'bar',label:'Overall',data:vins.map(v=>{const m=overall.find(x=>x.vintage===v);return m?getVal(m,key)??0:0;}),backgroundColor:'#6366f1cc',borderRadius:4,yAxisID:'y'}];
   if(sl.includeSegments){const thin=allM.filter(m=>m.model_id===modelId&&m.segment==='thin_file'),thick=allM.filter(m=>m.model_id===modelId&&m.segment==='thick_file');datasets.push({type:'line',label:'Current',data:vins.map(v=>{const m=thin.find(x=>x.vintage===v);return m?getVal(m,key)??null:null;}),borderColor:'#10b981',fill:false,tension:0.3,spanGaps:true,yAxisID:'y'},{type:'line',label:'Delinquent',data:vins.map(v=>{const m=thick.find(x=>x.vintage===v);return m?getVal(m,key)??null:null;}),borderColor:'#ef4444',fill:false,tension:0.3,spanGaps:true,yAxisID:'y'});}
-  ref.current=new Chart(cvs,{type:'bar',data:{labels:vins,datasets:datasets as any},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:text,boxWidth:12}}},scales:{x:{ticks:{color:text,maxRotation:45},grid:{color:grid}},y:{title:{display:true,text:METRIC_LABELS[key]??key,color:text},ticks:{color:text},grid:{color:grid}}}}});
+  ref.current=new Chart(cvs,{type:'bar',data:{labels:vins,datasets:datasets as any},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:text,boxWidth:12}}},scales:{x:{ticks:{color:text,maxRotation:45},grid:{color:grid}},y:{title:{display:true,text:METRIC_LABELS[key]??key,color:text},ticks:{color:text,callback:pctTick(key)},grid:{color:grid}}}}});
 }
 
 function renderDriftMonitor(allM: BankingMetrics[], models: BankingModel[], sl: SlicerState, cvs: HTMLCanvasElement, ref: React.MutableRefObject<Chart|null>, dark: boolean) {
@@ -189,7 +191,7 @@ function renderDriftMonitor(allM: BankingMetrics[], models: BankingModel[], sl: 
   const show=sl.selectedModels.length?models.filter(m=>sl.selectedModels.includes(m.model_id)):models.slice(0,5);
   const datasets: Record<string,unknown>[]=show.map((model,i)=>{const mets=allM.filter(m=>m.model_id===model.model_id&&!m.segment);return{label:model.name.slice(0,20),data:vins.map(v=>{const m=mets.find(x=>x.vintage===v);return m?getVal(m,key)??null:null;}),borderColor:COLORS[i%COLORS.length],backgroundColor:'transparent',fill:false,tension:0.3,spanGaps:true,pointRadius:4};});
   if(sl.showThresholds){const T:Record<string,{amber:number,red:number}>={KS:{amber:0.25,red:0.15},PSI:{amber:0.10,red:0.25},AUC:{amber:0.65,red:0.55},Gini:{amber:0.30,red:0.20},HRL:{amber:0.55,red:0.45}};const t=T[key];if(t){datasets.push({label:'Amber threshold',data:vins.map(()=>t.amber),borderColor:'#f59e0b',borderDash:[5,5],borderWidth:1.5,pointRadius:0,fill:false},{label:'Red threshold',data:vins.map(()=>t.red),borderColor:'#ef4444',borderDash:[5,5],borderWidth:1.5,pointRadius:0,fill:false});}}
-  ref.current=new Chart(cvs,{type:'line',data:{labels:vins,datasets:datasets as any},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:text,boxWidth:12}}},scales:{x:{ticks:{color:text,maxRotation:45},grid:{color:grid}},y:{title:{display:true,text:METRIC_LABELS[key]??key,color:text},ticks:{color:text},grid:{color:grid}}}}});
+  ref.current=new Chart(cvs,{type:'line',data:{labels:vins,datasets:datasets as any},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:text,boxWidth:12}}},scales:{x:{ticks:{color:text,maxRotation:45},grid:{color:grid}},y:{title:{display:true,text:METRIC_LABELS[key]??key,color:text},ticks:{color:text,callback:pctTick(key)},grid:{color:grid}}}}});
 }
 
 function renderRAGDistribution(rows: ChartRow[], sl: SlicerState, cvs: HTMLCanvasElement, ref: React.MutableRefObject<Chart|null>, dark: boolean) {
@@ -210,7 +212,7 @@ function renderSegmentComparison(allM: BankingMetrics[], models: BankingModel[],
   const vins=[...new Set(allM.map(m=>m.vintage))].sort().reverse();
   const show=sl.selectedModels.length?models.filter(m=>sl.selectedModels.includes(m.model_id)):models.slice(0,8);
   const sv=(mid:string,seg:string)=>{const lv=vins.find(v=>allM.some(m=>m.model_id===mid&&m.vintage===v&&m.segment===seg));const m=allM.find(x=>x.model_id===mid&&x.vintage===lv&&x.segment===seg);return m?getVal(m,key)??0:0;};
-  ref.current=new Chart(cvs,{type:'bar',data:{labels:show.map(m=>m.name.slice(0,14)),datasets:[{label:'Current',data:show.map(m=>sv(m.model_id,'thin_file')),backgroundColor:'#10b981cc',borderRadius:4},{label:'Delinquent',data:show.map(m=>sv(m.model_id,'thick_file')),backgroundColor:'#ef4444cc',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:text}}},scales:{x:{ticks:{color:text,maxRotation:45},grid:{color:grid}},y:{title:{display:true,text:METRIC_LABELS[key]??key,color:text},ticks:{color:text},grid:{color:grid}}}}});
+  ref.current=new Chart(cvs,{type:'bar',data:{labels:show.map(m=>m.name.slice(0,14)),datasets:[{label:'Current',data:show.map(m=>sv(m.model_id,'thin_file')),backgroundColor:'#10b981cc',borderRadius:4},{label:'Delinquent',data:show.map(m=>sv(m.model_id,'thick_file')),backgroundColor:'#ef4444cc',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:text}}},scales:{x:{ticks:{color:text,maxRotation:45},grid:{color:grid}},y:{title:{display:true,text:METRIC_LABELS[key]??key,color:text},ticks:{color:text,callback:pctTick(key)},grid:{color:grid}}}}});
 }
 
 function renderTypeBenchmark(rows: ChartRow[], sl: SlicerState, cvs: HTMLCanvasElement, ref: React.MutableRefObject<Chart|null>, dark: boolean) {

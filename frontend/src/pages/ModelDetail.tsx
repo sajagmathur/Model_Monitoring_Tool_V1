@@ -313,19 +313,28 @@ const ModelDetail: React.FC = () => {
   const qLabel = compareMode ? (v: string) => qLabelMap[v] ?? v : undefined;
 
   // Reference KS and Change-in-KS data for trend chart
+  // Use segmentFilteredMetrics so "All" (weighted avg) and specific segments both work
   const referenceKSValue = useMemo(() => {
-    const refM = bankingMetrics.find(m => m.model_id === selectedBankingModel && m.vintage === referenceVintage && !m.segment);
+    const refM = segmentFilteredMetrics.find(m => m.vintage === referenceVintage);
     return refM?.metrics.KS;
-  }, [bankingMetrics, selectedBankingModel, referenceVintage]);
+  }, [segmentFilteredMetrics, referenceVintage]);
 
   const changeInKSMetrics = useMemo((): BankingMetrics[] => {
     if (referenceKSValue === undefined || referenceKSValue === 0) return [];
-    const unsegMetrics = bankingMetrics.filter(m => m.model_id === selectedBankingModel && !m.segment);
-    return unsegMetrics.map(m => ({
+    return segmentFilteredMetrics.map(m => ({
       ...m,
       metrics: { ...(m.metrics as any), change_in_KS: m.metrics.KS !== undefined ? (m.metrics.KS - referenceKSValue) / referenceKSValue * 100 : undefined },
     })) as BankingMetrics[];
-  }, [bankingMetrics, selectedBankingModel, referenceKSValue]);
+  }, [segmentFilteredMetrics, referenceKSValue]);
+
+  // Baseline version of change_in_KS for compare mode
+  const changeInKSBaselineMetrics = useMemo((): BankingMetrics[] | undefined => {
+    if (!compareMode || baselineFilteredMetrics.length === 0 || !referenceKSValue) return undefined;
+    return baselineFilteredMetrics.map(m => ({
+      ...m,
+      metrics: { ...(m.metrics as any), change_in_KS: m.metrics.KS !== undefined ? (m.metrics.KS - referenceKSValue) / referenceKSValue * 100 : undefined },
+    })) as BankingMetrics[];
+  }, [compareMode, baselineFilteredMetrics, referenceKSValue]);
 
   // Segment/Volume data
   const currentDatasetType = compareMode ? currentDataset : selectedDataset;
@@ -630,77 +639,52 @@ const ModelDetail: React.FC = () => {
               {availVintages.length} vintage{availVintages.length !== 1 ? 's' : ''}
             </span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
-            {latestMetric?.metrics.KS !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>KS</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{fmtPct(latestMetric.metrics.KS)}</div>
+          {(() => {
+            const TILE_CONFIG: Record<string, { label: string; getValue: () => string | null; teal?: boolean }> = {
+              KS:              { label: 'KS',           getValue: () => latestMetric?.metrics.KS        !== undefined ? fmtPct(latestMetric.metrics.KS) : null },
+              PSI:             { label: 'PSI',          getValue: () => latestMetric?.metrics.PSI       !== undefined ? latestMetric.metrics.PSI.toFixed(3) : null },
+              AUC:             { label: 'AUC',          getValue: () => latestMetric?.metrics.AUC       !== undefined ? latestMetric.metrics.AUC.toFixed(3) : null },
+              Gini:            { label: 'Gini',         getValue: () => latestMetric?.metrics.Gini      !== undefined ? latestMetric.metrics.Gini.toFixed(3) : null },
+              bad_rate:        { label: 'Bad Rate',     getValue: () => latestMetric?.metrics.bad_rate  !== undefined ? `${(latestMetric.metrics.bad_rate * 100).toFixed(2)}%` : null },
+              CA_at_10:        { label: 'CA@10',        getValue: () => latestMetric?.metrics.CA_at_10  !== undefined ? fmtPct(latestMetric.metrics.CA_at_10) : null },
+              volume_bad_rate: { label: 'Volume',       getValue: () => latestMetric?.volume            !== undefined ? latestMetric.volume.toLocaleString() : null },
+              accuracy:        { label: 'Accuracy',     getValue: () => latestMetric?.metrics.accuracy  !== undefined ? fmtPct(latestMetric.metrics.accuracy) : null },
+              precision:       { label: 'Precision',    getValue: () => latestMetric?.metrics.precision !== undefined ? fmtPct(latestMetric.metrics.precision) : null },
+              recall:          { label: 'Recall',       getValue: () => latestMetric?.metrics.recall    !== undefined ? fmtPct(latestMetric.metrics.recall) : null },
+              f1_score:        { label: 'F1 Score',     getValue: () => latestMetric?.metrics.f1_score  !== undefined ? fmtPct(latestMetric.metrics.f1_score) : null },
+              HRL:             { label: 'Hit Rate Lift', teal: true, getValue: () => latestMetric?.metrics.HRL !== undefined ? fmtPct(latestMetric.metrics.HRL) : null },
+            };
+            const tileOrder = [
+              ...selectedMetrics.filter(k => TILE_CONFIG[k]),
+              ...Object.keys(TILE_CONFIG).filter(k => !selectedMetrics.includes(k)),
+            ];
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+                {tileOrder.map(k => {
+                  const cfg = TILE_CONFIG[k];
+                  const val = cfg.getValue();
+                  if (!val) return null;
+                  const isSelected = selectedMetrics.includes(k);
+                  const dimClass = isSelected ? '' : 'opacity-40';
+                  if (cfg.teal) {
+                    return (
+                      <div key={k} className={`p-3 rounded border ${dimClass} ${isDark ? 'bg-teal-900/30 border-teal-700' : 'bg-teal-50 border-teal-200'}`}>
+                        <div className={`text-xs font-medium ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>{cfg.label}</div>
+                        <div className={`text-lg font-bold ${(latestMetric?.metrics.HRL ?? 0) >= 0.70 ? 'text-green-500' : (latestMetric?.metrics.HRL ?? 0) >= 0.55 ? 'text-amber-500' : 'text-red-500'}`}>{val}</div>
+                        <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Hit Rate Lift (Fraud Models)</div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={k} className={`p-3 rounded border ${dimClass} ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{cfg.label}</div>
+                      <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{val}</div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
-            {latestMetric?.metrics.PSI !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>PSI</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{latestMetric.metrics.PSI.toFixed(3)}</div>
-              </div>
-            )}
-            {latestMetric?.metrics.AUC !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>AUC</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{latestMetric.metrics.AUC.toFixed(3)}</div>
-              </div>
-            )}
-            {latestMetric?.metrics.Gini !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Gini</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{latestMetric.metrics.Gini.toFixed(3)}</div>
-              </div>
-            )}
-            {latestMetric?.metrics.bad_rate !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Bad Rate</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{(latestMetric.metrics.bad_rate * 100).toFixed(2)}%</div>
-              </div>
-            )}
-            {latestMetric?.volume !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Volume</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{latestMetric.volume.toLocaleString()}</div>
-              </div>
-            )}
-            {latestMetric?.metrics.accuracy !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Accuracy</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{fmtPct(latestMetric.metrics.accuracy)}</div>
-              </div>
-            )}
-            {latestMetric?.metrics.precision !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Precision</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{fmtPct(latestMetric.metrics.precision)}</div>
-              </div>
-            )}
-            {latestMetric?.metrics.recall !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Recall</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{fmtPct(latestMetric.metrics.recall)}</div>
-              </div>
-            )}
-            {latestMetric?.metrics.f1_score !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>F1 Score</div>
-                <div className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{fmtPct(latestMetric.metrics.f1_score)}</div>
-              </div>
-            )}
-            {latestMetric?.metrics.HRL !== undefined && (
-              <div className={`p-3 rounded border ${isDark ? 'bg-teal-900/30 border-teal-700' : 'bg-teal-50 border-teal-200'}`}>
-                <div className={`text-xs font-medium ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>Hit Rate Lift</div>
-                <div className={`text-lg font-bold ${latestMetric.metrics.HRL >= 0.70 ? 'text-green-500' : latestMetric.metrics.HRL >= 0.55 ? 'text-amber-500' : 'text-red-500'}`}>
-                  {fmtPct(latestMetric.metrics.HRL)}
-                </div>
-                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Hit Rate Lift (Fraud Models)</div>
-              </div>
-            )}
-          </div>
+            );
+          })()}
 
           {/* Metric Selector + Performance Trends Over Time */}
           <div className="mb-4">
@@ -836,7 +820,7 @@ const ModelDetail: React.FC = () => {
                     Gini:            { label: 'Gini Coefficient', show: latestMetric?.metrics.Gini !== undefined },
                     bad_rate:        { label: 'Bad Rate', show: latestMetric?.metrics.bad_rate !== undefined },
                     CA_at_10:        { label: 'Capture Rate @ 10%', show: true },
-                    change_in_KS:    { label: 'Change in KS vs Reference', show: changeInKSMetrics.length > 0 },
+                    change_in_KS:    { label: 'Change in KS% vs Reference', show: changeInKSMetrics.length > 0 },
                     accuracy:        { label: 'Accuracy', show: true },
                     precision:       { label: 'Precision', show: true },
                     recall:          { label: 'Recall', show: true },
@@ -876,10 +860,13 @@ const ModelDetail: React.FC = () => {
                             </>
                           ) : key === 'change_in_KS' ? (
                             <BankingMetricsTrendChart
-                              metrics={changeInKSMetrics}
+                              metrics={selectedVintages.length > 0 ? changeInKSMetrics.filter(m => selectedVintages.includes(m.vintage)) : changeInKSMetrics}
                               metricKey={'change_in_KS' as any}
                               height={200}
-                              title="ΔKS% vs Reference"
+                              isDark={isDark}
+                              title="Change in KS% vs Reference"
+                              segmentLabel={showDual ? 'All Segments' : cProps.segmentLabel}
+                              lineColor={compareMode ? '#f97316' : undefined}
                             />
                           ) : (
                             <BankingMetricsTrendChart {...cProps} metricKey={key as any} height={200} />
@@ -981,7 +968,14 @@ const ModelDetail: React.FC = () => {
                   <p className={isDark ? 'text-slate-300' : 'text-slate-700'}>{METRIC_DESCRIPTIONS.ROB.overview}</p>
                 </div>
               )}
-              <ROBChart isDark={isDark} viewMode={viewModes.rob} forceBoth={isExporting} />
+              <ROBChart
+                isDark={isDark}
+                modelId={selectedBankingModel || ''}
+                referenceVintage={referenceVintage || availVintages[0] || ''}
+                monVintages={availVintages.filter(v => v !== (referenceVintage || availVintages[0]))}
+                viewMode={viewModes.rob}
+                forceBoth={isExporting}
+              />
               <ChartCommentary
                 sectionId="rob"
                 sectionLabel="Rank Order Break (ROB)"

@@ -158,6 +158,18 @@ export const METRIC_DESCRIPTIONS: Record<string, MetricDescription> = {
     },
     higherIsBetter: true,
   },
+  change_in_KS: {
+    label: 'Change in KS% vs Reference',
+    formula: 'ΔKS% = (KS_monitoring − KS_reference) / KS_reference × 100',
+    overview:
+      'Tracks the percentage change in KS Statistic relative to the reference (training) vintage. A negative ΔKS% indicates the model is losing discriminatory power over time. A value near zero means the model is stable. Trend direction is more important than a single observation — sustained decline warrants investigation.',
+    thresholds: {
+      green: 'ΔKS% > −5% — Stable discrimination',
+      amber: 'ΔKS% −5% to −15% — Moderate degradation, review recommended',
+      red: 'ΔKS% < −15% — Significant degradation, escalate',
+    },
+    higherIsBetter: true,
+  },
 };
 
 export const ALL_METRIC_KEYS = Object.keys(METRIC_DESCRIPTIONS);

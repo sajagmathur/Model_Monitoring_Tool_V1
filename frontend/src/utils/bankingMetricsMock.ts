@@ -595,8 +595,7 @@ export function generateCompleteBankingDataset(): {
 } {
   seed = 42; // Reset seed
   const models = generateBankingModels(12);
-  const allMetrics: BankingMetrics[] = [];
-  
+  const allMetrics: BankingMetrics[] = [];  
   models.forEach(model => {
     const modelMetrics = generateMetricsTimeSeries(model, VINTAGES);
     allMetrics.push(...modelMetrics);
@@ -604,3 +603,105 @@ export function generateCompleteBankingDataset(): {
   
   return { models, metrics: allMetrics };
 }
+
+// ─── ROB (Rank Order Break) Utilities ─────────────────────────────────────────
+
+export interface ROBBandDetail {
+  band: string;
+  shortLabel: string;
+  refBadRate: number;
+  refRank: number;
+  monBadRate: number;
+  monRank: number;
+  rob: number;
+}
+
+export interface ROBVintageResult {
+  vintage: string;
+  robPct: number;
+  totalROB: number;
+  maxPossible: number;
+  bandDetails: ROBBandDetail[];
+}
+
+const SCORE_BANDS = [
+  { band: '100–200', shortLabel: '100–200' },
+  { band: '201–300', shortLabel: '201–300' },
+  { band: '301–400', shortLabel: '301–400' },
+  { band: '401–500', shortLabel: '401–500' },
+  { band: '501–600', shortLabel: '501–600' },
+  { band: '601–700', shortLabel: '601–700' },
+  { band: '701–800', shortLabel: '701–800' },
+  { band: '801–900', shortLabel: '801–900' },
+];
+
+/**
+ * Generate score-band bad rates for a specific vintage using a deterministic seed.
+ * Higher-risk bands (lower score) naturally have higher bad rates; monitoring vintages
+ * introduce mild drift that can cause rank inversions (ROB events).
+ */
+function generateBandBadRatesForVintage(
+  modelId: string,
+  vintage: string,
+  isReference: boolean
+): number[] {
+  seed = hashSeed(`rob-${modelId}-${vintage}-${isReference ? 'ref' : 'mon'}`);
+  const n = SCORE_BANDS.length;
+  const baseBadRates: number[] = [];
+  // Reference: monotonically decreasing bad rates (highest risk band = highest bad rate)
+  // Monitoring: introduce noise that may cause rank inversions
+  for (let i = 0; i < n; i++) {
+    const baseRate = 0.12 - i * 0.013; // grades from ~12% down to ~3%
+    const noise = isReference
+      ? randBetween(-0.003, 0.003)   // very stable reference
+      : randBetween(-0.025, 0.025);  // monitoring can drift enough to swap ranks
+    baseBadRates.push(Math.max(0.005, Math.min(0.30, baseRate + noise)));
+  }
+  return baseBadRates;
+}
+
+function assignRanks(badRates: number[]): number[] {
+  // Rank 1 = highest bad rate; ties share the lower rank number
+  const sorted = [...badRates].sort((a, b) => b - a);
+  return badRates.map(r => sorted.indexOf(r) + 1);
+}
+
+/**
+ * Generate ROB trend data across a reference vintage and multiple monitoring vintages.
+ * Returns an array of ROBVintageResult, one per monitoring vintage (reference excluded
+ * since ROB vs self = 0), suitable for a trend line chart.
+ */
+export function generateROBTrendData(
+  modelId: string,
+  referenceVintage: string,
+  monVintages: string[]
+): ROBVintageResult[] {
+  if (!referenceVintage || monVintages.length === 0) return [];
+
+  const n = SCORE_BANDS.length;
+  const maxPossible = Math.trunc(n / 2) * Math.ceil(n / 2);
+
+  const refBadRates = generateBandBadRatesForVintage(modelId, referenceVintage, true);
+  const refRanks = assignRanks(refBadRates);
+
+  return monVintages.map(vintage => {
+    const monBadRates = generateBandBadRatesForVintage(modelId, vintage, false);
+    const monRanks = assignRanks(monBadRates);
+
+    const bandDetails: ROBBandDetail[] = SCORE_BANDS.map((b, i) => ({
+      band: b.band,
+      shortLabel: b.shortLabel,
+      refBadRate: refBadRates[i],
+      refRank: refRanks[i],
+      monBadRate: monBadRates[i],
+      monRank: monRanks[i],
+      rob: Math.max(0, monRanks[i] - refRanks[i]),
+    }));
+
+    const totalROB = bandDetails.reduce((s, d) => s + d.rob, 0);
+    const robPct = maxPossible > 0 ? (totalROB / maxPossible) * 100 : 0;
+
+    return { vintage, robPct, totalROB, maxPossible, bandDetails };
+  });
+}
+

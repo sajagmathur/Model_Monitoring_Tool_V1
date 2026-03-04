@@ -37,6 +37,8 @@ interface BankingMetricsTrendChartProps {
   /** Displayed in the vintage legend footer when compareMode is true */
   trainingLatestVintage?: string;
   monitoringLatestVintage?: string;
+  /** Override the auto-derived line color */
+  lineColor?: string;
 }
 
 export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> = ({
@@ -56,6 +58,7 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
   allVintagesSorted,
   trainingLatestVintage,
   monitoringLatestVintage,
+  lineColor,
 }) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
@@ -93,6 +96,7 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
         case 'recall':    return '#ec4899';
         case 'f1_score':  return '#a855f7';
         case 'HRL':       return '#14b8a6';
+        case 'change_in_KS': return '#0ea5e9';
         default:          return '#6b7280';
       }
     };
@@ -132,9 +136,12 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
     } else {
       // ── Single-segment / aggregate mode ───────────────────────────────────
       const isCompareMode = !!baselineMetrics?.length;
-      const color = segmentLabel === 'Current' ? THIN_COLOR
+      const color = lineColor ?? (
+        segmentLabel === 'Current' ? THIN_COLOR
         : segmentLabel === 'Delinquent' ? THICK_COLOR
-        : metricColor();
+        : segmentLabel === 'All Segments' ? '#6366f1'
+        : metricColor()
+      );
       const lbl = isCompareMode
         ? currentLabel
         : (segmentLabel ? `${segmentLabel}` : (title || metricKey));

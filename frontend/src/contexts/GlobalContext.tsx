@@ -371,6 +371,7 @@ interface GlobalContextType {
   createSchedulingJob: (job: Omit<SchedulingJob, 'id' | 'createdAt' | 'createdBy'>) => SchedulingJob;
   updateSchedulingJob: (id: string, updates: Partial<SchedulingJob>) => void;
   deleteSchedulingJob: (id: string) => void;
+  clearAllSchedulingJobs: () => void;
   getSchedulingJob: (id: string) => SchedulingJob | undefined;
   runSchedulingJob: (id: string, action?: 'run' | 'toggle' | 'delete') => void;
 
@@ -443,6 +444,7 @@ interface GlobalContextType {
   workflowLogs: WorkflowLog[];
   createWorkflowLog: (log: Omit<WorkflowLog, 'id' | 'createdAt'>) => WorkflowLog;
   deleteWorkflowLog: (id: string) => void;
+  clearAllWorkflowLogs: () => void;
   getWorkflowLog: (id: string) => WorkflowLog | undefined;
   getWorkflowLogsByProject: (projectId: string) => WorkflowLog[];
 
@@ -1585,6 +1587,10 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
+  const clearAllSchedulingJobs = () => {
+    setState(prev => ({ ...prev, schedulingJobs: [] }));
+  };
+
   const getSchedulingJob = (id: string) => (state.schedulingJobs || []).find(j => j.id === id);
 
   const runSchedulingJob = (id: string, action: 'run' | 'toggle' | 'delete' = 'run') => {
@@ -1694,6 +1700,10 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       ...prev,
       workflowLogs: (prev.workflowLogs || []).filter(log => log.id !== id),
     }));
+  };
+
+  const clearAllWorkflowLogs = () => {
+    setState(prev => ({ ...prev, workflowLogs: [] }));
   };
 
   const getWorkflowLog = (id: string) => (state.workflowLogs || []).find(log => log.id === id);
@@ -1851,11 +1861,13 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     createSchedulingJob,
     updateSchedulingJob,
     deleteSchedulingJob,
+    clearAllSchedulingJobs,
     getSchedulingJob,
     runSchedulingJob,
     workflowLogs: state.workflowLogs || [],
     createWorkflowLog,
     deleteWorkflowLog,
+    clearAllWorkflowLogs,
     getWorkflowLog,
     getWorkflowLogsByProject,
     currentWorkflow: state.currentWorkflow || {},

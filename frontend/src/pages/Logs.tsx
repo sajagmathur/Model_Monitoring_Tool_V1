@@ -18,7 +18,7 @@ import {
 const Logs: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { workflowLogs = [], deleteWorkflowLog } = useGlobal();
+  const { workflowLogs = [], deleteWorkflowLog, clearAllWorkflowLogs } = useGlobal();
 
   const [filteredLogs, setFilteredLogs] = useState(workflowLogs || []);
   const [searchQuery, setSearchQuery] = useState('');
@@ -77,6 +77,14 @@ const Logs: React.FC = () => {
     }
   };
 
+  const handleClearAll = () => {
+    if ((workflowLogs || []).length === 0) return;
+    if (window.confirm(`Are you sure you want to delete all ${(workflowLogs || []).length} workflow log(s)? This cannot be undone.`)) {
+      clearAllWorkflowLogs();
+      setSelectedLog(null);
+    }
+  };
+
   const getStepStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
@@ -96,13 +104,28 @@ const Logs: React.FC = () => {
     <div className={`min-h-screen p-6 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div>
-          <h1 className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-            Workflow Logs
-          </h1>
-          <p className={`mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-            View and manage workflow execution logs and summaries
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              Workflow Logs
+            </h1>
+            <p className={`mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              View and manage workflow execution logs and summaries
+            </p>
+          </div>
+          {(workflowLogs || []).length > 0 && (
+            <button
+              onClick={handleClearAll}
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 border ${
+                isDark
+                  ? 'border-red-500/50 text-red-400 hover:bg-red-500/10'
+                  : 'border-red-300 text-red-600 hover:bg-red-50'
+              }`}
+            >
+              <Trash2 size={16} />
+              Clear All Logs
+            </button>
+          )}
         </div>
 
         {/* Filters */}

@@ -20,7 +20,7 @@ import {
 
 const Scheduling: React.FC = () => {
   const { theme } = useTheme();
-  const { schedulingJobs, runSchedulingJob, createGeneratedReport, createDataQualityReport, reportConfigurations, ingestionJobs, cloneDatasetAsResolved } = useGlobal();
+  const { schedulingJobs, runSchedulingJob, createGeneratedReport, createDataQualityReport, reportConfigurations, ingestionJobs, cloneDatasetAsResolved, clearAllSchedulingJobs } = useGlobal();
   const navigate = useNavigate();
   const isDark = theme === 'dark';
 
@@ -234,6 +234,13 @@ const Scheduling: React.FC = () => {
     }
   };
 
+  const handleClearAll = () => {
+    if (schedulingJobs.length === 0) return;
+    if (confirm(`Are you sure you want to delete all ${schedulingJobs.length} scheduled job(s)? This cannot be undone.`)) {
+      clearAllSchedulingJobs();
+    }
+  };
+
   const generateMockMetrics = (reportType: string) => {
     switch (reportType) {
       case 'performance':
@@ -303,6 +310,19 @@ const Scheduling: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {schedulingJobs.length > 0 && (
+            <button
+              onClick={handleClearAll}
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 border ${
+                isDark
+                  ? 'border-red-500/50 text-red-400 hover:bg-red-500/10'
+                  : 'border-red-300 text-red-600 hover:bg-red-50'
+              }`}
+            >
+              <Trash2 size={16} />
+              Clear All Jobs
+            </button>
+          )}
           <button
             onClick={() => navigate('/report-generation')}
             className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
