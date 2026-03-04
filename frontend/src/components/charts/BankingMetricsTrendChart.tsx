@@ -14,6 +14,7 @@ interface BankingMetricsTrendChartProps {
     | 'accuracy' | 'precision' | 'recall' | 'f1_score' | 'HRL' | 'change_in_KS';
   title?: string;
   height?: number;
+  isDark?: boolean;
   /** When provided, renders a second dashed series for baseline comparison */
   baselineMetrics?: BankingMetrics[];
   currentLabel?: string;
@@ -59,11 +60,16 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
   trainingLatestVintage,
   monitoringLatestVintage,
   lineColor,
+  isDark = false,
 }) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
 
   const isDualSegment = !!(thinFileMetrics?.length && thickFileMetrics?.length);
+
+  const textColor = isDark ? '#94a3b8' : '#475569';
+  const gridColor = isDark ? 'rgba(148,163,184,0.12)' : '#e5e7eb';
+  const titleColor = isDark ? '#cbd5e1' : '#6b7280';
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -208,13 +214,14 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
               padding: 10,
               usePointStyle: true,
               pointStyleWidth: 16,
+              color: textColor,
             },
           },
           title: subtitleText ? {
             display: true,
             text: subtitleText,
             font: { size: 10, family: 'Inter, system-ui, sans-serif', style: 'italic' },
-            color: '#6b7280',
+            color: titleColor,
             padding: { bottom: 4 },
           } : { display: false },
           tooltip: {
@@ -238,13 +245,15 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
               font: { size: 11, family: 'Inter, system-ui, sans-serif' },
               maxRotation: 45,
               minRotation: 45,
+              color: textColor,
             },
           },
           y: {
             beginAtZero: metricKey === 'volume',
-            grid: { color: '#e5e7eb' },
+            grid: { color: gridColor },
             ticks: {
               font: { size: 11, family: 'Inter, system-ui, sans-serif' },
+              color: textColor,
               callback: (value: any) => {
                 if (metricKey === 'volume') return (value as number).toLocaleString();
                 const isPct = ['KS','accuracy','precision','recall','f1_score','HRL','bad_rate'].includes(metricKey);
@@ -270,6 +279,7 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
     thinFileBaselineMetrics, thickFileBaselineMetrics,
     segmentLabel, isDualSegment,
     compareMode, allVintagesSorted,
+    isDark, lineColor,
   ]);
 
   const showVintageLegend = compareMode && (trainingLatestVintage || monitoringLatestVintage);
@@ -282,7 +292,7 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
       {showVintageLegend && (
         <div style={{
           display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px',
-          marginTop: '6px', paddingLeft: '4px',
+          marginTop: '6px', paddingLeft: '4px', color: textColor,
         }}>
           {trainingLatestVintage && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#f59e0b', fontWeight: 600 }}>
