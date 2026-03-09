@@ -27,7 +27,7 @@ import { METRIC_DESCRIPTIONS, DEFAULT_SELECTED_METRICS } from '../utils/metricDe
 import { exportDashboardToExcel } from '../utils/excelExport';
 
 const AVAILABLE_DASHBOARD_METRICS = [
-  'volume_bad_rate', 'KS', 'PSI', 'AUC', 'Gini', 'bad_rate', 'CA_at_10', 'change_in_KS',
+  'volume_bad_rate', 'KS', 'PSI', 'AUC', 'Gini', 'bad_rate', 'MAPE', 'change_in_KS',
   'accuracy', 'precision', 'recall', 'f1_score', 'HRL', 'ROB', 'ConfusionMatrix',
 ];
 
@@ -188,7 +188,7 @@ const ModelDetail: React.FC = () => {
               AUC:       wavg(thin.metrics.AUC,       thick.metrics.AUC),
               Gini:      wavg(thin.metrics.Gini,      thick.metrics.Gini),
               bad_rate:  wavg(thin.metrics.bad_rate,  thick.metrics.bad_rate),
-              CA_at_10:  wavg(thin.metrics.CA_at_10,  thick.metrics.CA_at_10),
+              MAPE:      wavg(thin.metrics.MAPE,      thick.metrics.MAPE),
               accuracy:  wavg(thin.metrics.accuracy,  thick.metrics.accuracy),
               precision: wavg(thin.metrics.precision, thick.metrics.precision),
               recall:    wavg(thin.metrics.recall,    thick.metrics.recall),
@@ -436,7 +436,7 @@ const ModelDetail: React.FC = () => {
   const mPort = selectedModel?.portfolio ?? '';
 
   const aiSummaries: Record<string, string> = {
-    trends: `${mName} (${mPort}) — as of vintage ${vint}: KS=${ks != null ? fmtPct(ks) : 'N/A'} (${ks == null ? '–' : ks >= 0.35 ? 'strong discrimination' : ks >= 0.25 ? 'adequate discrimination' : 'weak — review model fitness'}), AUC=${auc != null ? auc.toFixed(3) : 'N/A'}, PSI=${psi != null ? psi.toFixed(3) : 'N/A'} (${psi == null ? '–' : psi < 0.10 ? 'stable — no population shift' : psi < 0.25 ? 'moderate shift — monitor inputs' : 'significant shift — escalate to Model Governance'}). Overall RAG Status: ${rag.toUpperCase()}. ${rag === 'red' ? 'Immediate review and potential recalibration recommended.' : rag === 'amber' ? 'Enhanced monitoring over next 2 vintages advised.' : 'Model performing within approved thresholds.'}`,
+    trends: `${mName} (${mPort}) — as of vintage ${vint}: KS=${ks != null ? fmtPct(ks) : 'N/A'} (${ks == null ? '–' : ks >= 0.35 ? 'strong discrimination' : ks >= 0.25 ? 'adequate discrimination' : 'weak — review model fitness'}), AUC=${auc != null ? auc.toFixed(3) : 'N/A'}, PSI=${psi != null ? psi.toFixed(4) : 'N/A'} (${psi == null ? '–' : psi < 0.10 ? 'stable — no population shift' : psi < 0.25 ? 'moderate shift — monitor inputs' : 'significant shift — escalate to Model Governance'}). Overall RAG Status: ${rag.toUpperCase()}. ${rag === 'red' ? 'Immediate review and potential recalibration recommended.' : rag === 'amber' ? 'Enhanced monitoring over next 2 vintages advised.' : 'Model performing within approved thresholds.'}`,
     segments: `Segment comparison for ${mName} at vintage ${vint}. ${compareMode ? `Compare Mode (${baselineDataset} vs ${currentDataset}): baseline established at reference vintage ${referenceVintage}.` : ''} Current segment and Delinquent segment performance should be monitored for divergence. If Delinquent segment PSI > 0.25, consider re-stratification or model review.`,
     volumeBadRate: `Volume and bad rate analysis for ${mName} (vintage ${vint}). Latest bad rate: ${br != null ? fmtPct(br) : 'N/A'}. ${volumeDisplayMode === 'quarterly' ? 'Quarterly view reveals seasonal patterns in application volume and default rates.' : 'Score band view shows risk concentration across scoring deciles.'} ${compareMode ? `Comparison against ${baselineDataset} baseline (vintage ${referenceVintage}) highlights any portfolio composition changes.` : 'Monitor for sudden shifts exceeding ±1.5pp in monthly bad rate.'} `,
     variables: `Variable stability analysis for ${mName} as of vintage ${vint}. Variables with PSI > 0.25 indicate significant distribution shift and should be investigated with upstream data teams. Variables with CSI > 0.10 require segment-level review. ${compareMode ? `Comparative baseline from ${baselineDataset} (${referenceVintage}).` : 'Consider retraining if >3 high-PSI variables identified.'} `,
@@ -642,11 +642,11 @@ const ModelDetail: React.FC = () => {
           {(() => {
             const TILE_CONFIG: Record<string, { label: string; getValue: () => string | null; teal?: boolean }> = {
               KS:              { label: 'KS',           getValue: () => latestMetric?.metrics.KS        !== undefined ? fmtPct(latestMetric.metrics.KS) : null },
-              PSI:             { label: 'PSI',          getValue: () => latestMetric?.metrics.PSI       !== undefined ? latestMetric.metrics.PSI.toFixed(3) : null },
+              PSI:             { label: 'PSI',          getValue: () => latestMetric?.metrics.PSI       !== undefined ? latestMetric.metrics.PSI.toFixed(4) : null },
               AUC:             { label: 'AUC',          getValue: () => latestMetric?.metrics.AUC       !== undefined ? latestMetric.metrics.AUC.toFixed(3) : null },
               Gini:            { label: 'Gini',         getValue: () => latestMetric?.metrics.Gini      !== undefined ? latestMetric.metrics.Gini.toFixed(3) : null },
               bad_rate:        { label: 'Bad Rate',     getValue: () => latestMetric?.metrics.bad_rate  !== undefined ? `${(latestMetric.metrics.bad_rate * 100).toFixed(2)}%` : null },
-              CA_at_10:        { label: 'CA@10',        getValue: () => latestMetric?.metrics.CA_at_10  !== undefined ? fmtPct(latestMetric.metrics.CA_at_10) : null },
+              MAPE:            { label: 'MAPE',         getValue: () => latestMetric?.metrics.MAPE      !== undefined ? fmtPct(latestMetric.metrics.MAPE) : null },
               volume_bad_rate: { label: 'Volume',       getValue: () => latestMetric?.volume            !== undefined ? latestMetric.volume.toLocaleString() : null },
               accuracy:        { label: 'Accuracy',     getValue: () => latestMetric?.metrics.accuracy  !== undefined ? fmtPct(latestMetric.metrics.accuracy) : null },
               precision:       { label: 'Precision',    getValue: () => latestMetric?.metrics.precision !== undefined ? fmtPct(latestMetric.metrics.precision) : null },
@@ -819,7 +819,7 @@ const ModelDetail: React.FC = () => {
                     AUC:             { label: 'AUC', show: !!(latestMetric?.metrics.AUC !== undefined || isDualSegmentMode) },
                     Gini:            { label: 'Gini Coefficient', show: latestMetric?.metrics.Gini !== undefined },
                     bad_rate:        { label: 'Bad Rate', show: latestMetric?.metrics.bad_rate !== undefined },
-                    CA_at_10:        { label: 'Capture Rate @ 10%', show: true },
+                    MAPE:            { label: 'MAPE',               show: true },
                     change_in_KS:    { label: 'Change in KS% vs Reference', show: changeInKSMetrics.length > 0 },
                     accuracy:        { label: 'Accuracy', show: true },
                     precision:       { label: 'Precision', show: true },
@@ -892,7 +892,7 @@ const ModelDetail: React.FC = () => {
                       <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>AUC</th>
                       <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Gini</th>
                       <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Bad Rate</th>
-                      <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>CA@10</th>
+                      <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>MAPE</th>
                       <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Accuracy</th>
                       <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Precision</th>
                       <th className={`px-3 py-2 text-right font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Recall</th>
@@ -908,11 +908,11 @@ const ModelDetail: React.FC = () => {
                       <tr key={idx} className={isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}>
                         <td className={`px-3 py-2 ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.vintage}</td>
                         <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.KS !== undefined ? fmtPct(m.metrics.KS) : '-'}</td>
-                        <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.PSI?.toFixed(3) || '-'}</td>
+                        <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.PSI?.toFixed(4) || '-'}</td>
                         <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.AUC?.toFixed(3) || '-'}</td>
                         <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.Gini?.toFixed(3) || '-'}</td>
                         <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.bad_rate ? (m.metrics.bad_rate * 100).toFixed(2) + '%' : '-'}</td>
-                        <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.CA_at_10 !== undefined ? fmtPct(m.metrics.CA_at_10) : '-'}</td>
+                        <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.MAPE !== undefined ? fmtPct(m.metrics.MAPE) : '-'}</td>
                         <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.accuracy !== undefined ? fmtPct(m.metrics.accuracy) : '-'}</td>
                         <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.precision !== undefined ? fmtPct(m.metrics.precision) : '-'}</td>
                         <td className={`px-3 py-2 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{m.metrics.recall !== undefined ? fmtPct(m.metrics.recall) : '-'}</td>
@@ -1053,7 +1053,7 @@ const ModelDetail: React.FC = () => {
                   <option value="recall">Recall</option>
                   <option value="f1_score">F1 Score</option>
                   <option value="HRL">Hit Rate Lift (HRL)</option>
-                  <option value="CA_at_10">CA at 10%</option>
+                  <option value="MAPE">MAPE</option>
                 </select>
               </div>
               <button onClick={() => setViewModes({ ...viewModes, segments: 'chart' })} className={`px-3 py-1 rounded text-sm ${viewModes.segments === 'chart' ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'}`}>Chart</button>

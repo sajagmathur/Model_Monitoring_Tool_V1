@@ -10,6 +10,10 @@ import { PortfolioAnalyzer, type ReportItem } from '../components/charts/Portfol
 import { ChartCommentary, SectionComment } from '../components/ChartCommentary';
 import { calculateRAGStatus, type BankingMetrics } from '../utils/bankingMetricsMock';
 import { exportDashboard } from '../utils/dashboardExport';
+import { Chart, registerables } from 'chart.js';
+Chart.register(...registerables);
+
+
 
 const Dashboard: React.FC = () => {
   const { theme } = useTheme();
@@ -34,7 +38,6 @@ const Dashboard: React.FC = () => {
   const [selectedRAGFilter, setSelectedRAGFilter] = useState<'all' | 'green' | 'amber' | 'red'>('all');
   const [showProjectsBanner, setShowProjectsBanner] = useState(false);
   const [bannerModelId, setBannerModelId] = useState<string>('');
-  const [ragViewMode, setRagViewMode] = useState<'chart' | 'table'>('chart');
   const [ragComments, setRagComments] = useState<SectionComment[]>([]);
   const [dashboardComments, setDashboardComments] = useState<SectionComment[]>([]);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -42,13 +45,16 @@ const Dashboard: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [reportItems, setReportItems] = useState<ReportItem[]>([]);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [tablePage, setTablePage] = useState(1);
+  const [tableSearch, setTableSearch] = useState('');
 
   const [filters, setFilters] = useState({
-    portfolio: 'All',
     businessLine: 'All',
-    modelType: 'All',
+    mlCategory: 'All',
+    domain: 'All',
+    populationType: 'All',
     model: 'All',
-    timeWindow: 'Last 30 Days',
+    observationVintage: 'All',
   });
 
   useEffect(() => {
@@ -104,18 +110,20 @@ const Dashboard: React.FC = () => {
   const latestVintage = allVintages[0];
 
   const filterOptions = useMemo(() => ({
-    portfolio:    ['All', ...Array.from(new Set(bankingModels.map(m => m.portfolio))).sort()],
-    businessLine: ['All', 'Retail', 'Commercial', 'Digital', 'Cards', 'Mortgages'],
-    modelType:    ['All', ...Array.from(new Set(bankingModels.map(m => m.model_type))).sort()],
-    model:        ['All', ...bankingModels.map(m => m.name)],
-    timeWindow:   ['Last 7 Days', 'Last 30 Days', 'Last 90 Days', 'Year to Date'],
-  }), [bankingModels]);
+    businessLine:      ['All', 'Retail', 'Commercial', 'Digital', 'Cards', 'Mortgages'],
+    mlCategory:        ['All', 'ML-Classification', 'Non-ML-Classification', 'ML-Non-Classification', 'Non-ML-Non-Classification'],
+    domain:            ['All', ...Array.from(new Set(bankingModels.map(m => m.domain).filter(Boolean) as string[])).sort()],
+    populationType:    ['All', ...Array.from(new Set(bankingModels.map(m => m.populationType).filter(Boolean) as string[])).sort()],
+    model:             ['All', ...bankingModels.map(m => m.name)],
+    observationVintage:['All', ...allVintages],
+  }), [bankingModels, allVintages]);
 
   const filteredPortfolioModels = useMemo(() => {
     let models = bankingModels;
-    if (filters.portfolio !== 'All') models = models.filter(m => m.portfolio === filters.portfolio);
-    if (filters.modelType !== 'All')  models = models.filter(m => m.model_type === filters.modelType);
-    if (filters.model !== 'All')      models = models.filter(m => m.name === filters.model);
+    if (filters.mlCategory !== 'All')     models = models.filter(m => m.mlCategory === filters.mlCategory);
+    if (filters.domain !== 'All')         models = models.filter(m => m.domain === filters.domain);
+    if (filters.populationType !== 'All') models = models.filter(m => m.populationType === filters.populationType);
+    if (filters.model !== 'All')          models = models.filter(m => m.name === filters.model);
     if (filters.businessLine !== 'All') {
       const blKeywords: Record<string, string[]> = {
         'Retail':    ['Retail', 'Personal', 'Consumer', 'Cards'],
@@ -133,14 +141,17 @@ const Dashboard: React.FC = () => {
   }, [bankingModels, filters]);
 
   const portfolioRows = useMemo(() => {
+    const vintageFilter = filters.observationVintage !== 'All' ? filters.observationVintage : null;
     return filteredPortfolioModels.map(model => {
       const modelMetrics = bankingMetrics.filter(m => m.model_id === model.model_id);
-      const latestV = allVintages.find(v => modelMetrics.some(m => m.vintage === v));
+      const latestV = vintageFilter
+        ? (modelMetrics.some(m => m.vintage === vintageFilter) ? vintageFilter : allVintages.find(v => modelMetrics.some(m => m.vintage === v)))
+        : allVintages.find(v => modelMetrics.some(m => m.vintage === v));
       const latestM = modelMetrics.find(m => m.vintage === latestV);
       return { model, metric: latestM };
     }).filter(r => r.metric)
       .filter(r => selectedRAGFilter === 'all' || r.metric!.rag_status === selectedRAGFilter);
-  }, [filteredPortfolioModels, bankingMetrics, allVintages, selectedRAGFilter]);
+  }, [filteredPortfolioModels, bankingMetrics, allVintages, selectedRAGFilter, filters.observationVintage]);
 
   const ragFilteredMetrics = useMemo(() => {
     return filteredPortfolioModels.map(model => {
@@ -150,9 +161,42 @@ const Dashboard: React.FC = () => {
     }).filter(Boolean) as BankingMetrics[];
   }, [filteredPortfolioModels, bankingMetrics, allVintages]);
 
-  const isAnyFilterActive = Object.entries(filters).some(([k, v]) =>
-    k !== 'timeWindow' ? v !== 'All' : v !== 'Last 30 Days'
+  // ── Pagination & Search ──────────────────────────────────────────────────────
+  const PAGE_SIZE = 20;
+  const searchedPortfolioRows = useMemo(() => {
+    if (!tableSearch.trim()) return portfolioRows;
+    const q = tableSearch.toLowerCase();
+    return portfolioRows.filter(({ model }) =>
+      model.name.toLowerCase().includes(q) ||
+      model.model_id.toLowerCase().includes(q) ||
+      model.portfolio.toLowerCase().includes(q) ||
+      (model.domain ?? '').toLowerCase().includes(q)
+    );
+  }, [portfolioRows, tableSearch]);
+  const totalPages = Math.max(1, Math.ceil(searchedPortfolioRows.length / PAGE_SIZE));
+  const pagedPortfolioRows = useMemo(() =>
+    searchedPortfolioRows.slice((tablePage - 1) * PAGE_SIZE, tablePage * PAGE_SIZE),
+    [searchedPortfolioRows, tablePage]
   );
+
+  // ── Download CSV ──────────────────────────────────────────────────────────────
+  const handleDownloadInventory = () => {
+    const hdrs = ['Model ID','Model Name','Domain','Population Type','ML Category','Type','Latest Vintage','KS','PSI','AUC','Gini','MAPE','Status'];
+    const rows = portfolioRows.map(({ model, metric: m }) => [
+      model.model_id, model.name, model.domain ?? '', model.populationType ?? '', model.mlCategory ?? '',
+      m!.model_type, m!.vintage,
+      m!.metrics.KS?.toFixed(4) ?? '', m!.metrics.PSI?.toFixed(4) ?? '',
+      m!.metrics.AUC?.toFixed(4) ?? '', m!.metrics.Gini?.toFixed(4) ?? '',
+      m!.metrics.MAPE?.toFixed(4) ?? '', m!.rag_status ?? '',
+    ]);
+    const csv = [hdrs, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'model_inventory.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const isAnyFilterActive = Object.entries(filters).some(([k, v]) => v !== 'All');
 
   const BL_KEYWORDS: Record<string, string[]> = {
     Retail: ['Retail','Personal','Consumer','Home','Cards'],
@@ -170,8 +214,11 @@ const Dashboard: React.FC = () => {
 
   const metricCell = (val: number | undefined, key: string) => {
     if (val == null) return <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>—</span>;
-    const PCT = new Set(['KS','accuracy','precision','recall','f1_score','HRL','bad_rate']);
-    const disp = PCT.has(key) ? (val * 100).toFixed(1) + '%' : val.toFixed(3);
+    const PCT = new Set(['KS','accuracy','precision','recall','f1_score','HRL','bad_rate','MAPE']);
+    const disp = PCT.has(key)
+      ? (val * 100).toFixed(1) + '%'
+      : key === 'PSI' ? val.toFixed(4)
+      : val.toFixed(3);
     let color = '';
     if (key === 'KS')      color = val >= 0.35 ? 'text-green-500' : val >= 0.25 ? 'text-amber-500' : 'text-red-500';
     if (key === 'PSI')     color = val < 0.10 ? 'text-green-500' : val < 0.25 ? 'text-amber-500' : 'text-red-500';
@@ -256,10 +303,12 @@ const Dashboard: React.FC = () => {
             <div className={`h-5 w-px ${isDark ? 'bg-slate-600' : 'bg-slate-300'}`} />
             {(
               [
-                { key: 'businessLine', label: 'Product', opts: filterOptions.businessLine },
-                { key: 'modelType',    label: 'Model Type',    opts: filterOptions.modelType    },
-                { key: 'model',        label: 'Model',         opts: filterOptions.model        },
-                { key: 'timeWindow',   label: 'Time Window',   opts: filterOptions.timeWindow   },
+                { key: 'businessLine',     label: 'Product',             opts: filterOptions.businessLine     },
+                { key: 'mlCategory',       label: 'Model Type',           opts: filterOptions.mlCategory       },
+                { key: 'domain',           label: 'Domain',               opts: filterOptions.domain           },
+                { key: 'populationType',   label: 'Population Type',      opts: filterOptions.populationType   },
+                { key: 'model',            label: 'Model',                opts: filterOptions.model            },
+                { key: 'observationVintage', label: 'Observation Vintage', opts: filterOptions.observationVintage },
               ] as const
             ).map(({ key, label, opts }) => (
               <div key={key} className="flex items-center gap-1.5">
@@ -275,7 +324,7 @@ const Dashboard: React.FC = () => {
             ))}
             {isAnyFilterActive && (
               <button
-                onClick={() => setFilters({ portfolio: 'All', businessLine: 'All', modelType: 'All', model: 'All', timeWindow: 'Last 30 Days' })}
+                onClick={() => setFilters({ businessLine: 'All', mlCategory: 'All', domain: 'All', populationType: 'All', model: 'All', observationVintage: 'All' })}
                 className={`ml-auto text-xs underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'}`}
               >
                 Clear filters
@@ -284,10 +333,10 @@ const Dashboard: React.FC = () => {
           </div>
           {isAnyFilterActive && (
             <div className="flex flex-wrap gap-2 mt-3">
-              {Object.entries(filters).filter(([k, v]) => k !== 'timeWindow' ? v !== 'All' : v !== 'Last 30 Days').map(([k, v]) => (
+              {Object.entries(filters).filter(([, v]) => v !== 'All').map(([k, v]) => (
                 <span key={k} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>
                   {v}
-                  <button onClick={() => setFilters(prev => ({ ...prev, [k]: k === 'timeWindow' ? 'Last 30 Days' : 'All' }))} className="ml-0.5 hover:opacity-70">x</button>
+                  <button onClick={() => setFilters(prev => ({ ...prev, [k]: 'All' }))} className="ml-0.5 hover:opacity-70">x</button>
                 </span>
               ))}
             </div>
@@ -298,145 +347,27 @@ const Dashboard: React.FC = () => {
           <SkeletonLoader count={6} isDark={isDark} variant="card" />
         ) : (
           <>
-            {/* Model Portfolio Overview */}
-            <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                   Model Portfolio Overview
-                </h2>
-                <span className={`text-xs px-2 py-1 rounded ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
-                  {portfolioRows.length} model{portfolioRows.length !== 1 ? 's' : ''}{isAnyFilterActive ? ' (filtered)' : ''}
-                </span>
-              </div>
-
-              {portfolioRows.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className={`${isDark ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
-                      <tr>
-                        <th className="px-3 py-2 text-left font-semibold whitespace-nowrap sticky left-0 z-10" style={{background: isDark ? '#334155' : '#f1f5f9'}}>Model ID</th>
-                        <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Model Name</th>
-                        <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">
-                          <button
-                            onClick={() => setFilters(prev => ({ ...prev, businessLine: prev.businessLine === 'All' ? 'All' : 'All' }))}
-                            className="flex items-center gap-1 hover:underline"
-                            title="Filter by product"
-                          >
-                            Product
-                          </button>
-                        </th>
-                        <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Type</th>
-                        <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Latest Vintage</th>
-                        <th className="px-3 py-2 text-right font-semibold">KS</th>
-                        <th className="px-3 py-2 text-right font-semibold">PSI</th>
-                        <th className="px-3 py-2 text-right font-semibold">AUC</th>
-                        <th className="px-3 py-2 text-right font-semibold">Gini</th>
-                        <th className="px-3 py-2 text-right font-semibold">CA@10</th>
-                        <th className="px-3 py-2 text-right font-semibold">Accuracy</th>
-                        <th className="px-3 py-2 text-right font-semibold">Precision</th>
-                        <th className="px-3 py-2 text-right font-semibold">Recall</th>
-                        <th className="px-3 py-2 text-right font-semibold">F1</th>
-                        <th className="px-3 py-2 text-right font-semibold">HRL</th>
-                        <th className="px-3 py-2 text-center font-semibold">Status</th>
-                        <th className="px-3 py-2 text-center font-semibold"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {portfolioRows.map(({ model, metric: m }) => {
-                        const bl = deriveBusinessLine({ model_type: model.model_type, portfolio: model.portfolio, name: model.name });
-                        return (
-                          <tr
-                            key={model.model_id}
-                            className={`border-b ${isDark ? 'border-slate-700 hover:bg-slate-700/50' : 'border-slate-100 hover:bg-slate-50'}`}
-                          >
-                            <td className={`px-3 py-2 font-mono text-xs font-semibold sticky left-0 ${isDark ? 'text-blue-300 bg-slate-800' : 'text-blue-700 bg-white'}`}>
-                              {model.model_id}
-                            </td>
-                            <td className={`px-3 py-2 font-medium whitespace-nowrap ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                              {model.name}
-                            </td>
-                            <td className="px-3 py-2">
-                              <button
-                                onClick={() => setFilters(prev => ({ ...prev, businessLine: bl }))}
-                                className={`text-xs px-1.5 py-0.5 rounded-full font-medium border transition-colors ${
-                                  filters.businessLine === bl
-                                    ? 'bg-blue-600 text-white border-blue-600'
-                                    : isDark
-                                      ? 'bg-slate-700 text-slate-300 border-slate-600 hover:bg-slate-600'
-                                      : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
-                                }`}
-                                title={`Filter by ${bl}`}
-                              >
-                                {bl}
-                              </button>
-                            </td>
-                            <td className={`px-3 py-2 text-xs whitespace-nowrap ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{m!.model_type}</td>
-                            <td className={`px-3 py-2 font-mono text-xs whitespace-nowrap ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m!.vintage}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.KS, 'KS')}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.PSI, 'PSI')}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.AUC, 'AUC')}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.Gini, 'Gini')}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.CA_at_10, 'CA_at_10')}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.accuracy, 'accuracy')}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.precision, 'precision')}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.recall, 'recall')}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.f1_score, 'f1_score')}</td>
-                            <td className="px-3 py-2 text-right">{metricCell(m!.metrics.HRL, 'HRL')}</td>
-                            <td className="px-3 py-2 text-center">
-                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                                m!.rag_status === 'green' ? 'bg-green-100 text-green-700'
-                                : m!.rag_status === 'amber' ? 'bg-amber-100 text-amber-700'
-                                : 'bg-red-100 text-red-700'
-                              }`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${m!.rag_status === 'green' ? 'bg-green-500' : m!.rag_status === 'amber' ? 'bg-amber-500' : 'bg-red-500'}`} />
-                                {m!.rag_status?.toUpperCase() ?? '–'}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 text-center">
-                              <button
-                                onClick={() => navigate(`/dashboard/model/${model.model_id}`)}
-                                className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded font-medium"
-                              >
-                                Detail
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className={`text-center py-10 rounded-lg border-2 border-dashed ${isDark ? 'border-slate-600 text-slate-400' : 'border-slate-300 text-slate-500'}`}>
-                  {bankingModels.length === 0
-                    ? 'No models available. Click "Reload Data" to load sample portfolio.'
-                    : 'No models match the current filters.'}
-                </div>
-              )}
-            </div>
-
-            {/* Portfolio RAG Status Distribution */}
+            {/* ── Portfolio RAG Status (side-by-side: pie + table) ── */}
             <div id="export-rag-status" className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
                   Portfolio RAG Status Distribution
                 </h3>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setRagViewMode('chart')} className={`px-3 py-1 rounded text-sm ${ragViewMode === 'chart' ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'}`}>Chart</button>
-                  <button onClick={() => setRagViewMode('table')} className={`px-3 py-1 rounded text-sm ${ragViewMode === 'table' ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'}`}>Table</button>
-                </div>
+                {selectedRAGFilter !== 'all' && (
+                  <button onClick={() => setSelectedRAGFilter('all')} className="text-sm text-blue-600 hover:text-blue-700 underline">
+                    Clear RAG filter (showing: {selectedRAGFilter})
+                  </button>
+                )}
               </div>
-
-              {ragViewMode === 'chart' ? (
-                <div style={{ height: '300px' }}>
+              <div className="flex flex-col lg:flex-row gap-6 items-start">
+                <div style={{ height: '280px', flex: '0 0 280px', minWidth: 0 }}>
                   <PortfolioRAGChart
                     metrics={ragFilteredMetrics}
                     onRAGClick={(ragStatus) => setSelectedRAGFilter(ragStatus)}
                   />
                 </div>
-              ) : (
-                <div className="overflow-auto">
-                  <table className="w-full">
+                <div className="flex-1 overflow-auto self-center">
+                  <table className="w-full min-w-[280px]">
                     <thead className={`${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
                       <tr>
                         <th className={`px-4 py-2 text-left text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>RAG Status</th>
@@ -445,18 +376,18 @@ const Dashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {(['green', 'amber', 'red'] as const).map(status => {
+                      {(['green','amber','red'] as const).map(status => {
                         const count = ragFilteredMetrics.filter(m => m.rag_status === status).length;
                         const pct = ragFilteredMetrics.length > 0 ? ((count / ragFilteredMetrics.length) * 100).toFixed(1) : '0.0';
                         return (
                           <tr key={status} className={isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-50'}>
                             <td className={`px-4 py-3 ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>
                               <span className="inline-flex items-center gap-2">
-                                <span className={`w-3 h-3 rounded-full ${status === 'green' ? 'bg-green-500' : status === 'amber' ? 'bg-amber-500' : 'bg-red-500'}`} />
-                                {status.charAt(0).toUpperCase() + status.slice(1)}
+                                <span className={`w-3 h-3 rounded-full ${status==='green'?'bg-green-500':status==='amber'?'bg-amber-500':'bg-red-500'}`} />
+                                {status.charAt(0).toUpperCase()+status.slice(1)}
                               </span>
                             </td>
-                            <td className={`px-4 py-3 ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{count}</td>
+                            <td className={`px-4 py-3 font-semibold ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{count}</td>
                             <td className={`px-4 py-3 ${isDark ? 'text-slate-300' : 'text-slate-900'}`}>{pct}%</td>
                           </tr>
                         );
@@ -464,16 +395,7 @@ const Dashboard: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
-              )}
-
-              <div className="mt-4 text-center">
-                {selectedRAGFilter !== 'all' && (
-                  <button onClick={() => setSelectedRAGFilter('all')} className="text-sm text-blue-600 hover:text-blue-700 underline">
-                    Clear RAG filter (showing: {selectedRAGFilter})
-                  </button>
-                )}
               </div>
-
               <ChartCommentary
                 sectionId="ragStatus"
                 sectionLabel="Portfolio RAG Status"
@@ -483,6 +405,164 @@ const Dashboard: React.FC = () => {
                 isDark={isDark}
                 aiSuggestion={`Portfolio RAG Summary: ${ragFilteredMetrics.filter(m => m.rag_status === 'green').length} Green, ${ragFilteredMetrics.filter(m => m.rag_status === 'amber').length} Amber, ${ragFilteredMetrics.filter(m => m.rag_status === 'red').length} Red out of ${ragFilteredMetrics.length} models. ${ragFilteredMetrics.filter(m => m.rag_status === 'red').length > 0 ? 'ACTION: Red status models require immediate review.' : ragFilteredMetrics.filter(m => m.rag_status === 'amber').length > 0 ? 'ATTENTION: Amber models should be monitored closely.' : 'Portfolio is healthy — all models within thresholds.'}`}
               />
+            </div>
+
+            {/* ── Model Portfolio Overview ── */}
+            <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <div className="flex items-center gap-3">
+                  <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    Model Portfolio Overview
+                  </h2>
+                  {/* Performance Type tooltip */}
+                  <div className="relative group">
+                    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border cursor-help ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-600'}`}>
+                      Full Performance ℹ
+                    </span>
+                    <div className={`absolute left-0 top-full mt-1 z-20 w-64 p-3 rounded-lg shadow-lg text-xs hidden group-hover:block ${isDark ? 'bg-slate-700 border border-slate-600 text-slate-200' : 'bg-white border border-slate-200 text-slate-700'}`}>
+                      <p className="font-semibold mb-1">Performance Type: Full Performance</p>
+                      <p>Metrics are computed across the full population for the selected Observation Vintage, reflecting overall model health without segment filtering.</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    placeholder="Search model…"
+                    value={tableSearch}
+                    onChange={e => { setTableSearch(e.target.value); setTablePage(1); }}
+                    className={`text-xs px-3 py-1.5 rounded border w-44 ${isDark ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-800 placeholder-slate-400'}`}
+                  />
+                  <button
+                    onClick={handleDownloadInventory}
+                    className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border bg-green-600 hover:bg-green-700 text-white border-green-600"
+                    title="Download model inventory as CSV"
+                  >
+                    <Download size={13} /> Download Inventory
+                  </button>
+                  <span className={`text-xs px-2 py-1 rounded ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                    {searchedPortfolioRows.length} model{searchedPortfolioRows.length !== 1 ? 's' : ''}{isAnyFilterActive ? ' (filtered)' : ''}
+                  </span>
+                </div>
+              </div>
+
+              {portfolioRows.length > 0 ? (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className={`${isDark ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold whitespace-nowrap sticky left-0 z-10" style={{background: isDark ? '#334155' : '#f1f5f9'}}>Model ID</th>
+                          <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Model Name</th>
+                          <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Product</th>
+                          <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Domain</th>
+                          <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Population Type</th>
+                          <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Type</th>
+                          <th className="px-3 py-2 text-left font-semibold whitespace-nowrap">Latest Vintage</th>
+                          <th className="px-3 py-2 text-right font-semibold">KS</th>
+                          <th className="px-3 py-2 text-right font-semibold">PSI</th>
+                          <th className="px-3 py-2 text-right font-semibold">AUC</th>
+                          <th className="px-3 py-2 text-right font-semibold">Gini</th>
+                          <th className="px-3 py-2 text-right font-semibold">MAPE</th>
+                          <th className="px-3 py-2 text-right font-semibold">Accuracy</th>
+                          <th className="px-3 py-2 text-right font-semibold">Precision</th>
+                          <th className="px-3 py-2 text-right font-semibold">Recall</th>
+                          <th className="px-3 py-2 text-right font-semibold">F1</th>
+                          <th className="px-3 py-2 text-right font-semibold">HRL</th>
+                          <th className="px-3 py-2 text-center font-semibold">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pagedPortfolioRows.map(({ model, metric: m }) => {
+                          const bl = deriveBusinessLine({ model_type: model.model_type, portfolio: model.portfolio, name: model.name });
+                          return (
+                            <tr
+                              key={model.model_id}
+                              className={`border-b ${isDark ? 'border-slate-700 hover:bg-slate-700/50' : 'border-slate-100 hover:bg-slate-50'}`}
+                            >
+                              <td className={`px-3 py-2 font-mono text-xs font-semibold sticky left-0 ${isDark ? 'text-blue-300 bg-slate-800' : 'text-blue-700 bg-white'}`}>
+                                {model.model_id}
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                <a
+                                  href={`/dashboard/model/${model.model_id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={`font-medium hover:underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-700 hover:text-blue-800'}`}
+                                >
+                                  {model.name}
+                                </a>
+                              </td>
+                              <td className="px-3 py-2">
+                                <button
+                                  onClick={() => setFilters(prev => ({ ...prev, businessLine: bl }))}
+                                  className={`text-xs px-1.5 py-0.5 rounded-full font-medium border transition-colors ${
+                                    filters.businessLine === bl
+                                      ? 'bg-blue-600 text-white border-blue-600'
+                                      : isDark ? 'bg-slate-700 text-slate-300 border-slate-600 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                                  }`}
+                                >{bl}</button>
+                              </td>
+                              <td className={`px-3 py-2 text-xs whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {model.domain ?? '—'}
+                              </td>
+                              <td className={`px-3 py-2 text-xs whitespace-nowrap ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {model.populationType ?? '—'}
+                              </td>
+                              <td className={`px-3 py-2 text-xs whitespace-nowrap ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{m!.model_type}</td>
+                              <td className={`px-3 py-2 font-mono text-xs whitespace-nowrap ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m!.vintage}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.KS, 'KS')}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.PSI, 'PSI')}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.AUC, 'AUC')}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.Gini, 'Gini')}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.MAPE, 'MAPE')}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.accuracy, 'accuracy')}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.precision, 'precision')}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.recall, 'recall')}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.f1_score, 'f1_score')}</td>
+                              <td className="px-3 py-2 text-right">{metricCell(m!.metrics.HRL, 'HRL')}</td>
+                              <td className="px-3 py-2 text-center">
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  m!.rag_status === 'green' ? 'bg-green-100 text-green-700'
+                                  : m!.rag_status === 'amber' ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-red-100 text-red-700'
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${m!.rag_status === 'green' ? 'bg-green-500' : m!.rag_status === 'amber' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                                  {m!.rag_status?.toUpperCase() ?? '–'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {/* Pagination */}
+                  <div className="flex items-center justify-between mt-3 px-1">
+                    <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Page {tablePage} of {totalPages} · {searchedPortfolioRows.length} model{searchedPortfolioRows.length !== 1 ? 's' : ''}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setTablePage(p => Math.max(1, p - 1))}
+                        disabled={tablePage === 1}
+                        className={`px-3 py-1 rounded text-xs border disabled:opacity-40 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+                      >← Prev</button>
+                      <button
+                        onClick={() => setTablePage(p => Math.min(totalPages, p + 1))}
+                        disabled={tablePage === totalPages}
+                        className={`px-3 py-1 rounded text-xs border disabled:opacity-40 ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+                      >Next →</button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className={`text-center py-10 rounded-lg border-2 border-dashed ${isDark ? 'border-slate-600 text-slate-400' : 'border-slate-300 text-slate-500'}`}>
+                  {bankingModels.length === 0
+                    ? 'No models available. Click "Reload Data" to load sample portfolio.'
+                    : 'No models match the current filters.'}
+                </div>
+              )}
             </div>
 
             {/* ── Portfolio Analyzer ── */}

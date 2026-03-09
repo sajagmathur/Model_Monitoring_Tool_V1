@@ -883,7 +883,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       },
     ];
 
-    // Derive banking models/metrics from registry models only
+    // Derive banking models/metrics from registry models (Projects workflow only)
     const { bankingModels, bankingMetrics } = buildBankingDataFromRegistry(sampleModels);
 
     return {
@@ -950,7 +950,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             bankingMetrics: parsed.bankingMetrics || [],
           };
           
-          // If banking data is missing, derive from registry models
+          // Derive banking data from registry models if missing
           if (!mergedState.bankingModels.length || !mergedState.bankingMetrics.length) {
             const { bankingModels, bankingMetrics } = buildBankingDataFromRegistry(mergedState.registryModels);
             mergedState.bankingModels = bankingModels;
@@ -1034,7 +1034,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             bankingMetrics: parsed.bankingMetrics || [],
           };
           
-          // If banking data is missing, derive from registry models
+          // Derive banking data from registry models if missing
           if (!mergedState.bankingModels.length || !mergedState.bankingMetrics.length) {
             const { bankingModels, bankingMetrics } = buildBankingDataFromRegistry(mergedState.registryModels);
             mergedState.bankingModels = bankingModels;

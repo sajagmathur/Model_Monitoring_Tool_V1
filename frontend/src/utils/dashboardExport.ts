@@ -39,7 +39,7 @@ const METRIC_GUIDE: Record<string, { label: string; formula: string; green: stri
   AUC:       { label: 'AUC-ROC',                formula: 'Area under ROC curve',              green: '> 0.75',  amber: '0.65–0.75', red: '< 0.65' },
   Gini:      { label: 'Gini',                   formula: '2 × AUC − 1',                      green: '> 0.50',  amber: '0.30–0.50', red: '< 0.30' },
   bad_rate:  { label: 'Bad Rate',               formula: 'Bads / Total',                     green: '±15% base', amber: '15–30%',   red: '>30%'   },
-  CA_at_10:  { label: 'Capture Rate @ 10%',     formula: 'Bads top10% / Total Bads',         green: '> 0.30',  amber: '0.20–0.30', red: '< 0.20' },
+  MAPE:      { label: 'MAPE',                        formula: 'Mean Absolute % Error',             green: '< 10%',   amber: '10–20%',    red: '> 20%'  },
   accuracy:  { label: 'Accuracy',               formula: '(TP+TN)/Total',                    green: '> 0.85',  amber: '0.70–0.85', red: '< 0.70' },
   precision: { label: 'Precision',              formula: 'TP/(TP+FP)',                       green: '> 0.80',  amber: '0.65–0.80', red: '< 0.65' },
   recall:    { label: 'Recall',                 formula: 'TP/(TP+FN)',                       green: '> 0.75',  amber: '0.60–0.75', red: '< 0.60' },
@@ -303,7 +303,7 @@ export async function exportDashboardAsPDF(options: ExportOptions): Promise<void
     }
     if (metrics.PSI !== undefined) {
       const ok = metrics.PSI <= 0.1;
-      kpis.push({ label: 'PSI (Stability)', value: metrics.PSI.toFixed(3),
+      kpis.push({ label: 'PSI (Stability)', value: metrics.PSI.toFixed(4),
         status: ok ? 'GREEN' : metrics.PSI <= 0.25 ? 'AMBER' : 'RED',
         color: ok ? [22,163,74] : metrics.PSI <= 0.25 ? [217,119,6] : [220,38,38] });
     }
@@ -538,7 +538,7 @@ export async function exportDashboardAsPPT(options: ExportOptions): Promise<void
       ]);
     };
     if (metrics.KS !== undefined) addRow('KS Statistic', metrics.KS.toFixed(3), metrics.KS>=0.35?'GREEN':metrics.KS>=0.25?'AMBER':'RED', '> 0.35', false);
-    if (metrics.PSI !== undefined) addRow('PSI (Stability)', metrics.PSI.toFixed(3), metrics.PSI<=0.1?'GREEN':metrics.PSI<=0.25?'AMBER':'RED', '< 0.10', true);
+    if (metrics.PSI !== undefined) addRow('PSI (Stability)', metrics.PSI.toFixed(4), metrics.PSI<=0.1?'GREEN':metrics.PSI<=0.25?'AMBER':'RED', '< 0.10', true);
     if (metrics.AUC !== undefined) addRow('AUC', metrics.AUC.toFixed(3), metrics.AUC>=0.75?'GREEN':'AMBER', '> 0.75', false);
     if (metrics.Gini !== undefined) addRow('Gini', metrics.Gini.toFixed(3), '', '', true);
     if (metrics.bad_rate !== undefined) addRow('Bad Rate', (metrics.bad_rate*100).toFixed(2)+'%', '', '', false);

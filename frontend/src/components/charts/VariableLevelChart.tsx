@@ -204,7 +204,7 @@ const VariableLevelChart: React.FC<VariableLevelChartProps> = ({
         },
         scales: {
           x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor } },
-          y: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor }, min: 0 },
+          y: { ticks: { color: textColor, font: { size: 10 }, callback: (v: any) => Number(v).toFixed(4) }, grid: { color: gridColor }, min: 0 },
         },
       },
     });

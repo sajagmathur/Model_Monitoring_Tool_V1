@@ -58,7 +58,7 @@ type ChartRow = { model: BankingModel; metric: BankingMetrics };
 
 const METRIC_LABELS: Record<string, string> = {
   KS: 'KS Statistic', PSI: 'PSI', AUC: 'AUC', Gini: 'Gini',
-  bad_rate: 'Bad Rate', CA_at_10: 'CA@10', accuracy: 'Accuracy',
+  bad_rate: 'Bad Rate', MAPE: 'MAPE', accuracy: 'Accuracy',
   precision: 'Precision', recall: 'Recall', f1_score: 'F1 Score', HRL: 'Hit Rate Lift (HRL)',
 };
 

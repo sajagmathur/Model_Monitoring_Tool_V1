@@ -67,17 +67,17 @@ export const METRIC_DESCRIPTIONS: Record<string, MetricDescription> = {
     },
     higherIsBetter: false,
   },
-  CA_at_10: {
-    label: 'Capture Rate at 10%',
-    formula: 'CA@10 = Cumulative Bads in top 10% of scores / Total Bads',
+  MAPE: {
+    label: 'MAPE (Mean Absolute Percentage Error)',
+    formula: 'MAPE = (1/n) × Σ |Actual − Forecast| / |Actual| × 100%',
     overview:
-      'The percentage of all bads captured in the top 10% worst-scoring accounts. This is a business-critical metric for resource allocation — a high CA@10 means actions targeting the top risk decile will capture a large proportion of future bads.',
+      'Mean Absolute Percentage Error measures the average percentage deviation between model predictions and actual outcomes. Lower MAPE indicates better predictive accuracy. It is scale-independent and particularly useful for comparing forecast accuracy across models with different magnitudes.',
     thresholds: {
-      green: '> 0.30 — High capture efficiency',
-      amber: '0.20 – 0.30 — Moderate capture',
-      red: '< 0.20 — Low capture, operational efficiency concern',
+      green: '< 10% — Excellent forecast accuracy',
+      amber: '10% – 20% — Acceptable deviation, monitor closely',
+      red: '> 20% — High forecast error, model review required',
     },
-    higherIsBetter: true,
+    higherIsBetter: false,
   },
   accuracy: {
     label: 'Accuracy',
@@ -174,5 +174,5 @@ export const METRIC_DESCRIPTIONS: Record<string, MetricDescription> = {
 
 export const ALL_METRIC_KEYS = Object.keys(METRIC_DESCRIPTIONS);
 
-export const DEFAULT_SELECTED_METRICS = ['volume_bad_rate', 'KS', 'PSI', 'AUC', 'Gini', 'bad_rate', 'CA_at_10', 'ROB', 'ConfusionMatrix'];
+export const DEFAULT_SELECTED_METRICS = ['volume_bad_rate', 'KS', 'PSI', 'AUC', 'Gini', 'bad_rate', 'MAPE', 'ROB', 'ConfusionMatrix'];
 

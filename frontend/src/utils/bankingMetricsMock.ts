@@ -10,6 +10,9 @@ export interface BankingModel {
   name: string;
   segments?: string[];
   version?: string;
+  domain?: string;
+  populationType?: string;
+  mlCategory?: string;
 }
 
 export interface BankingMetrics {
@@ -25,7 +28,7 @@ export interface BankingMetrics {
     PSI?: number;
     AUC?: number;
     Gini?: number;
-    CA_at_10?: number;
+    MAPE?: number;
     bad_rate?: number;
     // Collections metrics
     roll_rate_30?: number;
@@ -105,6 +108,10 @@ export interface ScoreBandData {
 // Constants
 const PORTFOLIOS = ['Retail', 'Corporate', 'SME', 'Acquisition', 'ECM', 'Collections', 'Fraud'];
 const MODEL_TYPES = ['Acquisition Scorecard', 'ECM Scorecard', 'Bureau', 'Collections', 'Fraud', 'ML'];
+export const ML_CATEGORIES = ['ML-Classification', 'Non-ML-Classification', 'ML-Non-Classification', 'Non-ML-Non-Classification'] as const;
+export type MLCategory = typeof ML_CATEGORIES[number];
+export const DOMAINS = ['Retail Banking', 'Corporate Banking', 'SME Banking', 'Cards', 'Mortgages'] as const;
+export const POPULATION_TYPES = ['ECM', 'ACQ', 'Collection', 'Other'] as const;
 const VINTAGES = ['2024-01', '2024-02', '2024-03', '2024-04', '2024-05', '2024-06', '2024-07', '2024-08', '2024-09', '2024-10', '2024-11', '2024-12', '2025-01'];
 const SEGMENTS = ['thin_file', 'thick_file'] as const;
 
@@ -170,18 +177,34 @@ export function generateBankingModels(count: number = 20): BankingModel[] {
   const models: BankingModel[] = [];
   seed = 42; // Reset seed for consistency
   
-  const modelConfigs = [
-    { portfolio: 'Retail', type: 'Acquisition Scorecard', segments: SEGMENTS },
-    { portfolio: 'Retail', type: 'ECM Scorecard' },
-    { portfolio: 'Retail', type: 'ML' },
-    { portfolio: 'Corporate', type: 'Acquisition Scorecard', segments: SEGMENTS },
-    { portfolio: 'Corporate', type: 'Bureau' },
-    { portfolio: 'SME', type: 'Acquisition Scorecard', segments: SEGMENTS },
-    { portfolio: 'SME', type: 'Bureau' },
-    { portfolio: 'Collections', type: 'Collections' },
-    { portfolio: 'Fraud', type: 'Fraud' },
-    { portfolio: 'Acquisition', type: 'ML' },
-    { portfolio: 'ECM', type: 'ECM Scorecard' },
+  const modelConfigs: Array<{
+    portfolio: string;
+    type: string;
+    segments?: readonly string[];
+    domain: string;
+    populationType: string;
+    mlCategory: string;
+  }> = [
+    { portfolio: 'Retail',      type: 'Acquisition Scorecard', segments: SEGMENTS, domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Classification'     },
+    { portfolio: 'Retail',      type: 'ECM Scorecard',                              domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Classification'     },
+    { portfolio: 'Retail',      type: 'ML',                                         domain: 'Banking', populationType: 'ECM', mlCategory: 'ML-Classification'         },
+    { portfolio: 'Corporate',   type: 'Acquisition Scorecard', segments: SEGMENTS, domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Classification'     },
+    { portfolio: 'Corporate',   type: 'Bureau',                                     domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Non-Classification' },
+    { portfolio: 'SME',         type: 'Acquisition Scorecard', segments: SEGMENTS, domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Classification'     },
+    { portfolio: 'SME',         type: 'Bureau',                                     domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Non-Classification' },
+    { portfolio: 'Collections', type: 'Collections',                                domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Non-Classification' },
+    { portfolio: 'Fraud',       type: 'Fraud',                                      domain: 'Banking', populationType: 'ECM', mlCategory: 'ML-Classification'         },
+    { portfolio: 'Acquisition', type: 'ML',                                         domain: 'Banking', populationType: 'ECM', mlCategory: 'ML-Classification'         },
+    { portfolio: 'ECM',         type: 'ECM Scorecard',                              domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Classification'     },
+    { portfolio: 'Retail',      type: 'Acquisition Scorecard', segments: SEGMENTS, domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Classification'     },
+    { portfolio: 'Corporate',   type: 'ML',                                         domain: 'Banking', populationType: 'ECM', mlCategory: 'ML-Non-Classification'     },
+    { portfolio: 'SME',         type: 'ECM Scorecard',                              domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Classification'     },
+    { portfolio: 'Retail',      type: 'Bureau',                                     domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Non-Classification' },
+    { portfolio: 'Fraud',       type: 'ML',                                         domain: 'Banking', populationType: 'ECM', mlCategory: 'ML-Classification'         },
+    { portfolio: 'ECM',         type: 'Acquisition Scorecard', segments: SEGMENTS, domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Classification'     },
+    { portfolio: 'Collections', type: 'ML',                                         domain: 'Banking', populationType: 'ECM', mlCategory: 'ML-Non-Classification'     },
+    { portfolio: 'Corporate',   type: 'ECM Scorecard',                              domain: 'Banking', populationType: 'ECM', mlCategory: 'Non-ML-Classification'     },
+    { portfolio: 'SME',         type: 'ML',                                         domain: 'Banking', populationType: 'ECM', mlCategory: 'ML-Classification'         },
   ];
   
   for (let i = 0; i < Math.min(count, modelConfigs.length); i++) {
@@ -193,6 +216,9 @@ export function generateBankingModels(count: number = 20): BankingModel[] {
       model_type: config.type,
       name: `${config.type} - ${config.portfolio} ${modelNum}`,
       segments: config.segments ? [...config.segments] : undefined,
+      domain: config.domain,
+      populationType: config.populationType,
+      mlCategory: config.mlCategory,
     });
   }
   
@@ -222,7 +248,7 @@ function generateMetricsForType(modelType: string, baseKS: number = 0.4): Bankin
     metrics.PSI = Math.max(0.01, randBetween(0.02, 0.20));
     metrics.AUC = Math.max(0.60, Math.min(0.95, 0.65 + metrics.KS * 0.5 + randBetween(-0.05, 0.05)));
     metrics.Gini = metrics.AUC * 2 - 1;
-    metrics.CA_at_10 = Math.max(0.15, Math.min(0.45, metrics.KS * 0.7 + randBetween(-0.05, 0.05)));
+    metrics.MAPE = Math.max(0.15, Math.min(0.45, metrics.KS * 0.7 + randBetween(-0.05, 0.05))); // MAPE replaces CA@10
     metrics.bad_rate = Math.max(0.02, Math.min(0.15, randBetween(0.04, 0.10)));
 
     if (CLASSIFICATION_TYPES.has(modelType)) {
@@ -594,7 +620,7 @@ export function generateCompleteBankingDataset(): {
   metrics: BankingMetrics[];
 } {
   seed = 42; // Reset seed
-  const models = generateBankingModels(12);
+  const models = generateBankingModels(20);
   const allMetrics: BankingMetrics[] = [];  
   models.forEach(model => {
     const modelMetrics = generateMetricsTimeSeries(model, VINTAGES);

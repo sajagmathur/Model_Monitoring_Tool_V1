@@ -10,7 +10,7 @@ export const THICK_COLOR = '#14b8a6'; // teal
 
 interface BankingMetricsTrendChartProps {
   metrics: BankingMetrics[];
-  metricKey: 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'Gini' | 'CA_at_10' | 'volume'
+  metricKey: 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'Gini' | 'MAPE' | 'volume'
     | 'accuracy' | 'precision' | 'recall' | 'f1_score' | 'HRL' | 'change_in_KS';
   title?: string;
   height?: number;
@@ -95,7 +95,7 @@ export const BankingMetricsTrendChart: React.FC<BankingMetricsTrendChartProps> =
         case 'AUC':       return '#10b981';
         case 'bad_rate':  return '#ef4444';
         case 'Gini':      return '#8b5cf6';
-        case 'CA_at_10':  return '#06b6d4';
+        case 'MAPE':      return '#06b6d4';
         case 'volume':    return '#6366f1';
         case 'accuracy':  return '#22c55e';
         case 'precision': return '#f97316';

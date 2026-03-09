@@ -4,7 +4,7 @@ import { SegmentMetrics } from '../../utils/bankingMetricsMock';
 
 Chart.register(...registerables);
 
-type SegmentMetricKey = 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'accuracy' | 'precision' | 'recall' | 'f1_score' | 'HRL' | 'Gini' | 'CA_at_10';
+type SegmentMetricKey = 'KS' | 'PSI' | 'AUC' | 'bad_rate' | 'accuracy' | 'precision' | 'recall' | 'f1_score' | 'HRL' | 'Gini' | 'MAPE';
 
 interface SegmentComparisonChartProps {
   segmentData: SegmentMetrics;

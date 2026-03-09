@@ -83,6 +83,9 @@ export function mapRegistryModelToBankingModel(registryModel: RegistryModel): Ba
     model_type: mapModelType(registryModel.modelType),
     segments: supportsSegments ? ['thin_file', 'thick_file'] : undefined,
     version: registryModel.version,
+    domain: 'Banking',
+    populationType: 'ECM',
+    mlCategory: registryModel.modelType === 'classification' ? 'ML-Classification' : 'ML-Non-Classification',
   };
 }
 
@@ -228,14 +231,14 @@ export function generateMetricsFromRegistryModel(
         const basePrecision = registryModel.metrics?.precision || 0.82;
         const baseRecall    = registryModel.metrics?.recall    || 0.78;
         const baseF1        = registryModel.metrics?.f1_score  || 0.80;
-        const baseCA10      = registryModel.metrics?.ca_at_10  || 0.42;
+        const baseCA10      = registryModel.metrics?.ca_at_10  || 0.42;  // used for MAPE base
         const baseHRL       = registryModel.metrics?.hrl       || 0.65;
 
         metricData.accuracy   = Number(Math.max(0.50, generateMetricWithDrift(baseAccuracy,  index, aucDrift * 0.5,  0.008)).toFixed(3));
         metricData.precision  = Number(Math.max(0.40, generateMetricWithDrift(basePrecision, index, aucDrift * 0.6,  0.012)).toFixed(3));
         metricData.recall     = Number(Math.max(0.40, generateMetricWithDrift(baseRecall,    index, aucDrift * 0.4,  0.012)).toFixed(3));
         metricData.f1_score   = Number(Math.max(0.40, generateMetricWithDrift(baseF1,        index, aucDrift * 0.5,  0.010)).toFixed(3));
-        metricData.CA_at_10   = Number(Math.max(0.10, generateMetricWithDrift(baseCA10,      index, aucDrift * 0.3,  0.012)).toFixed(3));
+        metricData.MAPE       = Number(Math.max(0.10, generateMetricWithDrift(baseCA10,      index, aucDrift * 0.3,  0.012)).toFixed(3));
         metricData.HRL        = Number(Math.max(0.30, generateMetricWithDrift(baseHRL,       index, aucDrift * 0.4,  0.012)).toFixed(3));
       }
 
