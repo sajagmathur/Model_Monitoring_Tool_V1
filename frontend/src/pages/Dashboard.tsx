@@ -484,14 +484,12 @@ const Dashboard: React.FC = () => {
                                 {model.model_id}
                               </td>
                               <td className="px-3 py-2 whitespace-nowrap">
-                                <a
-                                  href={`/dashboard/model/${model.model_id}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className={`font-medium hover:underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-700 hover:text-blue-800'}`}
+                                <button
+                                  onClick={() => window.open(`/dashboard/model/${model.model_id}`, '_blank', 'noopener,noreferrer')}
+                                  className={`font-medium hover:underline text-left ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-700 hover:text-blue-800'}`}
                                 >
                                   {model.name}
-                                </a>
+                                </button>
                               </td>
                               <td className="px-3 py-2">
                                 <button
