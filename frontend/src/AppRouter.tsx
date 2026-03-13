@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
@@ -182,17 +182,10 @@ const AppRoutes: React.FC = () => {
  * Root App Component with Providers
  */
 export default function AppRouter() {
-  // Use Vite's injected BASE_URL (derived from vite.config.ts `base` option).
-  // Strip trailing slash — BrowserRouter's basename must NOT end with '/'.
-  // e.g. '/' → '' (root), '/model-monitoring-studio/' → '/model-monitoring-studio'
-  const basename = import.meta.env.BASE_URL === '/'
-    ? ''
-    : import.meta.env.BASE_URL.replace(/\/$/, '');
-  
   try {
     return (
       <ErrorBoundary>
-        <Router basename={basename}>
+        <HashRouter>
           <ThemeProvider>
             <I18nProvider>
               <AuthProvider>
@@ -204,7 +197,7 @@ export default function AppRouter() {
               </AuthProvider>
             </I18nProvider>
           </ThemeProvider>
-        </Router>
+        </HashRouter>
       </ErrorBoundary>
     );
   } catch (error) {
