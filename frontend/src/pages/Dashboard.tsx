@@ -485,7 +485,7 @@ const Dashboard: React.FC = () => {
                               </td>
                               <td className="px-3 py-2 whitespace-nowrap">
                                 <button
-                                  onClick={() => window.open(`/dashboard/model/${model.model_id}`, '_blank', 'noopener,noreferrer')}
+                                  onClick={() => window.open(`${import.meta.env.BASE_URL}dashboard/model/${model.model_id}`, '_blank', 'noopener,noreferrer')}
                                   className={`font-medium hover:underline text-left ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-700 hover:text-blue-800'}`}
                                 >
                                   {model.name}
