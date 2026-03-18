@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import { 
-  CheckCircle2, AlertCircle, ChevronRight, Upload, Plus, X, Eye, Download,
-  Shield, BarChart3, TrendingUp, CheckCircle, Database, Zap, Save, Calendar, Clock, FileText
+  CheckCircle2, AlertCircle, ChevronRight, ChevronLeft, Upload, Plus, X, Eye, Download,
+  Shield, BarChart3, TrendingUp, CheckCircle, Database, Zap, Save, Calendar, Clock, FileText,
+  FileSpreadsheet, Info, RefreshCw, FolderPlus
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlobal, IngestionJob } from '../contexts/GlobalContext';
+import type { ModelInventory } from '../contexts/GlobalContext';
+import { useNotification } from '../hooks/useNotification';
 import { Breadcrumb } from '../components/UIPatterns';
 import { DataIngestionStepComponent, DataIngestionConfig, UploadedDataset } from './DataIngestionStep';
 import { generateDataQualityPDF } from '../utils/pdfGenerator';
@@ -34,37 +38,39 @@ interface ModelVersion {
 }
 
 interface ModelMetadata {
-  // Identity Tab
+  // Identity (matches Excel template columns)
   modelId: string;
   modelName: string;
   modelVersion: string;
-  owner: string;
+  geography: string;
+  domain: string;
+  product: string;
+  modelType: string;
+  populationType: string;
+  usage: string;
+  riskTierMRR: string;
+  modelStatus: string;
   developer: string;
-  validator: string;
-  type: 'Classification' | 'Regression' | 'Time Series';
-  riskTier: 'High' | 'Medium' | 'Low';
-  status: 'Champion' | 'Challenger' | 'Benchmark';
-  domain?: string;
-
-  // Governance Tab
+  segmentVariable: string;
+  // Performance Benchmarks
+  fullPerfBenchmarkVintage: string;
+  fullPerfWindow: string;
+  fullPerfBadDef: string;
+  ew1BenchmarkVintage: string;
+  ew1Window: string;
+  ew1BadDef: string;
+  ew2BenchmarkVintage: string;
+  ew2Window: string;
+  ew2BadDef: string;
+  // Governance / Dates
   approvalDate: string;
-  reviewer: string;
-  expiryDate: string;
+  firstUseDate: string;
+  owner: string;
   lastValidationDate: string;
-  nextReviewDue: string;
-
-  // Version Tab
-  versionName: string;
-  role: 'Champion' | 'Challenger' | 'Benchmark';
-  environment: 'Development' | 'Staging' | 'Production';
-  versionStatus: 'Active' | 'Retired' | 'Archived';
-
-  // Lineage Tab
-  upstreamSources: string;
-  featurePipelines: string;
-  downstreamSystems: string;
-  dependencies: string;
-
+  nextReviewDate: string;
+  // Lineage
+  upstreamModels: string;
+  downstreamModels: string;
   // Metrics
   metrics?: { [key: string]: number };
 }
@@ -111,11 +117,690 @@ interface ModelTree {
   };
 }
 
-const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void; onModelSelect: (model: ModelVersion) => void; onAddModel: (metadata: ModelMetadata) => void }> = ({ workflow, onComplete, onModelSelect, onAddModel }) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// Bulk-Upload Excel Template Schema
+// ─────────────────────────────────────────────────────────────────────────────
+const BULK_REQUIRED_COLUMNS = [
+  'Model Name', 'Model ID', 'Geography', 'Domain', 'Product', 'Model Type',
+  'Population Type', 'Usage', 'Risk Tier/MRR', 'Model Status', 'Developer', 'Segment Variable',
+];
+const BULK_OPTIONAL_COLUMNS = [
+  'Full Performance Benchmark Vintage', 'Full Performance Window', 'Full Performance Bad Definition',
+  'Early Warning 1 Benchmark Vintage', 'Early Warning 1 Window', 'Early Warning 1 Bad Definition',
+  'Early Warning 2 Benchmark Vintage', 'Early Warning 2 Window', 'Early Warning 2 Bad Definition',
+  'Approval Date', 'First Use Date', 'Owner', 'Last Validation Date', 'Next Review Date',
+  'Upstream Models', 'Downstream Models',
+];
+
+interface BulkParsedRow { rowNum: number; data: Record<string, string>; errors: string[]; }
+interface BulkSchemaResult {
+  isValid: boolean;
+  presentRequired: string[]; missingRequired: string[];
+  presentOptional: string[];
+  unknownColumns: string[];
+  headers: string[];
+  rows: BulkParsedRow[];
+  rowErrors: number;
+}
+
+const mapBulkModelType = (t: string): 'classification' | 'regression' | 'clustering' | 'nlp' | 'custom' => {
+  const l = t.toLowerCase();
+  if (l.includes('classif') || l.includes('scorecard') || l.includes('logistic')) return 'classification';
+  if (l.includes('regress') || l.includes('linear')) return 'regression';
+  if (l.includes('clust')) return 'clustering';
+  if (l.includes('nlp') || l.includes('text')) return 'nlp';
+  return 'custom';
+};
+const mapBulkRiskTier = (t: string): 'dev' | 'staging' | 'production' => {
+  const l = t.toLowerCase();
+  if (l === 'high') return 'production';
+  if (l === 'medium') return 'staging';
+  return 'dev';
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BulkModelUploadStep Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Walks the Geography › Domain › Product › Model Type › Model ID › Model Version
+ * hierarchy and finds-or-creates each node, returning the deepest node's ID.
+ */
+/**
+ * Walks the Geography › Domain › Product › Model Type › Model ID › Model Version
+ * hierarchy and finds-or-creates each node, returning the deepest node's ID.
+ *
+ * IMPORTANT: pass a mutable working-copy of the inventories array so that nodes
+ * created during the same synchronous call batch are visible to subsequent calls
+ * (prevents duplicates when multiple models share the same folder hierarchy).
+ */
+function findOrCreateInventoryPath(
+  segments: { geo: string; domain: string; product: string; modelType: string; modelId: string; modelVersion: string },
+  inventories: ModelInventory[] | null | undefined,
+  createInv: ((inv: Omit<ModelInventory, 'id' | 'createdAt'>) => ModelInventory) | null | undefined
+): string {
+  if (!inventories || !createInv) {
+    console.warn('findOrCreateInventoryPath called with missing parameters');
+    return '';
+  }
+
+  const levels = [
+    { type: 'geography' as const,    value: segments.geo.trim() },
+    { type: 'domain' as const,       value: segments.domain.trim() },
+    { type: 'product' as const,      value: segments.product.trim() },
+    { type: 'modelType' as const,    value: segments.modelType.trim() },
+    { type: 'modelId' as const,      value: segments.modelId.trim() },
+    { type: 'modelVersion' as const, value: segments.modelVersion.trim() },
+  ].filter(l => l.value);
+
+  let parentId: string | undefined;
+  let lastId = '';
+  for (const level of levels) {
+    const existing = inventories.find(
+      inv => inv.name === level.value && (inv.type as string) === level.type && inv.parentId === parentId
+    );
+    if (existing) {
+      lastId = existing.id;
+    } else {
+      const newInv = createInv({ name: level.value, type: level.type, parentId });
+      // Push into the working array so subsequent iterations see what was just created
+      inventories.push(newInv);
+      lastId = newInv.id;
+    }
+    parentId = lastId;
+  }
+  return lastId;
+}
+const BulkModelUploadStep: React.FC<{
+  projectId: string;
+  onBulkAddModels: (models: ModelVersion[]) => void;
+  onModelSelect: (model: ModelVersion) => void;
+  onComplete: () => void;
+  onBack: () => void;
+}> = ({ projectId, onBulkAddModels, onModelSelect, onComplete, onBack }) => {
   const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const { createRegistryModel, updateRegistryModel, modelInventories, createModelInventory } = useGlobal();
+  const { showNotification } = useNotification();
+
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [validationResult, setValidationResult] = useState<BulkSchemaResult | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [uploadedModels, setUploadedModels] = useState<ModelVersion[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState('');
+  const [uploadStage, setUploadStage] = useState<'idle' | 'validated' | 'assigning' | 'uploaded'>('idle');
+  const [showPreview, setShowPreview] = useState(false);
+  // Inventory assignment state (per-model)
+  const [uploadedRowData, setUploadedRowData] = useState<Record<string, Record<string, string>>>({});
+  const [bulkInvMode, setBulkInvMode] = useState<Record<string, 'suggested' | 'existing' | 'skip'>>({});
+  const [bulkExistingInv, setBulkExistingInv] = useState<Record<string, string>>({});
+
+  const parseAndValidate = async (file: File) => {
+    setValidating(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
+
+      if (rawData.length < 2) {
+        setValidationResult({
+          isValid: false, presentRequired: [], missingRequired: [...BULK_REQUIRED_COLUMNS],
+          presentOptional: [], unknownColumns: [], headers: [], rows: [], rowErrors: 0,
+        });
+        setValidating(false);
+        return;
+      }
+
+      const headers: string[] = (rawData[0] as any[]).map((h: any) => String(h ?? '').trim());
+      const presentRequired = BULK_REQUIRED_COLUMNS.filter(c => headers.includes(c));
+      const missingRequired = BULK_REQUIRED_COLUMNS.filter(c => !headers.includes(c));
+      const presentOptional = BULK_OPTIONAL_COLUMNS.filter(c => headers.includes(c));
+      const allKnown = new Set([...BULK_REQUIRED_COLUMNS, ...BULK_OPTIONAL_COLUMNS]);
+      const unknownColumns = headers.filter(h => h && !allKnown.has(h));
+
+      const rows: BulkParsedRow[] = [];
+      for (let i = 1; i < rawData.length; i++) {
+        const rowArr = rawData[i] as any[];
+        if (rowArr.every((v: any) => v === '' || v == null)) continue;
+        const data: Record<string, string> = {};
+        headers.forEach((col, idx) => { data[col] = String(rowArr[idx] ?? '').trim(); });
+        const errors: string[] = [];
+        BULK_REQUIRED_COLUMNS.forEach(col => {
+          if (headers.includes(col) && !data[col]) errors.push(`"${col}" is empty`);
+        });
+        rows.push({ rowNum: i + 1, data, errors });
+      }
+
+      const rowErrors = rows.filter(r => r.errors.length > 0).length;
+      setValidationResult({
+        isValid: missingRequired.length === 0 && rowErrors === 0,
+        presentRequired, missingRequired, presentOptional, unknownColumns,
+        headers, rows, rowErrors,
+      });
+      setUploadStage('validated');
+    } catch (err) {
+      console.error('Bulk Excel parse error:', err);
+      setValidationResult(null);
+    }
+    setValidating(false);
+  };
+
+  const handleFileChange = (file: File) => {
+    setUploadedFile(file);
+    setValidationResult(null);
+    setUploadStage('idle');
+    setUploadedModels([]);
+    setSelectedModelId('');
+    parseAndValidate(file);
+  };
+
+  const handleUpload = () => {
+    if (!validationResult?.isValid) return;
+    const newModels: ModelVersion[] = [];
+    const rowMap: Record<string, Record<string, string>> = {};
+
+    validationResult.rows.forEach((row) => {
+      const d = row.data;
+      // Create registry model (returns model with its generated ID)
+      const regModel = createRegistryModel({
+        name: d['Model Name'],
+        model_id: d['Model ID'] || undefined,
+        version: 'v1',
+        projectId,
+        modelType: mapBulkModelType(d['Model Type'] || ''),
+        stage: mapBulkRiskTier(d['Risk Tier/MRR'] || ''),
+        status: 'active',
+        domain: d['Domain'] || undefined,
+        bulkImported: true,
+        bulkMetadata: {
+          geography: d['Geography'] || '',
+          product: d['Product'] || '',
+          populationType: d['Population Type'] || '',
+          usage: d['Usage'] || '',
+          segmentVariable: d['Segment Variable'] || '',
+          developer: d['Developer'] || '',
+          owner: d['Owner'] || '',
+          riskTier: d['Risk Tier/MRR'] || '',
+          modelStatus: d['Model Status'] || '',
+          fullPerfBenchmarkVintage: d['Full Performance Benchmark Vintage'] || '',
+          fullPerfWindow: d['Full Performance Window'] || '',
+          fullPerfBadDef: d['Full Performance Bad Definition'] || '',
+          ew1BenchmarkVintage: d['Early Warning 1 Benchmark Vintage'] || '',
+          ew1Window: d['Early Warning 1 Window'] || '',
+          ew1BadDef: d['Early Warning 1 Bad Definition'] || '',
+          ew2BenchmarkVintage: d['Early Warning 2 Benchmark Vintage'] || '',
+          ew2Window: d['Early Warning 2 Window'] || '',
+          ew2BadDef: d['Early Warning 2 Bad Definition'] || '',
+          approvalDate: d['Approval Date'] || '',
+          firstUseDate: d['First Use Date'] || '',
+          lastValidationDate: d['Last Validation Date'] || '',
+          nextReviewDate: d['Next Review Date'] || '',
+          upstreamModels: d['Upstream Models'] || '',
+          downstreamModels: d['Downstream Models'] || '',
+        },
+      });
+
+      rowMap[regModel.id] = d;
+
+      // Use the registry model's ID so DataIngestion can find it
+      newModels.push({
+        id: regModel.id,
+        name: d['Model Name'],
+        type: d['Model Type'] || 'Classification',
+        tier: d['Risk Tier/MRR'] || 'Medium',
+        status: d['Model Status'] || 'Active',
+        version: 'v1',
+        environment: 'Development',
+        owner: d['Owner'] || '',
+        lastValidation: d['Last Validation Date'] || '',
+        nextReview: d['Next Review Date'] || '',
+      });
+    });
+
+    setUploadedModels(newModels);
+    setSelectedModelId(newModels[0]?.id || '');
+    setUploadedRowData(rowMap);
+
+    // Init inventory assignment modes — default to 'suggested' for all
+    const modeInit: Record<string, 'suggested' | 'existing' | 'skip'> = {};
+    newModels.forEach(m => { modeInit[m.id] = 'suggested'; });
+    setBulkInvMode(modeInit);
+    setBulkExistingInv({});
+
+    setUploadStage('assigning');
+    showNotification(`✓ ${newModels.length} model(s) loaded — review inventory paths below.`, 'success', 5000);
+  };
+
+  const handleAssignAndContinue = () => {
+    if (!createModelInventory) {
+      showNotification('Error: Context not initialized. Please refresh and try again.', 'error');
+      return;
+    }
+
+    // Use a mutable working copy of inventories so that nodes created for the first
+    // model are visible when processing the second, third, etc. — prevents duplicates.
+    const workingInventories = [...modelInventories];
+
+    // Assign inventories to each model based on user selections
+    uploadedModels.forEach(m => {
+      const mode = bulkInvMode[m.id] || 'suggested';
+      if (mode === 'skip') return;
+      const row = uploadedRowData[m.id] || {};
+      let invId = '';
+      if (mode === 'suggested') {
+        const segs = {
+          geo: row['Geography'] || '',
+          domain: row['Domain'] || '',
+          product: row['Product'] || '',
+          modelType: row['Model Type'] || '',
+          modelId: row['Model ID'] || '',
+          modelVersion: String(row['Model Version'] || 'v1'),
+        };
+        if (Object.values(segs).some(v => v.trim())) {
+          invId = findOrCreateInventoryPath(segs, workingInventories, createModelInventory);
+        }
+      } else if (mode === 'existing') {
+        invId = bulkExistingInv[m.id] || '';
+      }
+      if (invId) {
+        updateRegistryModel(m.id, { inventoryId: invId });
+      }
+    });
+
+    onBulkAddModels(uploadedModels);
+    setUploadStage('uploaded');
+    showNotification(
+      `✓ ${uploadedModels.length} model(s) imported with inventory assignments!`,
+      'success',
+      8000
+    );
+  };
+
+  const handleContinue = () => {
+    const selected = uploadedModels.find(m => m.id === selectedModelId);
+    if (!selected) {
+      showNotification('Please select a model to continue the workflow.', 'warning');
+      return;
+    }
+    onModelSelect(selected);
+    onComplete();
+  };
+
+  const inputClass = `w-full px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onBack}
+          className={`p-2 rounded-lg transition ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}
+          title="Back to upload mode selection"
+        >
+          <ChevronLeft size={18} />
+        </button>
+        <div>
+          <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Bulk Model Upload</h3>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+            Upload an Excel template to import multiple models at once
+          </p>
+        </div>
+      </div>
+
+      {/* Template format info */}
+      <div className={`p-4 rounded-lg border ${isDark ? 'bg-blue-500/10 border-blue-500/30' : 'bg-blue-50 border-blue-200'}`}>
+        <div className="flex items-start gap-2 mb-2">
+          <Info size={16} className={`mt-0.5 flex-shrink-0 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
+          <p className={`text-sm font-medium ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>Required Excel Template Columns</p>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {BULK_REQUIRED_COLUMNS.map(col => (
+            <span key={col} className={`text-xs px-2 py-0.5 rounded font-medium ${isDark ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-100 text-blue-700'}`}>
+              {col}
+            </span>
+          ))}
+        </div>
+        <p className={`text-xs mt-2 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+          Schema DQ validation runs automatically on upload. Optional columns (performance windows, dates, lineage) are also supported.
+        </p>
+      </div>
+
+      {/* File Upload */}
+      <label className={`cursor-pointer flex flex-col items-center justify-center gap-3 py-10 rounded-lg border-2 border-dashed transition ${
+        uploadedFile
+          ? isDark ? 'border-green-600 bg-green-900/10' : 'border-green-400 bg-green-50'
+          : isDark ? 'border-slate-600 hover:border-slate-500 hover:bg-slate-800/50' : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'
+      }`}>
+        {uploadedFile ? (
+          <>
+            <FileSpreadsheet size={32} className="text-green-500" />
+            <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>{uploadedFile.name}</p>
+            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Click to replace</p>
+          </>
+        ) : (
+          <>
+            <Upload size={32} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
+            <p className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Upload Excel Template (.xlsx, .xls)</p>
+            <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Schema DQ validation runs automatically</p>
+          </>
+        )}
+        <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFileChange(f); }} />
+      </label>
+
+      {/* Validating spinner */}
+      {validating && (
+        <div className={`flex items-center gap-3 p-4 rounded-lg border ${isDark ? 'bg-blue-500/10 border-blue-500/30' : 'bg-blue-50 border-blue-200'}`}>
+          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500 flex-shrink-0" />
+          <p className={`text-sm ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Running schema DQ validation…</p>
+        </div>
+      )}
+
+      {/* Validation Results */}
+      {validationResult && !validating && (
+        <div className={`rounded-lg border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+          {/* Result header */}
+          <div className={`p-4 flex items-center justify-between ${
+            validationResult.isValid
+              ? isDark ? 'bg-green-900/20' : 'bg-green-50'
+              : isDark ? 'bg-red-900/20' : 'bg-red-50'
+          }`}>
+            <div className="flex items-center gap-3">
+              {validationResult.isValid
+                ? <CheckCircle2 size={20} className="text-green-500" />
+                : <AlertCircle size={20} className="text-red-500" />}
+              <div>
+                <p className={`text-sm font-semibold ${validationResult.isValid ? (isDark ? 'text-green-300' : 'text-green-800') : (isDark ? 'text-red-300' : 'text-red-800')}`}>
+                  {validationResult.isValid ? 'Schema Valid — Ready to Import' : 'Schema Validation Failed'}
+                </p>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {validationResult.rows.length} data row(s) detected
+                  {validationResult.rowErrors > 0 && ` · ${validationResult.rowErrors} row(s) have errors`}
+                </p>
+              </div>
+            </div>
+            {validationResult.rows.length > 0 && (
+              <button
+                onClick={() => setShowPreview(!showPreview)}
+                className={`text-xs px-3 py-1.5 rounded border transition ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+              >
+                {showPreview ? 'Hide' : 'Preview'} Data
+              </button>
+            )}
+          </div>
+
+          {/* Column check grid */}
+          <div className="p-4">
+            <p className={`text-xs font-semibold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              Required Columns ({validationResult.presentRequired.length}/{BULK_REQUIRED_COLUMNS.length})
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5 mb-4">
+              {BULK_REQUIRED_COLUMNS.map(col => {
+                const ok = validationResult.presentRequired.includes(col);
+                return (
+                  <div key={col} className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-xs ${ok ? (isDark ? 'bg-green-900/20 text-green-300' : 'bg-green-50 text-green-700') : (isDark ? 'bg-red-900/20 text-red-300' : 'bg-red-50 text-red-700')}`}>
+                    {ok ? <CheckCircle2 size={11} /> : <X size={11} />}
+                    <span className="truncate">{col}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {validationResult.presentOptional.length > 0 && (
+              <div className="mb-3">
+                <p className={`text-xs font-semibold mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  Optional Columns Detected ({validationResult.presentOptional.length})
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {validationResult.presentOptional.map(col => (
+                    <span key={col} className={`text-xs px-2 py-0.5 rounded ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>{col}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {validationResult.rowErrors > 0 && (
+              <div>
+                <p className={`text-xs font-semibold mb-1.5 ${isDark ? 'text-red-300' : 'text-red-700'}`}>
+                  Row Errors ({validationResult.rowErrors})
+                </p>
+                <div className="space-y-1 max-h-28 overflow-y-auto">
+                  {validationResult.rows.filter(r => r.errors.length > 0).map(r => (
+                    <div key={r.rowNum} className={`text-xs p-2 rounded ${isDark ? 'bg-red-900/20 text-red-300' : 'bg-red-50 text-red-700'}`}>
+                      Row {r.rowNum}: {r.errors.join('; ')}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Preview table */}
+          {showPreview && validationResult.rows.length > 0 && (
+            <div className={`border-t overflow-x-auto max-h-52 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className={isDark ? 'bg-slate-800' : 'bg-slate-50'}>
+                    <th className={`sticky left-0 px-3 py-2 text-left font-semibold ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>#</th>
+                    {validationResult.presentRequired.map(col => (
+                      <th key={col} className="px-3 py-2 text-left font-semibold whitespace-nowrap">{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {validationResult.rows.slice(0, 8).map(row => (
+                    <tr key={row.rowNum} className={`border-t ${row.errors.length > 0 ? (isDark ? 'bg-red-900/10 border-slate-700' : 'bg-red-50 border-slate-200') : (isDark ? 'border-slate-700' : 'border-slate-200')}`}>
+                      <td className={`sticky left-0 px-3 py-2 font-medium ${isDark ? 'bg-slate-800 text-slate-400' : 'bg-white text-slate-500'}`}>{row.rowNum}</td>
+                      {validationResult.presentRequired.map(col => (
+                        <td key={col} className={`px-3 py-2 whitespace-nowrap ${!row.data[col] ? (isDark ? 'text-red-400 italic' : 'text-red-600 italic') : (isDark ? 'text-slate-300' : 'text-slate-700')}`}>
+                          {row.data[col] || '—'}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {validationResult.rows.length > 8 && (
+                    <tr><td colSpan={validationResult.presentRequired.length + 1} className={`px-3 py-2 text-center italic text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>… {validationResult.rows.length - 8} more row(s)</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Import button */}
+      {validationResult && !validating && uploadStage === 'validated' && (
+        <button
+          onClick={handleUpload}
+          disabled={!validationResult.isValid}
+          className={`w-full py-3 rounded-lg flex items-center justify-center gap-2 font-medium transition ${
+            validationResult.isValid
+              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+              : isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+          }`}
+        >
+          <Upload size={18} />
+          Import {validationResult.rows.length} Model(s)
+        </button>
+      )}
+
+      {/* Inventory assignment stage */}
+      {uploadStage === 'assigning' && uploadedModels.length > 0 && (
+        <div className="space-y-4">
+          <div className={`flex items-center justify-between p-4 rounded-lg ${isDark ? 'bg-blue-900/20 border border-blue-500/30' : 'bg-blue-50 border border-blue-200'}`}>
+            <div>
+              <p className={`font-semibold text-sm ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>
+                Assign Inventory Folders — {uploadedModels.length} model(s)
+              </p>
+              <p className={`text-xs mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-700'}`}>
+                Review the suggested folder path for each model. Accept, pick an existing folder, or skip.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                const all: Record<string, 'suggested' | 'existing' | 'skip'> = {};
+                uploadedModels.forEach(m => { all[m.id] = 'suggested'; });
+                setBulkInvMode(all);
+              }}
+              className={`text-xs px-3 py-1.5 rounded border flex-shrink-0 transition ${isDark ? 'border-blue-500 text-blue-300 hover:bg-blue-900/30' : 'border-blue-400 text-blue-700 hover:bg-blue-100'}`}
+            >
+              ✓ Accept All
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {uploadedModels.map(m => {
+              const row = uploadedRowData[m.id] || {};
+              const mode = bulkInvMode[m.id] || 'suggested';
+              const pathParts = [row['Geography'], row['Domain'], row['Product'], row['Model Type'], row['Model ID'], 'v1'].filter(Boolean);
+              return (
+                <div key={m.id} className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <p className={`text-sm font-medium truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{m.name}</p>
+                    {/* Mode toggle */}
+                    <div className={`flex text-xs rounded-lg overflow-hidden border flex-shrink-0 ${isDark ? 'border-slate-600' : 'border-slate-300'}`}>
+                      {(['suggested', 'existing', 'skip'] as const).map(v => (
+                        <button
+                          key={v}
+                          onClick={() => setBulkInvMode(prev => ({ ...prev, [m.id]: v }))}
+                          className={`px-2.5 py-1 transition ${mode === v
+                            ? isDark ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                            : isDark ? 'bg-slate-700 text-slate-400 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {v === 'suggested' ? '📂 Suggested' : v === 'existing' ? '📋 Existing' : '⊘ Skip'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {mode === 'suggested' && (
+                    pathParts.length > 0 ? (
+                      <div className={`flex flex-wrap items-center gap-1.5 p-2.5 rounded ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+                        {pathParts.map((seg, i) => (
+                          <React.Fragment key={i}>
+                            {i > 0 && <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>›</span>}
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${isDark ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>{seg}</span>
+                          </React.Fragment>
+                        ))}
+                        <span className={`ml-auto text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Missing folders will be created automatically</span>
+                      </div>
+                    ) : (
+                      <p className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No path data in this row — fill Geography/Domain/Product in the Excel file.</p>
+                    )
+                  )}
+
+                  {mode === 'existing' && (
+                    <select
+                      value={bulkExistingInv[m.id] || ''}
+                      onChange={e => setBulkExistingInv(prev => ({ ...prev, [m.id]: e.target.value }))}
+                      className={`w-full px-2 py-1.5 rounded border text-xs ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                    >
+                      <option value="">-- Select existing folder --</option>
+                      {modelInventories.map(inv => (
+                        <option key={inv.id} value={inv.id}>
+                          {inv.type ? inv.type.charAt(0).toUpperCase() + inv.type.slice(1) : ''}: {inv.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {mode === 'skip' && (
+                    <p className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>This model will not be assigned to any inventory folder. You can assign it later from Model Repository.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={handleAssignAndContinue}
+            className="w-full py-3 rounded-lg flex items-center justify-center gap-2 font-medium bg-blue-600 hover:bg-blue-700 text-white transition"
+          >
+            <CheckCircle2 size={18} />
+            Confirm Assignments & Continue
+          </button>
+        </div>
+      )}
+
+      {/* Post-upload: success + model selector */}
+      {uploadStage === 'uploaded' && uploadedModels.length > 0 && (
+        <div className={`p-6 rounded-lg border space-y-5 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          {/* Success banner */}
+          <div className={`flex items-start gap-3 p-4 rounded-lg ${isDark ? 'bg-green-900/20 border border-green-500/30' : 'bg-green-50 border border-green-200'}`}>
+            <CheckCircle2 size={20} className="text-green-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className={`font-semibold text-sm ${isDark ? 'text-green-300' : 'text-green-800'}`}>
+                {uploadedModels.length} model(s) imported successfully!
+              </p>
+              <p className={`text-xs mt-1 ${isDark ? 'text-green-400' : 'text-green-700'}`}>
+                Navigate to <strong>Model Repository</strong> in the left navigation to upload{' '}
+                <code className="bg-black/10 px-1 rounded">model.pkl</code> and{' '}
+                <code className="bg-black/10 px-1 rounded">metrics.json</code> files for each model.
+              </p>
+            </div>
+          </div>
+
+          {/* Model selection */}
+          <div>
+            <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              Select a model to continue the workflow
+            </label>
+            <select
+              value={selectedModelId}
+              onChange={e => setSelectedModelId(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">-- Select a model --</option>
+              {uploadedModels.map(m => (
+                <option key={m.id} value={m.id}>{m.name} (v{m.version})</option>
+              ))}
+            </select>
+            <p className={`text-xs mt-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              The selected model will be used for the Data Ingestion and reporting steps.
+            </p>
+          </div>
+
+          <button
+            onClick={handleContinue}
+            disabled={!selectedModelId}
+            className={`w-full py-3 rounded-lg flex items-center justify-center gap-2 font-medium transition ${
+              selectedModelId
+                ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                : isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+            }`}
+          >
+            <ChevronRight size={18} />
+            Continue Workflow with Selected Model
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ModelRepositoryStep Component (Single and Bulk entry point)
+// ─────────────────────────────────────────────────────────────────────────────
+const ModelRepositoryStep: React.FC<{
+  workflow: Workflow;
+  onComplete: () => void;
+  onModelSelect: (model: ModelVersion) => void;
+  onAddModel: (metadata: ModelMetadata) => void;
+  onBulkAddModels: (models: ModelVersion[]) => void;
+  projectId: string;
+}> = ({ workflow, onComplete, onModelSelect, onAddModel, onBulkAddModels, projectId }) => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const { modelInventories = [], createModelInventory, registryModels } = useGlobal();
+
+  // 'null' = show choice screen, 'single' = manual upload, 'bulk' = BulkModelUploadStep, 'existing' = pick from registry
+  const [uploadMode, setUploadMode] = useState<'single' | 'bulk' | 'existing' | null>(null);
+  const [existingSearch, setExistingSearch] = useState('');
+  const [existingSelected, setExistingSelected] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ModelVersion | null>(null);
-  const [activeTab, setActiveTab] = useState<'identity' | 'governance' | 'version' | 'lineage'>('identity');
+  const [activeTab, setActiveTab] = useState<'identity' | 'governance' | 'performance' | 'lineage'>('identity');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [modelFileFormat, setModelFileFormat] = useState<'PMML' | 'ONNX' | 'Pickle' | 'JSON'>('PMML');
   const [appendToExisting, setAppendToExisting] = useState(false);
@@ -124,30 +809,23 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
   const [metricsFile, setMetricsFile] = useState<File | null>(null);
   const [metrics, setMetrics] = useState<{ [key: string]: number }>({});
   const [metadata, setMetadata] = useState<ModelMetadata>({
-    modelId: '',
-    modelName: '',
-    modelVersion: 'v1',
-    owner: '',
-    developer: '',
-    validator: '',
-    type: 'Classification',
-    riskTier: 'Medium',
-    status: 'Challenger',
-    domain: '',
-    approvalDate: '',
-    reviewer: '',
-    expiryDate: '',
-    lastValidationDate: '',
-    nextReviewDue: '',
-    versionName: 'v1',
-    role: 'Challenger',
-    environment: 'Development',
-    versionStatus: 'Active',
-    upstreamSources: '',
-    featurePipelines: '',
-    downstreamSystems: '',
-    dependencies: '',
+    modelId: '', modelName: '', modelVersion: 'v1',
+    geography: '', domain: '', product: '', modelType: '', populationType: '', usage: '',
+    riskTierMRR: '', modelStatus: '', developer: '', segmentVariable: '',
+    fullPerfBenchmarkVintage: '', fullPerfWindow: '', fullPerfBadDef: '',
+    ew1BenchmarkVintage: '', ew1Window: '', ew1BadDef: '',
+    ew2BenchmarkVintage: '', ew2Window: '', ew2BadDef: '',
+    approvalDate: '', firstUseDate: '', owner: '',
+    lastValidationDate: '', nextReviewDate: '',
+    upstreamModels: '', downstreamModels: '',
   });
+  // ── Metadata upload mode state ────────────────────────────────────────────
+  const [metaUploadMode, setMetaUploadMode] = useState<'none' | 'excel' | 'word'>('none');
+  const [llmStage, setLlmStage] = useState(0);
+  const [llmDone, setLlmDone] = useState(false);
+  // ── Inventory assignment state ────────────────────────────────────────────
+  const [invMode, setInvMode] = useState<'suggested' | 'existing'>('suggested');
+  const [assignInvId, setAssignInvId] = useState('');
 
   const handleMetricsFileUpload = async (file: File) => {
     try {
@@ -163,72 +841,97 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
 
   const handleMetadataFileUpload = async (file: File) => {
     try {
-      const text = await file.text();
-      
-      // Try parsing as JSON first, if it fails treat as Excel
       let data: any = {};
       if (file.name.endsWith('.json')) {
+        const text = await file.text();
         data = JSON.parse(text);
+      } else if (file.name.match(/\.xlsx?$|\.csv$/i)) {
+        // Parse Excel/CSV using XLSX
+        try {
+          const buf = await file.arrayBuffer();
+          const wb = XLSX.read(buf, { type: 'array' });
+          
+          if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) {
+            alert('Error: Excel file appears to be empty or invalid.');
+            return;
+          }
+          
+          const firstSheetName = wb.SheetNames[0];
+          const ws = wb.Sheets[firstSheetName];
+          
+          if (!ws) {
+            alert('Error: Could not read worksheet from Excel file.');
+            return;
+          }
+          
+          const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+          if (rows.length === 0) {
+            alert('Error: Excel sheet has no data rows.');
+            return;
+          }
+          
+          // Single-row sheet: use the first data row
+          const r = rows[0];
+          if (typeof r !== 'object' || r === null) {
+            alert('Error: Could not parse Excel data.');
+            return;
+          }
+          
+          data = {
+            modelId: String(r['Model ID'] || r.modelId || '').trim(),
+            modelName: String(r['Model Name'] || r.modelName || '').trim(),
+            modelVersion: String(r['Model Version'] || r.modelVersion || 'v1').trim(),
+            geography: String(r['Geography'] || '').trim(),
+            domain: String(r['Domain'] || '').trim(),
+            product: String(r['Product'] || '').trim(),
+            modelType: String(r['Model Type'] || '').trim(),
+            populationType: String(r['Population Type'] || '').trim(),
+            usage: String(r['Usage'] || '').trim(),
+            riskTierMRR: String(r['Risk Tier/MRR'] || '').trim(),
+            modelStatus: String(r['Model Status'] || '').trim(),
+            developer: String(r['Developer'] || '').trim(),
+            segmentVariable: String(r['Segment Variable'] || '').trim(),
+            fullPerfBenchmarkVintage: String(r['Full Performance Benchmark Vintage'] || '').trim(),
+            fullPerfWindow: String(r['Full Performance Window'] || '').trim(),
+            fullPerfBadDef: String(r['Full Performance Bad Definition'] || '').trim(),
+            ew1BenchmarkVintage: String(r['Early Warning 1 Benchmark Vintage'] || '').trim(),
+            ew1Window: String(r['Early Warning 1 Window'] || '').trim(),
+            ew1BadDef: String(r['Early Warning 1 Bad Definition'] || '').trim(),
+            ew2BenchmarkVintage: String(r['Early Warning 2 Benchmark Vintage'] || '').trim(),
+            ew2Window: String(r['Early Warning 2 Window'] || '').trim(),
+            ew2BadDef: String(r['Early Warning 2 Bad Definition'] || '').trim(),
+            approvalDate: String(r['Approval Date'] || '').trim(),
+            firstUseDate: String(r['First Use Date'] || '').trim(),
+            owner: String(r['Owner'] || '').trim(),
+            lastValidationDate: String(r['Last Validation Date'] || '').trim(),
+            nextReviewDate: String(r['Next Review Date'] || '').trim(),
+            upstreamModels: String(r['Upstream Models'] || '').trim(),
+            downstreamModels: String(r['Downstream Models'] || '').trim(),
+          };
+        } catch (xlsxError) {
+          console.error('XLSX parsing error:', xlsxError);
+          alert(`Failed to parse Excel file: ${xlsxError instanceof Error ? xlsxError.message : 'Unknown error'}`);
+          return;
+        }
       } else {
-        // For Excel and other formats, generate dummy data
-        data = generateDummyMetadata();
+        alert('Unsupported file format. Please use JSON, CSV, or Excel file.');
+        return;
       }
-      
-      // Auto-fill metadata from file or use dummy data
-      setMetadata({
-        modelId: data.modelId || `MODEL-${Date.now().toString().slice(-6)}`,
-        modelName: data.modelName || data.name || `Model v${Date.now().toString().slice(-3)}`,
-        modelVersion: data.modelVersion || data.version || 'v1',
-        owner: data.owner || 'Risk Analytics Team',
-        developer: data.developer || 'Data Science Team',
-        validator: data.validator || 'Model Governance',
-        type: data.type || 'Classification',
-        riskTier: data.riskTier || 'Medium',
-        status: data.status || 'Challenger',
-        approvalDate: data.approvalDate || new Date().toISOString().split('T')[0],
-        reviewer: data.reviewer || 'Model Review Board',
-        expiryDate: data.expiryDate || new Date(Date.now() + 365*24*60*60*1000).toISOString().split('T')[0],
-        lastValidationDate: data.lastValidationDate || new Date().toISOString().split('T')[0],
-        nextReviewDue: data.nextReviewDue || new Date(Date.now() + 90*24*60*60*1000).toISOString().split('T')[0],
-        versionName: data.versionName || data.modelVersion || 'v1',
-        role: data.role || data.status || 'Challenger',
-        environment: data.environment || 'Development',
-        versionStatus: data.versionStatus || 'Active',
-        upstreamSources: data.upstreamSources || 'Customer Master DB, Transaction History DB, Account Database',
-        featurePipelines: data.featurePipelines || 'Apache Spark ETL Pipeline, dbt Feature Transformations, Python Feature Engineering',
-        downstreamSystems: data.downstreamSystems || 'Credit Decisioning Engine, Lending Platform API, Risk Dashboard',
-        dependencies: data.dependencies || 'Python 3.9+, scikit-learn 1.0, scikit-learn 1.0, pandas 1.3+, numpy 1.20+',
-      });
+
+      if (!data || Object.keys(data).length === 0) {
+        alert('Could not extract data from file.');
+        return;
+      }
+
+      setMetadata(prev => ({
+        ...prev,
+        ...(data as Partial<ModelMetadata>),
+      }));
       setMetadataFile(file);
-      alert(`✓ Metadata loaded from ${file.name}\nFields auto-filled with data.`);
+      alert(`✓ Metadata loaded from ${file.name} — fields auto-filled.`);
     } catch (error) {
-      alert('Failed to parse metadata file. Using placeholder data instead.');
-      // Fallback to dummy data
-      setMetadata({
-        modelId: `MODEL-${Date.now().toString().slice(-6)}`,
-        modelName: 'Default Model',
-        modelVersion: 'v1',
-        owner: 'Risk Analytics Team',
-        developer: 'Data Science Team',
-        validator: 'Model Governance',
-        type: 'Classification',
-        riskTier: 'Medium',
-        status: 'Challenger',
-        approvalDate: new Date().toISOString().split('T')[0],
-        reviewer: 'Model Review Board',
-        expiryDate: new Date(Date.now() + 365*24*60*60*1000).toISOString().split('T')[0],
-        lastValidationDate: new Date().toISOString().split('T')[0],
-        nextReviewDue: new Date(Date.now() + 90*24*60*60*1000).toISOString().split('T')[0],
-        versionName: 'v1',
-        role: 'Challenger',
-        environment: 'Development',
-        versionStatus: 'Active',
-        upstreamSources: 'Customer Master DB, Transaction History DB, Account Database',
-        featurePipelines: 'Apache Spark ETL Pipeline, dbt Feature Transformations',
-        downstreamSystems: 'Credit Decisioning Engine, Lending Platform API',
-        dependencies: 'Python 3.9+, scikit-learn 1.0, pandas 1.3+, numpy 1.20+',
-      });
-      setMetadataFile(file);
+      console.error('Metadata upload error:', error);
+      alert(`Failed to process metadata file: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -264,10 +967,7 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
   };
 
   const handleSaveModel = () => {
-    if (!uploadedFile) {
-      alert('Please upload a model file (PMML/ONNX/Pickle/JSON)');
-      return;
-    }
+    // pkl/model file is optional — can be uploaded later in Model Repository
 
     // Check if adding version to existing model
     if (appendToExisting && appendToModelId) {
@@ -315,36 +1015,28 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
           type: uploadedFile.type,
         } : undefined,
         modelFileFormat,
+        inventoryId: assignInvId || undefined,
       };
       onAddModel(metadataWithMetrics);
     }
 
     // Reset form
     setMetadata({
-      modelId: '',
-      modelName: '',
-      modelVersion: 'v1',
-      owner: '',
-      developer: '',
-      validator: '',
-      type: 'Classification',
-      riskTier: 'Medium',
-      status: 'Challenger',
-      domain: '',
-      approvalDate: '',
-      reviewer: '',
-      expiryDate: '',
-      lastValidationDate: '',
-      nextReviewDue: '',
-      versionName: 'v1',
-      role: 'Challenger',
-      environment: 'Development',
-      versionStatus: 'Active',
-      upstreamSources: '',
-      featurePipelines: '',
-      downstreamSystems: '',
-      dependencies: '',
+      modelId: '', modelName: '', modelVersion: 'v1',
+      geography: '', domain: '', product: '', modelType: '', populationType: '', usage: '',
+      riskTierMRR: '', modelStatus: '', developer: '', segmentVariable: '',
+      fullPerfBenchmarkVintage: '', fullPerfWindow: '', fullPerfBadDef: '',
+      ew1BenchmarkVintage: '', ew1Window: '', ew1BadDef: '',
+      ew2BenchmarkVintage: '', ew2Window: '', ew2BadDef: '',
+      approvalDate: '', firstUseDate: '', owner: '',
+      lastValidationDate: '', nextReviewDate: '',
+      upstreamModels: '', downstreamModels: '',
     });
+    setAssignInvId('');
+    setInvMode('suggested');
+    setMetaUploadMode('none');
+    setLlmStage(0);
+    setLlmDone(false);
     setShowForm(false);
     setUploadedFile(null);
     setMetadataFile(null);
@@ -359,6 +1051,261 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
 
   return (
     <div className="space-y-6">
+
+      {/* ── Upload mode choice screen ─────────────────────────────────── */}
+      {uploadMode === null && (
+        <div className="space-y-4">
+          <div>
+            <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              Add Models to Your Project
+            </h3>
+            <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              Choose how you would like to onboard model(s) into the workflow.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Single model */}
+            <button
+              onClick={() => setUploadMode('single')}
+              className={`text-left p-6 rounded-xl border-2 transition hover:shadow-md ${
+                isDark
+                  ? 'border-slate-600 bg-slate-800/50 hover:border-blue-500 hover:bg-blue-500/10'
+                  : 'border-slate-200 bg-white hover:border-blue-500 hover:bg-blue-50'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-4 ${isDark ? 'bg-blue-600/20' : 'bg-blue-100'}`}>
+                <FileText size={20} className={isDark ? 'text-blue-400' : 'text-blue-600'} />
+              </div>
+              <h4 className={`font-semibold text-base mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Upload Single Model
+              </h4>
+              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Create a new model entry manually — fill in identity, governance, version, and lineage fields, upload a model file and metrics.
+              </p>
+            </button>
+
+            {/* Bulk upload */}
+            <button
+              onClick={() => setUploadMode('bulk')}
+              className={`text-left p-6 rounded-xl border-2 transition hover:shadow-md ${
+                isDark
+                  ? 'border-slate-600 bg-slate-800/50 hover:border-purple-500 hover:bg-purple-500/10'
+                  : 'border-slate-200 bg-white hover:border-purple-500 hover:bg-purple-50'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-4 ${isDark ? 'bg-purple-600/20' : 'bg-purple-100'}`}>
+                <FileSpreadsheet size={20} className={isDark ? 'text-purple-400' : 'text-purple-600'} />
+              </div>
+              <h4 className={`font-semibold text-base mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Upload Bulk Models
+              </h4>
+              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Import multiple models at once using an Excel template. Schema DQ validation runs automatically on upload.
+              </p>
+            </button>
+
+            {/* Use existing model */}
+            <button
+              onClick={() => { setExistingSelected(null); setExistingSearch(''); setUploadMode('existing'); }}
+              className={`text-left p-6 rounded-xl border-2 transition hover:shadow-md ${
+                isDark
+                  ? 'border-slate-600 bg-slate-800/50 hover:border-emerald-500 hover:bg-emerald-500/10'
+                  : 'border-slate-200 bg-white hover:border-emerald-500 hover:bg-emerald-50'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-4 ${isDark ? 'bg-emerald-600/20' : 'bg-emerald-100'}`}>
+                <Database size={20} className={isDark ? 'text-emerald-400' : 'text-emerald-600'} />
+              </div>
+              <h4 className={`font-semibold text-base mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Use Existing Model
+              </h4>
+              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Select a model already in the registry and continue setting up the monitoring workflow from there.
+              </p>
+              {registryModels.length > 0 && (
+                <span className={`mt-3 inline-block text-xs px-2 py-0.5 rounded-full font-medium ${
+                  isDark ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
+                }`}>{registryModels.length} model{registryModels.length !== 1 ? 's' : ''} available</span>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Existing model selector ──────────────────────────────────── */}
+      {uploadMode === 'existing' && (() => {
+        const filtered = registryModels.filter(m =>
+          m.name.toLowerCase().includes(existingSearch.toLowerCase()) ||
+          (m.model_id ?? '').toLowerCase().includes(existingSearch.toLowerCase()) ||
+          (m.domain ?? '').toLowerCase().includes(existingSearch.toLowerCase())
+        );
+        const chosen = registryModels.find(m => m.id === existingSelected) ?? null;
+
+        const handleConfirm = () => {
+          if (!chosen) return;
+          const mv: ModelVersion = {
+            id: chosen.id,
+            name: chosen.name,
+            type: chosen.modelType,
+            tier: chosen.bulkMetadata?.riskTierMRR ?? 'Tier 1',
+            status: chosen.status,
+            version: chosen.version,
+            environment: chosen.stage,
+            owner: chosen.bulkMetadata?.owner ?? '',
+            lastValidation: chosen.bulkMetadata?.lastValidationDate ?? '',
+            nextReview: chosen.bulkMetadata?.nextReviewDate ?? '',
+            metrics: chosen.metrics ?? {},
+          };
+          onModelSelect(mv);
+          onComplete();
+        };
+
+        return (
+          <div className="space-y-5">
+            {/* Back header */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setUploadMode(null)}
+                className={`p-2 rounded-lg transition ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}
+                title="Back"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <h3 className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Use Existing Model</h3>
+            </div>
+
+            {registryModels.length === 0 ? (
+              <div className={`flex flex-col items-center justify-center py-16 rounded-xl border-2 border-dashed ${
+                isDark ? 'border-slate-700 text-slate-500' : 'border-slate-200 text-slate-400'
+              }`}>
+                <Database size={32} className="mb-3 opacity-40" />
+                <p className="text-sm font-medium">No models in the registry yet</p>
+                <p className="text-xs mt-1">Upload a single or bulk model first, then come back here.</p>
+              </div>
+            ) : (
+              <div className={`rounded-xl border ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'} overflow-hidden`}>
+                {/* Search bar */}
+                <div className={`px-4 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  <input
+                    type="text"
+                    placeholder="Search by name, model ID, or domain…"
+                    value={existingSearch}
+                    onChange={e => setExistingSearch(e.target.value)}
+                    className={`w-full px-3 py-2 rounded-lg border text-sm ${
+                      isDark ? 'bg-slate-700 border-slate-600 text-white placeholder:text-slate-500' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400'
+                    }`}
+                  />
+                </div>
+
+                {/* Model list */}
+                <div className="max-h-80 overflow-y-auto divide-y" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                  {filtered.length === 0 ? (
+                    <p className={`px-4 py-8 text-sm text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No models match your search.</p>
+                  ) : filtered.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => setExistingSelected(m.id)}
+                      className={`w-full flex items-start gap-3 px-4 py-3 text-left transition ${
+                        existingSelected === m.id
+                          ? isDark ? 'bg-emerald-600/20' : 'bg-emerald-50'
+                          : isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className={`mt-0.5 w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center ${
+                        existingSelected === m.id
+                          ? isDark ? 'bg-emerald-600/30' : 'bg-emerald-100'
+                          : isDark ? 'bg-slate-700' : 'bg-slate-100'
+                      }`}>
+                        <Database size={14} className={existingSelected === m.id ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : (isDark ? 'text-slate-400' : 'text-slate-500')} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-sm font-medium truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{m.name}</span>
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                            isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'
+                          }`}>{m.version}</span>
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 capitalize ${
+                            m.stage === 'production'
+                              ? isDark ? 'bg-green-900/40 text-green-400' : 'bg-green-100 text-green-700'
+                              : m.stage === 'staging'
+                              ? isDark ? 'bg-yellow-900/40 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
+                              : isDark ? 'bg-blue-900/40 text-blue-400' : 'bg-blue-100 text-blue-700'
+                          }`}>{m.stage}</span>
+                        </div>
+                        <div className={`text-xs mt-0.5 flex gap-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                          {m.model_id && <span>{m.model_id}</span>}
+                          {m.domain && <span>{m.domain}</span>}
+                          <span className="capitalize">{m.modelType}</span>
+                        </div>
+                      </div>
+                      {existingSelected === m.id && (
+                        <CheckCircle2 size={16} className={`mt-1 flex-shrink-0 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Selected model summary + confirm */}
+            {chosen && (
+              <div className={`p-4 rounded-xl border ${
+                isDark ? 'bg-emerald-900/20 border-emerald-700/50' : 'bg-emerald-50 border-emerald-200'
+              }`}>
+                <p className={`text-xs font-semibold uppercase tracking-wide mb-2 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                  Selected model
+                </p>
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{chosen.name}</p>
+                    <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {chosen.version} · {chosen.modelType} · {chosen.stage}
+                      {chosen.domain ? ` · ${chosen.domain}` : ''}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleConfirm}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                      isDark
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    }`}
+                  >
+                    <CheckCircle2 size={15} />
+                    Continue with this model
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Bulk upload workflow ─────────────────────────────────────── */}
+      {uploadMode === 'bulk' && (
+        <BulkModelUploadStep
+          projectId={projectId}
+          onBulkAddModels={onBulkAddModels}
+          onModelSelect={onModelSelect}
+          onComplete={onComplete}
+          onBack={() => setUploadMode(null)}
+        />
+      )}
+
+      {/* ── Single upload workflow ───────────────────────────────────── */}
+      {uploadMode === 'single' && (
+      <div className="space-y-6">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setUploadMode(null)}
+            className={`p-2 rounded-lg transition ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}
+            title="Back"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <h3 className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Single Model Upload</h3>
+        </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Panel - Model Import */}
         <div className={`p-4 rounded-lg border ${theme === 'dark' ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -523,7 +1470,7 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
               {/* Step 2: Upload Model File */}
               <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
                 <p className={`text-sm font-medium mb-3 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Step 2: Upload Model File
+                  Step 2: Upload Model File <span className={`text-xs font-normal ml-1 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>(Optional — can upload later in Model Repository)</span>
                 </p>
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   {(['PMML', 'ONNX', 'Pickle', 'JSON'] as const).map((format) => (
@@ -575,30 +1522,116 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                 {/* Upload Metadata File Option */}
                 <div className={`p-3 rounded-lg border mb-4 ${theme === 'dark' ? 'bg-blue-900/20 border-blue-600' : 'bg-blue-50 border-blue-200'}`}>
                   <p className={`text-xs font-medium mb-2 ${theme === 'dark' ? 'text-blue-300' : 'text-blue-800'}`}>
-                    Upload Metadata (Excel or JSON) to auto-fill fields:
+                    Upload Metadata Document to auto-fill fields:
                   </p>
-                  <label className={`cursor-pointer flex items-center justify-center gap-2 py-2 rounded border-2 border-dashed transition ${
-                    theme === 'dark' ? 'border-blue-600 hover:bg-blue-900/30' : 'border-blue-300 hover:bg-blue-100'
-                  }`}>
-                    <Upload size={14} className={theme === 'dark' ? 'text-blue-400' : 'text-blue-600'} />
-                    <span className={`text-xs ${theme === 'dark' ? 'text-blue-300' : 'text-blue-700'}`}>
-                      {metadataFile ? `${metadataFile.name} ✓` : 'Click to upload or drag'}
-                    </span>
-                    <input
-                      type="file"
-                      accept=".json,.xlsx,.xls,.csv"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleMetadataFileUpload(file);
-                      }}
-                      className="hidden"
-                    />
-                  </label>
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      onClick={() => setMetaUploadMode(metaUploadMode === 'excel' ? 'none' : 'excel')}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded border text-xs transition ${
+                        metaUploadMode === 'excel'
+                          ? theme === 'dark' ? 'bg-blue-700 border-blue-500 text-blue-100' : 'bg-blue-100 border-blue-500 text-blue-800'
+                          : theme === 'dark' ? 'bg-slate-700 border-slate-500 hover:bg-slate-600 text-slate-300' : 'bg-white border-slate-300 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <span>📊</span> Excel / CSV
+                    </button>
+                    <button
+                      onClick={() => { setMetaUploadMode(metaUploadMode === 'word' ? 'none' : 'word'); setLlmStage(0); setLlmDone(false); }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded border text-xs transition ${
+                        metaUploadMode === 'word'
+                          ? theme === 'dark' ? 'bg-purple-700 border-purple-500 text-purple-100' : 'bg-purple-100 border-purple-500 text-purple-800'
+                          : theme === 'dark' ? 'bg-slate-700 border-slate-500 hover:bg-slate-600 text-slate-300' : 'bg-white border-slate-300 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <span>📝</span> Word (AI Parse)
+                    </button>
+                  </div>
+                  {metaUploadMode === 'excel' && (
+                    <label className={`cursor-pointer flex items-center justify-center gap-2 py-2 rounded border-2 border-dashed transition ${
+                      theme === 'dark' ? 'border-blue-600 hover:bg-blue-900/30' : 'border-blue-300 hover:bg-blue-100'
+                    }`}>
+                      <Upload size={14} className={theme === 'dark' ? 'text-blue-400' : 'text-blue-600'} />
+                      <span className={`text-xs ${theme === 'dark' ? 'text-blue-300' : 'text-blue-700'}`}>
+                        {metadataFile ? `✓ ${metadataFile.name}` : 'Click to upload Excel / CSV'}
+                      </span>
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleMetadataFileUpload(file);
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                  {metaUploadMode === 'word' && !llmDone && (
+                    <div>
+                      <label className={`cursor-pointer flex items-center justify-center gap-2 py-2 rounded border-2 border-dashed transition mb-2 ${
+                        theme === 'dark' ? 'border-purple-600 hover:bg-purple-900/30' : 'border-purple-300 hover:bg-purple-100'
+                      }`}>
+                        <Upload size={14} className={theme === 'dark' ? 'text-purple-400' : 'text-purple-600'} />
+                        <span className={`text-xs ${theme === 'dark' ? 'text-purple-300' : 'text-purple-700'}`}>
+                          {metadataFile ? `✓ ${metadataFile.name} — click Analyze` : 'Click to upload Word document (.docx)'}
+                        </span>
+                        <input
+                          type="file"
+                          accept=".docx,.doc"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) setMetadataFile(f); }}
+                          className="hidden"
+                        />
+                      </label>
+                      {metadataFile && llmStage === 0 && (
+                        <button
+                          onClick={() => {
+                            let s = 1;
+                            setLlmStage(s);
+                            const iv = setInterval(() => {
+                              s++;
+                              if (s <= 4) { setLlmStage(s); }
+                              else {
+                                clearInterval(iv);
+                                setLlmDone(true);
+                                const base = metadataFile!.name.replace(/\.[^.]+$/, '');
+                                setMetadata(prev => ({
+                                  ...prev,
+                                  modelName: prev.modelName || base,
+                                  geography: prev.geography || 'US',
+                                  domain: prev.domain || 'Banking',
+                                  product: prev.product || 'Credit Cards',
+                                  modelType: prev.modelType || 'Classification',
+                                  populationType: prev.populationType || 'All Applicants',
+                                  usage: prev.usage || 'Risk Scoring',
+                                  riskTierMRR: prev.riskTierMRR || 'High',
+                                  modelStatus: prev.modelStatus || 'Champion',
+                                  developer: prev.developer || 'Data Science Team',
+                                  owner: prev.owner || 'Risk Analytics',
+                                }));
+                              }
+                            }, 900);
+                          }}
+                          className="w-full py-1.5 rounded text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white transition"
+                        >
+                          ✨ Analyze with AI
+                        </button>
+                      )}
+                      {llmStage > 0 && !llmDone && (
+                        <div className={`mt-2 p-2 rounded text-xs ${theme === 'dark' ? 'bg-purple-900/30 text-purple-300' : 'bg-purple-50 text-purple-700'}`}>
+                          <span className="animate-pulse">{['', '📄 Analyzing document structure...', '🔍 Identifying model metadata fields...', '⚙️ Extracting governance and performance data...', '✅ Mapping fields to template...'][llmStage]}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {metaUploadMode === 'word' && llmDone && (
+                    <div className={`mt-1 p-2 rounded text-xs flex items-center gap-2 ${theme === 'dark' ? 'bg-green-900/30 text-green-300 border border-green-600' : 'bg-green-50 text-green-700 border border-green-300'}`}>
+                      <span>✅</span> Fields auto-filled from document — review and adjust below.
+                    </div>
+                  )}
                 </div>
 
                 {/* Tabs */}
                 <div className="flex gap-2 border-b mb-4" style={{ borderColor: theme === 'dark' ? '#374151' : '#e5e7eb' }}>
-                  {['identity', 'governance', 'version', 'lineage'].map((tab) => (
+                  {['identity', 'governance', 'performance', 'lineage'].map((tab) => (
                     <button
                       key={tab}
                       onClick={() => setActiveTab(tab as any)}
@@ -616,149 +1649,121 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                 </div>
 
                 {/* Tab Content */}
-                <div className="space-y-3 mb-4 max-h-64 overflow-y-auto">
+                <div className="space-y-3 mb-4 max-h-72 overflow-y-auto pr-1">
                   {activeTab === 'identity' && (
                     <>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Model ID</label>
-                          <input
-                            type="text"
-                            value={metadata.modelId}
-                            onChange={(e) => setMetadata({ ...metadata, modelId: e.target.value })}
-                            placeholder="e.g., CRED-RISK-001"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Model Name</label>
-                          <input
-                            type="text"
-                            value={metadata.modelName}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="col-span-2">
+                          <label className="block text-xs font-medium mb-1">Model Name <span className="text-red-500">*</span></label>
+                          <input type="text" value={metadata.modelName}
                             onChange={(e) => setMetadata({ ...metadata, modelName: e.target.value })}
                             placeholder="e.g., Credit Risk Classifier"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Model ID <span className="text-red-500">*</span></label>
+                          <input type="text" value={metadata.modelId}
+                            onChange={(e) => setMetadata({ ...metadata, modelId: e.target.value })}
+                            placeholder="e.g., CRED-RISK-001"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                       </div>
-
                       <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <label className="block text-xs font-medium mb-1">Version</label>
-                          <input
-                            type="text"
-                            value={metadata.modelVersion}
+                          <label className="block text-xs font-medium mb-1">Model Version</label>
+                          <input type="text" value={metadata.modelVersion}
                             onChange={(e) => setMetadata({ ...metadata, modelVersion: e.target.value })}
                             placeholder="v1"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium mb-1">Type</label>
-                          <select
-                            value={metadata.type}
-                            onChange={(e) => setMetadata({ ...metadata, type: e.target.value as any })}
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          >
-                            <option>Classification</option>
-                            <option>Regression</option>
-                            <option>Time Series</option>
-                          </select>
+                          <label className="block text-xs font-medium mb-1">Geography</label>
+                          <input type="text" value={metadata.geography}
+                            onChange={(e) => setMetadata({ ...metadata, geography: e.target.value })}
+                            placeholder="e.g., US, EMEA"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium mb-1">Risk Tier</label>
-                          <select
-                            value={metadata.riskTier}
-                            onChange={(e) => setMetadata({ ...metadata, riskTier: e.target.value as any })}
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          >
-                            <option>High</option>
-                            <option>Medium</option>
-                            <option>Low</option>
-                          </select>
+                          <label className="block text-xs font-medium mb-1">Domain</label>
+                          <div className="flex gap-1">
+                            <select
+                              value={['Banking','Insurance','Marketing','Healthcare','Retail','Telecommunications','Manufacturing'].includes(metadata.domain) ? metadata.domain : '__other__'}
+                              onChange={(e) => { if (e.target.value !== '__other__') setMetadata({ ...metadata, domain: e.target.value }); else setMetadata({ ...metadata, domain: '' }); }}
+                              className={`flex-1 px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                            >
+                              <option value="">--</option>
+                              {['Banking','Insurance','Marketing','Healthcare','Retail','Telecommunications','Manufacturing'].map(d => <option key={d}>{d}</option>)}
+                              <option value="__other__">Other…</option>
+                            </select>
+                            {!['Banking','Insurance','Marketing','Healthcare','Retail','Telecommunications','Manufacturing'].includes(metadata.domain) && (
+                              <input type="text" value={metadata.domain}
+                                onChange={(e) => setMetadata({ ...metadata, domain: e.target.value })}
+                                placeholder="Custom"
+                                className={`flex-1 px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                            )}
+                          </div>
                         </div>
                       </div>
-
                       <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <label className="block text-xs font-medium mb-1">Owner</label>
-                          <input
-                            type="text"
-                            value={metadata.owner}
-                            onChange={(e) => setMetadata({ ...metadata, owner: e.target.value })}
-                            placeholder="Team/Person"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
+                          <label className="block text-xs font-medium mb-1">Product</label>
+                          <input type="text" value={metadata.product}
+                            onChange={(e) => setMetadata({ ...metadata, product: e.target.value })}
+                            placeholder="e.g., Credit Cards"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Model Type</label>
+                          <input type="text" value={metadata.modelType}
+                            onChange={(e) => setMetadata({ ...metadata, modelType: e.target.value })}
+                            placeholder="e.g., Classification"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Population Type</label>
+                          <input type="text" value={metadata.populationType}
+                            onChange={(e) => setMetadata({ ...metadata, populationType: e.target.value })}
+                            placeholder="e.g., All Applicants"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Usage</label>
+                          <input type="text" value={metadata.usage}
+                            onChange={(e) => setMetadata({ ...metadata, usage: e.target.value })}
+                            placeholder="e.g., Risk Scoring"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Risk Tier / MRR</label>
+                          <input type="text" value={metadata.riskTierMRR}
+                            onChange={(e) => setMetadata({ ...metadata, riskTierMRR: e.target.value })}
+                            placeholder="e.g., High"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Model Status</label>
+                          <input type="text" value={metadata.modelStatus}
+                            onChange={(e) => setMetadata({ ...metadata, modelStatus: e.target.value })}
+                            placeholder="e.g., Champion"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="block text-xs font-medium mb-1">Developer</label>
-                          <input
-                            type="text"
-                            value={metadata.developer}
+                          <input type="text" value={metadata.developer}
                             onChange={(e) => setMetadata({ ...metadata, developer: e.target.value })}
-                            placeholder="Name"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
+                            placeholder="e.g., Data Science Team"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium mb-1">Validator</label>
-                          <input
-                            type="text"
-                            value={metadata.validator}
-                            onChange={(e) => setMetadata({ ...metadata, validator: e.target.value })}
-                            placeholder="Name"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium mb-1">Status</label>
-                        <select
-                          value={metadata.status}
-                          onChange={(e) => setMetadata({ ...metadata, status: e.target.value as any })}
-                          className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                        >
-                          <option>Champion</option>
-                          <option>Challenger</option>
-                          <option>Benchmark</option>
-                        </select>
-                      </div>
-
-                      {/* Domain Field */}
-                      <div>
-                        <label className="block text-xs font-medium mb-1">Domain</label>
-                        <div className="flex gap-2">
-                          <select
-                            value={['', 'Banking', 'Insurance', 'Marketing', 'Healthcare', 'Retail', 'Telecommunications', 'Manufacturing', 'Other'].includes(metadata.domain ?? '') ? (metadata.domain ?? '') : 'Other'}
-                            onChange={(e) => {
-                              if (e.target.value === 'Other') {
-                                setMetadata({ ...metadata, domain: '' });
-                              } else {
-                                setMetadata({ ...metadata, domain: e.target.value });
-                              }
-                            }}
-                            className={`flex-1 px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          >
-                            <option value="">-- Select Domain --</option>
-                            <option value="Banking">Banking</option>
-                            <option value="Insurance">Insurance</option>
-                            <option value="Marketing">Marketing</option>
-                            <option value="Healthcare">Healthcare</option>
-                            <option value="Retail">Retail</option>
-                            <option value="Telecommunications">Telecommunications</option>
-                            <option value="Manufacturing">Manufacturing</option>
-                            <option value="Other">Other (custom)</option>
-                          </select>
-                          {(metadata.domain === '' || !['Banking', 'Insurance', 'Marketing', 'Healthcare', 'Retail', 'Telecommunications', 'Manufacturing'].includes(metadata.domain ?? '')) && (
-                            <input
-                              type="text"
-                              value={metadata.domain ?? ''}
-                              onChange={(e) => setMetadata({ ...metadata, domain: e.target.value })}
-                              placeholder="Enter custom domain..."
-                              className={`flex-1 px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                            />
-                          )}
+                          <label className="block text-xs font-medium mb-1">Segment Variable</label>
+                          <input type="text" value={metadata.segmentVariable}
+                            onChange={(e) => setMetadata({ ...metadata, segmentVariable: e.target.value })}
+                            placeholder="e.g., Score Band"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                       </div>
                     </>
@@ -769,109 +1774,116 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="block text-xs font-medium mb-1">Approval Date</label>
-                          <input
-                            type="date"
-                            value={metadata.approvalDate}
+                          <input type="date" value={metadata.approvalDate}
                             onChange={(e) => setMetadata({ ...metadata, approvalDate: e.target.value })}
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium mb-1">Reviewer / MRM Owner</label>
-                          <input
-                            type="text"
-                            value={metadata.reviewer}
-                            onChange={(e) => setMetadata({ ...metadata, reviewer: e.target.value })}
-                            placeholder="Name/Role"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
+                          <label className="block text-xs font-medium mb-1">First Use Date</label>
+                          <input type="date" value={metadata.firstUseDate}
+                            onChange={(e) => setMetadata({ ...metadata, firstUseDate: e.target.value })}
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                       </div>
-
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Owner</label>
+                        <input type="text" value={metadata.owner}
+                          onChange={(e) => setMetadata({ ...metadata, owner: e.target.value })}
+                          placeholder="e.g., Risk Analytics Team"
+                          className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                      </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs font-medium mb-1">Expiry Date</label>
-                          <input
-                            type="date"
-                            value={metadata.expiryDate}
-                            onChange={(e) => setMetadata({ ...metadata, expiryDate: e.target.value })}
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
+                          <label className="block text-xs font-medium mb-1">Last Validation Date</label>
+                          <input type="date" value={metadata.lastValidationDate}
+                            onChange={(e) => setMetadata({ ...metadata, lastValidationDate: e.target.value })}
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium mb-1">Last Validation Date</label>
-                          <input
-                            type="date"
-                            value={metadata.lastValidationDate}
-                            onChange={(e) => setMetadata({ ...metadata, lastValidationDate: e.target.value })}
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
+                          <label className="block text-xs font-medium mb-1">Next Review Date</label>
+                          <input type="date" value={metadata.nextReviewDate}
+                            onChange={(e) => setMetadata({ ...metadata, nextReviewDate: e.target.value })}
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium mb-1">Next Review Due</label>
-                        <input
-                          type="date"
-                          value={metadata.nextReviewDue}
-                          onChange={(e) => setMetadata({ ...metadata, nextReviewDue: e.target.value })}
-                          className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                        />
                       </div>
                     </>
                   )}
 
-                  {activeTab === 'version' && (
+                  {activeTab === 'performance' && (
                     <>
-                      <div className="grid grid-cols-2 gap-3">
+                      {/* Full Performance */}
+                      <p className={`text-xs font-semibold pb-1 border-b ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Full Performance</p>
+                      <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <label className="block text-xs font-medium mb-1">Version Name</label>
-                          <input
-                            type="text"
-                            value={metadata.versionName}
-                            onChange={(e) => setMetadata({ ...metadata, versionName: e.target.value })}
-                            placeholder="e.g., v2.1-prod-stable"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          />
+                          <label className="block text-xs font-medium mb-1">Benchmark Vintage</label>
+                          <input type="text" value={metadata.fullPerfBenchmarkVintage}
+                            onChange={(e) => setMetadata({ ...metadata, fullPerfBenchmarkVintage: e.target.value })}
+                            placeholder="e.g., Q1 2023"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium mb-1">Role</label>
-                          <select
-                            value={metadata.role}
-                            onChange={(e) => setMetadata({ ...metadata, role: e.target.value as any })}
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          >
-                            <option>Champion</option>
-                            <option>Challenger</option>
-                            <option>Benchmark</option>
-                          </select>
+                          <label className="block text-xs font-medium mb-1">Window</label>
+                          <input type="text" value={metadata.fullPerfWindow}
+                            onChange={(e) => setMetadata({ ...metadata, fullPerfWindow: e.target.value })}
+                            placeholder="e.g., 12 months"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Bad Definition</label>
+                          <input type="text" value={metadata.fullPerfBadDef}
+                            onChange={(e) => setMetadata({ ...metadata, fullPerfBadDef: e.target.value })}
+                            placeholder="e.g., 90+ DPD"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                       </div>
-
-                      <div className="grid grid-cols-2 gap-3">
+                      {/* Early Warning 1 */}
+                      <p className={`text-xs font-semibold pb-1 border-b mt-2 ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Early Warning 1</p>
+                      <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <label className="block text-xs font-medium mb-1">Environment</label>
-                          <select
-                            value={metadata.environment}
-                            onChange={(e) => setMetadata({ ...metadata, environment: e.target.value as any })}
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          >
-                            <option>Development</option>
-                            <option>Staging</option>
-                            <option>Production</option>
-                          </select>
+                          <label className="block text-xs font-medium mb-1">Benchmark Vintage</label>
+                          <input type="text" value={metadata.ew1BenchmarkVintage}
+                            onChange={(e) => setMetadata({ ...metadata, ew1BenchmarkVintage: e.target.value })}
+                            placeholder="e.g., Q1 2023"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium mb-1">Status</label>
-                          <select
-                            value={metadata.versionStatus}
-                            onChange={(e) => setMetadata({ ...metadata, versionStatus: e.target.value as any })}
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                          >
-                            <option>Active</option>
-                            <option>Retired</option>
-                            <option>Archived</option>
-                          </select>
+                          <label className="block text-xs font-medium mb-1">Window</label>
+                          <input type="text" value={metadata.ew1Window}
+                            onChange={(e) => setMetadata({ ...metadata, ew1Window: e.target.value })}
+                            placeholder="e.g., 3 months"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Bad Definition</label>
+                          <input type="text" value={metadata.ew1BadDef}
+                            onChange={(e) => setMetadata({ ...metadata, ew1BadDef: e.target.value })}
+                            placeholder="e.g., 30+ DPD"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                      </div>
+                      {/* Early Warning 2 */}
+                      <p className={`text-xs font-semibold pb-1 border-b mt-2 ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Early Warning 2</p>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Benchmark Vintage</label>
+                          <input type="text" value={metadata.ew2BenchmarkVintage}
+                            onChange={(e) => setMetadata({ ...metadata, ew2BenchmarkVintage: e.target.value })}
+                            placeholder="e.g., Q2 2023"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Window</label>
+                          <input type="text" value={metadata.ew2Window}
+                            onChange={(e) => setMetadata({ ...metadata, ew2Window: e.target.value })}
+                            placeholder="e.g., 6 months"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Bad Definition</label>
+                          <input type="text" value={metadata.ew2BadDef}
+                            onChange={(e) => setMetadata({ ...metadata, ew2BadDef: e.target.value })}
+                            placeholder="e.g., 60+ DPD"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
                       </div>
                     </>
@@ -880,44 +1892,20 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                   {activeTab === 'lineage' && (
                     <>
                       <div>
-                        <label className="block text-xs font-medium mb-1">Upstream Data Sources</label>
-                        <textarea
-                          value={metadata.upstreamSources}
-                          onChange={(e) => setMetadata({ ...metadata, upstreamSources: e.target.value })}
-                          placeholder="e.g., Customer DB, Transaction DB"
-                          rows={2}
-                          className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                        />
+                        <label className="block text-xs font-medium mb-1">Upstream Models</label>
+                        <textarea value={metadata.upstreamModels}
+                          onChange={(e) => setMetadata({ ...metadata, upstreamModels: e.target.value })}
+                          placeholder="e.g., Customer Score Model, Transaction Risk Model"
+                          rows={3}
+                          className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium mb-1">Feature Pipelines</label>
-                        <textarea
-                          value={metadata.featurePipelines}
-                          onChange={(e) => setMetadata({ ...metadata, featurePipelines: e.target.value })}
-                          placeholder="e.g., Apache Spark pipeline, dbt"
-                          rows={2}
-                          className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium mb-1">Downstream Systems</label>
-                        <textarea
-                          value={metadata.downstreamSystems}
-                          onChange={(e) => setMetadata({ ...metadata, downstreamSystems: e.target.value })}
-                          placeholder="e.g., Lending platform, Decision engine"
-                          rows={2}
-                          className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium mb-1">Dependencies Mapping</label>
-                        <textarea
-                          value={metadata.dependencies}
-                          onChange={(e) => setMetadata({ ...metadata, dependencies: e.target.value })}
-                          placeholder="e.g., Python 3.9, scikit-learn 1.0"
-                          rows={2}
-                          className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                        />
+                        <label className="block text-xs font-medium mb-1">Downstream Models</label>
+                        <textarea value={metadata.downstreamModels}
+                          onChange={(e) => setMetadata({ ...metadata, downstreamModels: e.target.value })}
+                          placeholder="e.g., Credit Decisioning Engine, Portfolio Risk Model"
+                          rows={3}
+                          className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                       </div>
                     </>
                   )}
@@ -963,10 +1951,125 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
                 )}
               </div>
 
+              {/* Step 5: Assign to Inventory */}
+              <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                      Step 5: Inventory Folder
+                      <span className={`text-xs font-normal ml-1 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>(Optional)</span>
+                    </p>
+                  </div>
+                  {/* Mode toggle */}
+                  <div className={`flex text-xs rounded-lg overflow-hidden border ${theme === 'dark' ? 'border-slate-600' : 'border-slate-300'}`}>
+                    {(['suggested', 'existing'] as const).map(m => (
+                      <button
+                        key={m}
+                        onClick={() => { setInvMode(m); if (m === 'suggested') setAssignInvId(''); }}
+                        className={`px-3 py-1.5 transition ${invMode === m
+                          ? theme === 'dark' ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                          : theme === 'dark' ? 'bg-slate-700 text-slate-400 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {m === 'suggested' ? '📂 Suggested' : '📋 Pick Existing'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {invMode === 'suggested' && (() => {
+                  const filledSegs = [
+                    { label: 'Geography', value: metadata.geography },
+                    { label: 'Domain',    value: metadata.domain },
+                    { label: 'Product',   value: metadata.product },
+                    { label: 'Type',      value: metadata.modelType },
+                    { label: 'Model ID',  value: metadata.modelId },
+                    { label: 'Version',   value: metadata.modelVersion },
+                  ].filter(s => s.value.trim());
+
+                  if (filledSegs.length === 0) {
+                    return (
+                      <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
+                        Fill in Geography, Domain, Product, Model Type, and Model ID in the <strong>Identity</strong> tab above to generate a suggested folder path.
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <>
+                      {/* Live path breadcrumb */}
+                      <div className={`flex flex-wrap items-center gap-1.5 p-3 rounded-lg mb-3 ${theme === 'dark' ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-slate-200'}`}>
+                        {filledSegs.map((seg, i) => (
+                          <React.Fragment key={`seg-${i}`}>
+                            {i > 0 && <span className={`text-sm ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>›</span>}
+                            <span className={`text-xs px-2 py-1 rounded font-medium ${theme === 'dark' ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>
+                              {seg.value}
+                            </span>
+                          </React.Fragment>
+                        ))}
+                      </div>
+                      <p className={`text-xs mb-2 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {assignInvId
+                          ? '✓ Path created — missing folders were auto-created.'
+                          : 'Built from Identity tab fields. Click below to create this folder structure.'}
+                      </p>
+                      <button
+                        onClick={() => {
+                          if (!createModelInventory) {
+                            alert('Unable to create inventory - context not ready. Please refresh and try again.');
+                            return;
+                          }
+                          const id = findOrCreateInventoryPath(
+                            { geo: metadata.geography, domain: metadata.domain, product: metadata.product, modelType: metadata.modelType, modelId: metadata.modelId, modelVersion: metadata.modelVersion },
+                            modelInventories, createModelInventory
+                          );
+                          if (id) {
+                            setAssignInvId(id);
+                          }
+                        }}
+                        className={`text-xs px-3 py-1.5 rounded flex items-center gap-1.5 font-medium transition ${
+                          assignInvId
+                            ? theme === 'dark' ? 'bg-green-800/40 border border-green-600 text-green-300 hover:bg-green-800/60' : 'bg-green-50 border border-green-400 text-green-700 hover:bg-green-100'
+                            : theme === 'dark' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-blue-500 text-white hover:bg-blue-600'
+                        }`}
+                      >
+                        {assignInvId
+                          ? <><RefreshCw size={11} /> Re-create Path</>
+                          : <><FolderPlus size={11} /> Create & Assign This Path</>}
+                      </button>
+                    </>
+                  );
+                })()}
+
+                {invMode === 'existing' && (
+                  modelInventories.length > 0 ? (
+                    <select
+                      value={assignInvId}
+                      onChange={e => setAssignInvId(e.target.value)}
+                      className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                    >
+                      <option value="">-- No folder (unassigned) --</option>
+                      {modelInventories.map(inv => {
+                        const typeLabel = inv.type ? `${inv.type.charAt(0).toUpperCase()}${inv.type.slice(1)}` : 'Folder';
+                        return (
+                          <option key={inv.id} value={inv.id}>
+                            {typeLabel}: {inv.name}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  ) : (
+                    <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
+                      No inventory folders yet. Use the <strong>Suggested</strong> mode to auto-create one, or go to Model Repository to create folders first.
+                    </p>
+                  )
+                )}
+              </div>
+
               <div className="flex gap-2">
                 <button
                   onClick={handleSaveModel}
-                  disabled={!metadata.modelName || !metadata.modelId || !uploadedFile}
+                  disabled={!metadata.modelName || !metadata.modelId}
                   className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white rounded-lg transition text-sm font-medium"
                 >
                   Import Model
@@ -989,6 +2092,8 @@ const ModelRepositoryStep: React.FC<{ workflow: Workflow; onComplete: () => void
           )}
         </div>
       </div>
+      </div>
+      )}
     </div>
   );
 };
@@ -3459,7 +4564,7 @@ const ModelRepositoryTree: React.FC<{
 export default function Projects() {
   const { theme } = useTheme();
   const navigate = useNavigate();
-  const { createRegistryModel, createProject: createGlobalProject, projects: globalProjects, createIngestionJob, createWorkflowLog } = useGlobal();
+  const { createRegistryModel, createProject: createGlobalProject, projects: globalProjects, createIngestionJob, createWorkflowLog, createModelInventory: projectsCreateModelInventory, modelInventories: projectsModelInventories } = useGlobal();
   
   // Initialize state from localStorage or empty array
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -3842,14 +4947,14 @@ export default function Projects() {
                         const newModel: ModelVersion = {
                           id: `model-${Date.now()}`,
                           name: metadata.modelName,
-                          type: metadata.type,
-                          tier: metadata.riskTier,
-                          status: metadata.status,
+                          type: metadata.modelType,
+                          tier: metadata.riskTierMRR,
+                          status: metadata.modelStatus,
                           version: metadata.modelVersion,
-                          environment: metadata.environment,
+                          environment: 'Development',
                           owner: metadata.owner,
                           lastValidation: metadata.lastValidationDate,
-                          nextReview: metadata.nextReviewDue,
+                          nextReview: metadata.nextReviewDate,
                           metrics: metadata.metrics,
                         };
                         
@@ -3857,7 +4962,7 @@ export default function Projects() {
                         const description = getStepDescription.modelImport(
                           metadata.modelName,
                           metadata.modelVersion,
-                          metadata.type
+                          metadata.modelType
                         );
                         createWorkflowLog(createWorkflowLogEntry(
                           selectedProject.id,
@@ -3872,20 +4977,74 @@ export default function Projects() {
                           selectedModel: newModel.id,
                         });
                         
+                        // Auto-assign inventory from metadata if user skipped Step 5
+                        let resolvedInventoryId: string | undefined = (metadata as any).inventoryId || undefined;
+                        if (!resolvedInventoryId && projectsCreateModelInventory &&
+                            (metadata.geography || metadata.domain || metadata.product || metadata.modelType || metadata.modelId)) {
+                          // Use a mutable working copy so nodes created here are visible within this call
+                          const workingInventories = [...(projectsModelInventories || [])];
+                          resolvedInventoryId = findOrCreateInventoryPath(
+                            { geo: metadata.geography || '', domain: metadata.domain || '', product: metadata.product || '', modelType: metadata.modelType || '', modelId: metadata.modelId || '', modelVersion: metadata.modelVersion || '' },
+                            workingInventories, projectsCreateModelInventory
+                          ) || undefined;
+                        }
+
                         // Add to global registry with file information
                         createRegistryModel({
                           name: metadata.modelName,
                           model_id: metadata.modelId || undefined,
                           version: metadata.modelVersion,
                           projectId: selectedProject.id,
-                          modelType: metadata.type.toLowerCase() as 'classification' | 'regression' | 'clustering' | 'nlp' | 'custom',
+                          modelType: mapBulkModelType(metadata.modelType),
                           metrics: metadata.metrics,
-                          stage: metadata.environment.toLowerCase() as 'dev' | 'staging' | 'production',
+                          stage: 'dev',
                           status: 'active',
                           uploadedFile: (metadata as any).uploadedFile,
                           domain: metadata.domain || undefined,
+                          bulkImported: false,
+                          bulkMetadata: {
+                            geography: metadata.geography || '',
+                            product: metadata.product || '',
+                            populationType: metadata.populationType || '',
+                            usage: metadata.usage || '',
+                            segmentVariable: metadata.segmentVariable || '',
+                            developer: metadata.developer || '',
+                            owner: metadata.owner || '',
+                            riskTier: metadata.riskTierMRR || '',
+                            modelStatus: metadata.modelStatus || '',
+                            fullPerfBenchmarkVintage: metadata.fullPerfBenchmarkVintage || '',
+                            fullPerfWindow: metadata.fullPerfWindow || '',
+                            fullPerfBadDef: metadata.fullPerfBadDef || '',
+                            ew1BenchmarkVintage: metadata.ew1BenchmarkVintage || '',
+                            ew1Window: metadata.ew1Window || '',
+                            ew1BadDef: metadata.ew1BadDef || '',
+                            ew2BenchmarkVintage: metadata.ew2BenchmarkVintage || '',
+                            ew2Window: metadata.ew2Window || '',
+                            ew2BadDef: metadata.ew2BadDef || '',
+                            approvalDate: metadata.approvalDate || '',
+                            firstUseDate: metadata.firstUseDate || '',
+                            lastValidationDate: metadata.lastValidationDate || '',
+                            nextReviewDate: metadata.nextReviewDate || '',
+                            upstreamModels: metadata.upstreamModels || '',
+                            downstreamModels: metadata.downstreamModels || '',
+                          },
+                          inventoryId: resolvedInventoryId,
                         });
                       }}
+                      onBulkAddModels={(models) => {
+                        createWorkflowLog(createWorkflowLogEntry(
+                          selectedProject.id,
+                          selectedProject.name,
+                          'Model Import',
+                          `Bulk imported ${models.length} model(s) from Excel template`
+                        ));
+                        updateProjectWorkflow(selectedProject.id, {
+                          ...selectedProject.workflow,
+                          models: [...(selectedProject.workflow.models || []), ...models],
+                          selectedModel: models[0]?.id,
+                        });
+                      }}
+                      projectId={selectedProject.id}
                     />
                   )}
                   {selectedProject.workflow.currentStep === 1 && (

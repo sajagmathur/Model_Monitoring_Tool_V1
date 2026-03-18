@@ -1,7 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+﻿import React, { useState, useMemo, useEffect } from 'react';
 import {
   Package,
   ChevronRight,
+  ChevronDown,
   CheckCircle2,
   AlertTriangle,
   AlertCircle,
@@ -12,9 +13,19 @@ import {
   X,
   Edit,
   Save,
+  FileJson,
+  HardDrive,
+  Info,
+  FolderOpen,
+  Folder,
+  FolderPlus,
+  List,
+  LayoutGrid,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlobal } from '../contexts/GlobalContext';
+import type { ModelInventory, InventoryLevel } from '../contexts/GlobalContext';
+import { useNotification } from '../hooks/useNotification';
 import { Breadcrumb } from '../components/UIPatterns';
 import { getCreationDescription, createCreationLogEntry } from '../utils/workflowLogger';
 
@@ -155,9 +166,119 @@ const ModelVersionCard: React.FC<{ version: any; modelName: string; onEdit?: () 
   );
 };
 
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Category sub-folder node (self-contained, stateful)
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Recursive helper — counts all registry models under an inventory node (any depth)
+function countModelsUnder(invId: string, allInventories: ModelInventory[], allRegistryModels: any[]): number {
+  const direct = allRegistryModels.filter(m => m.inventoryId === invId).length;
+  const kids = allInventories.filter(i => i.parentId === invId);
+  return direct + kids.reduce((sum, child) => sum + countModelsUnder(child.id, allInventories, allRegistryModels), 0);
+}
+
+const CategoryNode: React.FC<{
+  inventory: ModelInventory;
+  allInventories: ModelInventory[];
+  isDark: boolean;
+  selectedModelId: string | null;
+  groupedModels: DisplayModel[];
+  registryModels: any[];
+  onModelSelect: (id: string) => void;
+}> = ({ inventory, allInventories, isDark, selectedModelId, groupedModels, registryModels, onModelSelect }) => {
+  const [expanded, setExpanded] = useState(true);
+
+  // Models assigned directly to THIS node (not descendants)
+  const directModels = useMemo(() => {
+    const names = new Set<string>();
+    const result: DisplayModel[] = [];
+    registryModels.filter(m => m.inventoryId === inventory.id).forEach(m => {
+      if (!names.has(m.name)) {
+        names.add(m.name);
+        const g = groupedModels.find(g => g.name === m.name);
+        if (g) result.push(g);
+      }
+    });
+    return result;
+  }, [registryModels, inventory.id, groupedModels]);
+
+  // Direct child folders
+  const children = useMemo(
+    () => allInventories.filter(inv => inv.parentId === inventory.id),
+    [allInventories, inventory.id]
+  );
+
+  const totalCount = countModelsUnder(inventory.id, allInventories, registryModels);
+  const hasContent = totalCount > 0 || children.length > 0;
+
+  return (
+    <div>
+      <div
+        onClick={() => setExpanded(e => !e)}
+        className={`flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer transition ${isDark ? 'hover:bg-slate-700/50 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}
+      >
+        {hasContent
+          ? (expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />)
+          : <span className="w-3" />}
+        {expanded ? <FolderOpen size={12} className="text-blue-400" /> : <Folder size={12} className="text-blue-400" />}
+        <span className="text-xs flex-1 truncate">{inventory.name}</span>
+        {inventory.type && !['portfolio','category'].includes(inventory.type) && (
+          <span className={`text-[10px] px-1 py-0.5 rounded flex-shrink-0 font-medium ${isDark ? 'bg-slate-700 text-slate-500' : 'bg-slate-200 text-slate-500'}`}>{inventory.type}</span>
+        )}
+        <span className={`text-xs px-1 rounded-full ${isDark ? 'bg-slate-700 text-slate-500' : 'bg-slate-200 text-slate-500'}`}>{totalCount}</span>
+      </div>
+      {expanded && hasContent && (
+        <div className="ml-4 border-l pl-2 space-y-0.5" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+          {directModels.map(m => (
+            <button
+              key={m.id}
+              onClick={() => onModelSelect(m.id)}
+              className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-left transition ${
+                selectedModelId === m.id
+                  ? isDark ? 'bg-blue-600/20 text-blue-300' : 'bg-blue-50 text-blue-700'
+                  : isDark ? 'text-slate-400 hover:bg-slate-700/50' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Package size={10} className="flex-shrink-0" />
+              <span className="truncate">{m.name}</span>
+            </button>
+          ))}
+          {children.map(child => (
+            <CategoryNode
+              key={child.id}
+              inventory={child}
+              allInventories={allInventories}
+              isDark={isDark}
+              selectedModelId={selectedModelId}
+              groupedModels={groupedModels}
+              registryModels={registryModels}
+              onModelSelect={onModelSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+type DetailTab = 'overview' | 'artifacts' | 'metadata';
+
 export default function ModelRegistry() {
   const { theme } = useTheme();
-  const { registryModels, clearRegistryModels, projects, createRegistryModel, deleteRegistryModel, updateRegistryModel, createWorkflowLog } = useGlobal();
+  const isDark = theme === 'dark';
+  const {
+    registryModels, clearRegistryModels, projects,
+    createRegistryModel, deleteRegistryModel, updateRegistryModel, createWorkflowLog,
+    modelInventories, createModelInventory, deleteModelInventory,
+  } = useGlobal();
+  const { showNotification } = useNotification();
+
+  // â”€â”€ Left panel view mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const [leftView, setLeftView] = useState<'inventory' | 'all'>('inventory');
+  const [expandedPortfolios, setExpandedPortfolios] = useState<Set<string>>(new Set());
+  const [selectedInventoryId, setSelectedInventoryId] = useState<string | null>(null);
+  // â”€â”€ Detail tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('overview');
+
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [modelFile, setModelFile] = useState<File | null>(null);
@@ -165,7 +286,19 @@ export default function ModelRegistry() {
   const [modelVersion, setModelVersion] = useState('v1.0');
   const [modelType, setModelType] = useState<'classification' | 'regression' | 'clustering' | 'nlp' | 'custom'>('classification');
   const [modelStage, setModelStage] = useState<'dev' | 'staging' | 'production'>('dev');
+  const [importInvId, setImportInvId] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
+
+  // â”€â”€ Create inventory modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const [showCreateInv, setShowCreateInv] = useState(false);
+  const [newInvName, setNewInvName] = useState('');
+  const [newInvType, setNewInvType] = useState<InventoryLevel>('geography');
+  const [newInvParentId, setNewInvParentId] = useState('');
+  const [newInvDesc, setNewInvDesc] = useState('');
+
+  // â”€â”€ Assign inventory modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const [assignModelId, setAssignModelId] = useState<string | null>(null);
+  const [assignInvId, setAssignInvId] = useState('');
 
   // Auto-select first project when modal opens
   useEffect(() => {
@@ -183,50 +316,51 @@ export default function ModelRegistry() {
 
   const handleClearAll = () => {
     if (registryModels.length === 0) return;
-    if (confirm(`Are you sure you want to remove all ${registryModels.length} model(s) from the repository? This cannot be undone.`)) {
-      clearRegistryModels();
+    if (confirm(`Are you sure you want to remove all ${registryModels.length} model(s) and all inventory folders from the repository? This cannot be undone.`)) {
+      clearRegistryModels(); // also clears modelInventories (see GlobalContext)
       setSelectedModelId(null);
     }
   };
   const handleEditModel = (model: any) => {
     setEditingModel(model.id);
-    setEditFormData({
-      name: model.name,
-      version: model.version,
-      modelType: model.modelType,
-      stage: model.stage,
-    });
+    setEditFormData({ name: model.name, version: model.version, modelType: model.modelType, stage: model.stage });
   };
-
   const handleUpdateModel = (modelId: string) => {
-    updateRegistryModel(modelId, {
-      name: editFormData.name,
-      version: editFormData.version,
-      modelType: editFormData.modelType,
-      stage: editFormData.stage,
-    });
+    updateRegistryModel(modelId, { name: editFormData.name, version: editFormData.version, modelType: editFormData.modelType, stage: editFormData.stage });
     setEditingModel(null);
-    alert('✓ Model updated successfully!');
+    showNotification('âœ“ Model updated', 'success');
   };
-
-  const handleDeleteModel = (modelId: string, modelName: string) => {
-    if (confirm(`Are you sure you want to delete "${modelName}"? This cannot be undone.`)) {
+  const handleDeleteModel = (modelId: string, name: string) => {
+    if (confirm(`Delete "${name}"? This cannot be undone.`)) {
       deleteRegistryModel(modelId);
-      if (selectedModelId === modelId) {
-        setSelectedModelId(null);
-      }
-      alert('✓ Model deleted successfully!');
+      if (selectedModelId === modelId) setSelectedModelId(null);
+      showNotification(`Deleted ${name}`, 'success');
     }
   };
-
   const handleCancelEdit = () => {
     setEditingModel(null);
-    setEditFormData({
-      name: '',
-      version: '',
-      modelType: 'classification',
-      stage: 'dev',
-    });
+    setEditFormData({ name: '', version: '', modelType: 'classification', stage: 'dev' });
+  };
+
+  // â”€â”€ Inventory handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const handleCreateInventory = () => {
+    if (!newInvName.trim()) return;
+    createModelInventory({ name: newInvName.trim(), type: newInvType, parentId: newInvParentId || undefined, description: newInvDesc || undefined });
+    setShowCreateInv(false);
+    setNewInvName(''); setNewInvType('geography'); setNewInvParentId(''); setNewInvDesc('');
+    showNotification(`âœ“ Inventory "${newInvName}" created`, 'success');
+  };
+
+  const handleAssignInventory = () => {
+    if (!assignModelId) return;
+    const g = groupedModels.find(m => m.id === assignModelId);
+    if (g) {
+      registryModels.filter(m => m.name === g.name).forEach(m => {
+        updateRegistryModel(m.id, { inventoryId: assignInvId || undefined });
+      });
+    }
+    setAssignModelId(null); setAssignInvId('');
+    showNotification('âœ“ Model assigned to inventory', 'success');
   };
   // Group models by name and organize versions
   const groupedModels = useMemo(() => {
@@ -262,12 +396,29 @@ export default function ModelRegistry() {
     return Object.values(groups);
   }, [registryModels]);
 
+  // â”€â”€ Inventory computed values â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const portfolios = useMemo(() => modelInventories.filter(i => !i.parentId), [modelInventories]);
+  const categories = useMemo(() => modelInventories.filter(i => !!i.parentId), [modelInventories]);
+
+  const modelsInInventory = (invId: string): DisplayModel[] => {
+    const names = new Set<string>();
+    const result: DisplayModel[] = [];
+    registryModels.filter(m => m.inventoryId === invId).forEach(m => {
+      if (!names.has(m.name)) { names.add(m.name); const g = groupedModels.find(g => g.name === m.name); if (g) result.push(g); }
+    });
+    return result;
+  };
+
+  const unassignedModels = useMemo(() => {
+    const assignedNames = new Set(registryModels.filter(m => m.inventoryId).map(m => m.name));
+    return groupedModels.filter(m => !assignedNames.has(m.name));
+  }, [groupedModels, registryModels]);
+
   // Find selected model using stable ID lookup
   const selectedModel = useMemo(() => {
     if (!selectedModelId || groupedModels.length === 0) {
       return groupedModels.length > 0 ? groupedModels[0] : null;
     }
-    
     const found = groupedModels.find((m) => m.id === selectedModelId);
     return found || (groupedModels.length > 0 ? groupedModels[0] : null);
   }, [selectedModelId, groupedModels]);
@@ -279,6 +430,8 @@ export default function ModelRegistry() {
     }
   }, [groupedModels.length, selectedModelId]);
 
+  const inputCls = `w-full px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`;
+
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
@@ -287,513 +440,638 @@ export default function ModelRegistry() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className={`text-3xl font-bold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-            Model Repository
-          </h1>
-          <p className={`mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-            Models imported from project workflows
+          <h1 className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Model Repository</h1>
+          <p className={`mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+            {registryModels.length} model(s) across {modelInventories.length} inventor{modelInventories.length === 1 ? 'y' : 'ies'}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowImportModal(true)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition font-medium ${
-              theme === 'dark'
-                ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                : 'bg-blue-500 hover:bg-blue-600 text-white'
-            }`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition font-medium ${isDark ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
           >
-            <Upload size={18} />
-            Import Model
+            <Upload size={16} /> Import Model
           </button>
           {registryModels.length > 0 && (
             <button
               onClick={handleClearAll}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition font-medium ${
-                theme === 'dark'
-                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/50'
-                  : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
-              }`}
-              title="Remove all models from repository"
+              title="Remove all models and start fresh"
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition font-medium border ${isDark ? 'bg-red-900/20 text-red-400 hover:bg-red-900/40 border-red-500/50' : 'bg-red-50 text-red-600 hover:bg-red-100 border-red-300'}`}
             >
-              <Trash2 size={18} />
-              Clear All Models
+              <Trash2 size={16} /> Reset Repository
             </button>
           )}
         </div>
       </div>
 
-      {/* Two-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Models List */}
-        <div className="lg:col-span-1 space-y-4">
-          <h2 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-            All Models ({groupedModels.length})
-          </h2>
+      {/* â”€â”€ Two-Column Layout â”€â”€ */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
 
-          {groupedModels.length === 0 ? (
-            <div
-              className={`p-6 rounded-lg border-2 border-dashed text-center ${
-                theme === 'dark'
-                  ? 'border-slate-600 bg-slate-900/30'
-                  : 'border-slate-300 bg-slate-50'
-              }`}
-            >
-              <Package
-                size={32}
-                className={`mx-auto mb-2 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-400'}`}
-              />
-              <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                No models yet
-              </p>
-              <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                Import models from Projects to see them here
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {groupedModels.map((model) => (
-                <button
-                  key={model.id}
-                  onClick={() => setSelectedModelId(model.id)}
-                  className={`w-full text-left p-3 rounded-lg transition ${
-                    selectedModelId === model.id
-                      ? theme === 'dark'
-                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/50'
-                        : 'bg-blue-50 text-blue-600 border border-blue-300'
-                      : theme === 'dark'
-                      ? 'text-slate-300 hover:bg-slate-700/30 border border-slate-700'
-                      : 'text-slate-700 hover:bg-slate-50 border border-slate-200'
-                  } border`}
-                >
-                  <p className="text-sm font-medium">{model.name}</p>
-                  <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                    {model.versions.length} version{model.versions.length !== 1 ? 's' : ''}
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Model Details */}
-        <div className="lg:col-span-2">
-          {selectedModel && groupedModels.length > 0 ? (
-            <div className="space-y-6">
-              {/* Model Overview */}
-              <div
-                className={`p-6 rounded-lg border ${
-                  theme === 'dark' ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'
+        {/* â”€â”€ LEFT PANEL â”€â”€ */}
+        <div className={`lg:col-span-1 rounded-xl border overflow-hidden ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
+          {/* View toggle */}
+          <div className={`flex border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+            {([['inventory', 'Inventories', <LayoutGrid size={12} key="ig"/>], ['all', 'All Models', <List size={12} key="li"/>]] as [string, string, React.ReactNode][]).map(([v, label, icon]) => (
+              <button
+                key={v}
+                onClick={() => setLeftView(v as any)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition border-b-2 ${
+                  leftView === v
+                    ? isDark ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-blue-500 text-blue-600 bg-blue-50'
+                    : isDark ? 'border-transparent text-slate-400 hover:text-slate-300' : 'border-transparent text-slate-600 hover:text-slate-700'
                 }`}
               >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <h2
-                      className={`text-2xl font-bold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}
-                    >
-                      {selectedModel.name}
-                    </h2>
-                    <p className={`mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                      {selectedModel.description}
-                    </p>
+                {icon}{label}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-3 space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 17rem)' }}>
+
+            {/* â”€â”€ INVENTORY VIEW â”€â”€ */}
+            {leftView === 'inventory' && (
+              <>
+                <button
+                  onClick={() => setShowCreateInv(true)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition mb-2 ${isDark ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'}`}
+                >
+                  <FolderPlus size={13} /> New Inventory Folder
+                </button>
+
+                {portfolios.length === 0 && unassignedModels.length === 0 && (
+                  <div className={`text-center py-8 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    <Folder size={28} className="mx-auto mb-2 opacity-50" />
+                    <p className="text-xs">No models yet</p>
+                    <p className="text-xs mt-1 opacity-70">Import models from Projects to get started</p>
                   </div>
-                  <div className="flex items-center gap-2 ml-4">
-                    {selectedModel.versions && selectedModel.versions.length > 0 && (
-                      <>
-                        <button
-                          onClick={() => handleEditModel(selectedModel.versions[0])}
-                          className={`p-2 rounded-lg ${theme === 'dark' ? 'hover:bg-slate-700 text-blue-400' : 'hover:bg-slate-100 text-blue-600'}`}
-                          title="Edit model"
-                        >
-                          <Edit size={18} />
+                )}
+
+                {/* Portfolio folders */}
+                {portfolios.map(portfolio => {
+                  const childCats = categories.filter(c => c.parentId === portfolio.id);
+                  const directModels = modelsInInventory(portfolio.id);
+                  const isExpanded = expandedPortfolios.has(portfolio.id);
+                  // Recursive count — walks the full Geography›Domain›Product›ModelType›ModelID›ModelVersion tree
+                  const totalCount = countModelsUnder(portfolio.id, modelInventories, registryModels);
+
+                  return (
+                    <div key={portfolio.id}>
+                      <div className={`group flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer transition ${
+                        selectedInventoryId === portfolio.id && !selectedModelId
+                          ? isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-700'
+                          : isDark ? 'hover:bg-slate-700/50 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
+                      }`}>
+                        <button onClick={() => setExpandedPortfolios(prev => { const s = new Set(prev); s.has(portfolio.id) ? s.delete(portfolio.id) : s.add(portfolio.id); return s; })} className="p-0.5 rounded flex-shrink-0">
+                          {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                        </button>
+                        <button onClick={() => { setSelectedInventoryId(portfolio.id); setSelectedModelId(null); }} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+                          {isExpanded ? <FolderOpen size={13} className="flex-shrink-0 text-amber-400" /> : <Folder size={13} className="flex-shrink-0 text-amber-400" />}
+                          <span className="text-xs font-medium truncate">{portfolio.name}</span>
+                          {portfolio.type && !['portfolio','category'].includes(portfolio.type) && (
+                            <span className={`text-[10px] px-1 py-0.5 rounded flex-shrink-0 font-medium ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'}`}>{portfolio.type}</span>
+                          )}
+                          <span className={`ml-auto text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-600'}`}>{totalCount}</span>
                         </button>
                         <button
-                          onClick={() => handleDeleteModel(selectedModel.versions[0].id, selectedModel.name)}
-                          className={`p-2 rounded-lg ${theme === 'dark' ? 'hover:bg-slate-700 text-red-400' : 'hover:bg-slate-100 text-red-600'}`}
-                          title="Delete model"
+                          onClick={e => { e.stopPropagation(); if (confirm(`Delete inventory "${portfolio.name}"? Models will be unassigned.`)) deleteModelInventory(portfolio.id); }}
+                          className={`opacity-0 group-hover:opacity-100 p-0.5 rounded flex-shrink-0 ${isDark ? 'text-red-400 hover:bg-slate-700' : 'text-red-500 hover:bg-red-50'}`}
+                          title="Delete folder"
+                        ><Trash2 size={11} /></button>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="ml-5 border-l pl-2 space-y-0.5 mt-0.5" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                          {directModels.map(m => (
+                            <button
+                              key={m.id}
+                              onClick={() => { setSelectedModelId(m.id); setSelectedInventoryId(null); setActiveDetailTab('overview'); }}
+                              className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-left transition ${
+                                selectedModelId === m.id
+                                  ? isDark ? 'bg-blue-600/20 text-blue-300' : 'bg-blue-50 text-blue-700'
+                                  : isDark ? 'text-slate-400 hover:bg-slate-700/50' : 'text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              <Package size={11} className="flex-shrink-0" />
+                              <span className="truncate">{m.name}</span>
+                              <span className={`ml-auto flex-shrink-0 text-xs ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>{m.versions.length}v</span>
+                            </button>
+                          ))}
+                          {childCats.map(child => (
+                            <CategoryNode
+                              key={child.id}
+                              inventory={child}
+                              allInventories={modelInventories}
+                              isDark={isDark}
+                              selectedModelId={selectedModelId}
+                              groupedModels={groupedModels}
+                              registryModels={registryModels}
+                              onModelSelect={id => { setSelectedModelId(id); setSelectedInventoryId(null); setActiveDetailTab('overview'); }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Unfoldered models — no inventoryId assigned */}
+                {unassignedModels.length > 0 && (
+                  <div>
+                    <div
+                      onClick={() => setSelectedInventoryId(prev => prev === '__unassigned__' ? null : '__unassigned__')}
+                      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition ${
+                        selectedInventoryId === '__unassigned__'
+                          ? isDark ? 'bg-slate-600/30 text-slate-300' : 'bg-slate-100 text-slate-700'
+                          : isDark ? 'hover:bg-slate-700/50 text-slate-400' : 'hover:bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      <Folder size={13} className={isDark ? 'text-slate-500' : 'text-slate-400'} />
+                      <span className="text-xs font-medium flex-1">Unfoldered</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'}`}>{unassignedModels.length}</span>
+                    </div>
+                    {selectedInventoryId === '__unassigned__' && (
+                      <div className="ml-5 border-l pl-2 mt-0.5 space-y-0.5" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
+                        {unassignedModels.map(m => (
+                          <button
+                            key={m.id}
+                            onClick={() => { setSelectedModelId(m.id); setSelectedInventoryId(null); setActiveDetailTab('overview'); }}
+                            className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-left transition ${
+                              selectedModelId === m.id
+                                ? isDark ? 'bg-blue-600/20 text-blue-300' : 'bg-blue-50 text-blue-700'
+                                : isDark ? 'text-slate-400 hover:bg-slate-700/50' : 'text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            <Package size={11} className="flex-shrink-0" />
+                            <span className="truncate">{m.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* â”€â”€ ALL MODELS VIEW â”€â”€ */}
+            {leftView === 'all' && (
+              <>
+                {groupedModels.length === 0 ? (
+                  <div className={`p-4 rounded-lg border-2 border-dashed text-center mt-2 ${isDark ? 'border-slate-600 bg-slate-900/30' : 'border-slate-300 bg-slate-50'}`}>
+                    <Package size={28} className={`mx-auto mb-2 ${isDark ? 'text-slate-400' : 'text-slate-400'}`} />
+                    <p className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>No models yet</p>
+                    <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Import models from Projects</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {groupedModels.map(model => {
+                      const regModel = registryModels.find(r => r.id === model.id);
+                      const invName = regModel?.inventoryId ? modelInventories.find(i => i.id === regModel.inventoryId)?.name : null;
+                      return (
+                        <button
+                          key={model.id}
+                          onClick={() => { setSelectedModelId(model.id); setActiveDetailTab('overview'); }}
+                          className={`w-full text-left p-3 rounded-lg transition border ${
+                            selectedModelId === model.id
+                              ? isDark ? 'bg-blue-600/20 text-blue-400 border-blue-500/50' : 'bg-blue-50 text-blue-600 border-blue-300'
+                              : isDark ? 'text-slate-300 hover:bg-slate-700/30 border-slate-700' : 'text-slate-700 hover:bg-slate-50 border-slate-200'
+                          }`}
                         >
-                          <Trash2 size={18} />
+                          <p className="text-sm font-medium truncate">{model.name}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>{model.versions.length}v Â· {model.modelType}</p>
+                            {invName && <span className={`text-xs px-1.5 py-0.5 rounded-full ${isDark ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>{invName}</span>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── RIGHT PANEL ── */}
+        <div className="lg:col-span-3">
+          {selectedModel ? (
+            <div className={`rounded-xl border overflow-hidden ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
+              {/* Model header */}
+              <div className={`p-5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      {selectedModel.name}
+                    </h2>
+                    <p className={`mt-0.5 text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                      {selectedModel.description}
+                    </p>
+                    <div className="flex items-center gap-3 mt-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>{selectedModel.modelType}</span>
+                      <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>{selectedModel.versions.length} version{selectedModel.versions.length !== 1 ? 's' : ''}</span>
+                      {(() => {
+                        const regModel = registryModels.find(r => r.id === selectedModel.id);
+                        const inv = regModel?.inventoryId ? modelInventories.find(i => i.id === regModel.inventoryId) : null;
+                        return inv ? <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>{inv.name}</span> : null;
+                      })()}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => { setAssignModelId(selectedModel.id); setAssignInvId(registryModels.find(r => r.id === selectedModel.id)?.inventoryId ?? ''); }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition border ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      <FolderOpen size={13} /> Assign to Inventory
+                    </button>
+                    {selectedModel.versions.length > 0 && (
+                      <>
+                        <button onClick={() => handleEditModel(selectedModel.versions[0])} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700 text-blue-400' : 'hover:bg-slate-100 text-blue-600'}`} title="Edit">
+                          <Edit size={15} />
+                        </button>
+                        <button onClick={() => handleDeleteModel(selectedModel.versions[0].id, selectedModel.name)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700 text-red-400' : 'hover:bg-slate-100 text-red-600'}`} title="Delete">
+                          <Trash2 size={15} />
                         </button>
                       </>
                     )}
                   </div>
                 </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <p className={`text-sm ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Model Type
-                    </p>
-                    <p
-                      className={`text-lg font-semibold ${
-                        theme === 'dark' ? 'text-white' : 'text-slate-900'
-                      }`}
-                    >
-                      {selectedModel.modelType}
-                    </p>
-                  </div>
-                  <div>
-                    <p className={`text-sm ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Total Versions
-                    </p>
-                    <p
-                      className={`text-lg font-semibold ${
-                        theme === 'dark' ? 'text-white' : 'text-slate-900'
-                      }`}
-                    >
-                      {selectedModel.versions.length}
-                    </p>
-                  </div>
-                  <div>
-                    <p className={`text-sm ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Lineage Steps
-                    </p>
-                    <p
-                      className={`text-lg font-semibold ${
-                        theme === 'dark' ? 'text-white' : 'text-slate-900'
-                      }`}
-                    >
-                      {selectedModel.lineage.length}
-                    </p>
-                  </div>
-                </div>
               </div>
 
-              {/* Versions */}
-              <div>
-                <h3
-                  className={`text-lg font-semibold mb-4 ${
-                    theme === 'dark' ? 'text-white' : 'text-slate-900'
-                  }`}
-                >
-                  Model Versions
-                </h3>
-                <div className="grid grid-cols-1 gap-4">
-                  {selectedModel.versions && selectedModel.versions.length > 0 ? (
-                    selectedModel.versions.map((version) => (
-                      <React.Fragment key={version.id}>
-                        {editingModel === version.id ? (
-                          <div
-                            className={`p-6 rounded-lg border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
-                          >
-                            <h4 className={`text-lg font-semibold mb-4 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-                              Edit Version {version.version}
-                            </h4>
-                            <div className="space-y-4">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <label className={`block text-sm font-medium mb-1 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                                    Model Name
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={editFormData.name}
-                                    onChange={(e) => setEditFormData({...editFormData, name: e.target.value})}
-                                    className={`w-full px-3 py-2 rounded-lg border ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}
-                                  />
+              {/* Tab bar */}
+              <div className={`flex border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                {(['overview', 'artifacts', 'metadata'] as DetailTab[]).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveDetailTab(tab)}
+                    className={`px-5 py-3 text-sm font-medium capitalize border-b-2 transition ${
+                      activeDetailTab === tab
+                        ? isDark ? 'border-blue-500 text-blue-400' : 'border-blue-500 text-blue-600'
+                        : isDark ? 'border-transparent text-slate-400 hover:text-slate-300' : 'border-transparent text-slate-600 hover:text-slate-700'
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              <div className="p-5">
+
+                {/* OVERVIEW TAB */}
+                {activeDetailTab === 'overview' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className={`p-3 rounded-lg ${isDark ? 'bg-slate-700/40' : 'bg-slate-50'}`}>
+                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Model Type</p>
+                        <p className={`text-base font-semibold mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedModel.modelType}</p>
+                      </div>
+                      <div className={`p-3 rounded-lg ${isDark ? 'bg-slate-700/40' : 'bg-slate-50'}`}>
+                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Versions</p>
+                        <p className={`text-base font-semibold mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedModel.versions.length}</p>
+                      </div>
+                      <div className={`p-3 rounded-lg ${isDark ? 'bg-slate-700/40' : 'bg-slate-50'}`}>
+                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Lineage Steps</p>
+                        <p className={`text-base font-semibold mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedModel.lineage.length}</p>
+                      </div>
+                    </div>
+                    <h3 className={`text-sm font-semibold pt-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Versions</h3>
+                    <div className="space-y-3">
+                      {selectedModel.versions.length > 0 ? selectedModel.versions.map(version => (
+                        <React.Fragment key={version.id}>
+                          {editingModel === version.id ? (
+                            <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                              <h4 className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>Edit v{version.version}</h4>
+                              <div className="space-y-3">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Name</label>
+                                    <input type="text" value={editFormData.name} onChange={e => setEditFormData({...editFormData, name: e.target.value})} className={`w-full px-3 py-1.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`} />
+                                  </div>
+                                  <div>
+                                    <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Version</label>
+                                    <input type="text" value={editFormData.version} onChange={e => setEditFormData({...editFormData, version: e.target.value})} className={`w-full px-3 py-1.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`} />
+                                  </div>
                                 </div>
-                                <div>
-                                  <label className={`block text-sm font-medium mb-1 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                                    Version
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={editFormData.version}
-                                    onChange={(e) => setEditFormData({...editFormData, version: e.target.value})}
-                                    className={`w-full px-3 py-2 rounded-lg border ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}
-                                  />
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Type</label>
+                                    <select value={editFormData.modelType} onChange={e => setEditFormData({...editFormData, modelType: e.target.value as any})} className={`w-full px-3 py-1.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}>
+                                      <option value="classification">Classification</option>
+                                      <option value="regression">Regression</option>
+                                      <option value="clustering">Clustering</option>
+                                      <option value="nlp">NLP</option>
+                                      <option value="custom">Custom</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Stage</label>
+                                    <select value={editFormData.stage} onChange={e => setEditFormData({...editFormData, stage: e.target.value as any})} className={`w-full px-3 py-1.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}>
+                                      <option value="dev">Development</option>
+                                      <option value="staging">Staging</option>
+                                      <option value="production">Production</option>
+                                    </select>
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <label className={`block text-sm font-medium mb-1 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                                    Model Type
-                                  </label>
-                                  <select
-                                    value={editFormData.modelType}
-                                    onChange={(e) => setEditFormData({...editFormData, modelType: e.target.value as any})}
-                                    className={`w-full px-3 py-2 rounded-lg border ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}
-                                  >
-                                    <option value="classification">Classification</option>
-                                    <option value="regression">Regression</option>
-                                    <option value="clustering">Clustering</option>
-                                    <option value="nlp">NLP</option>
-                                    <option value="custom">Custom</option>
-                                  </select>
+                                <div className="flex justify-end gap-2 pt-2">
+                                  <button onClick={handleCancelEdit} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'}`}>Cancel</button>
+                                  <button onClick={() => handleUpdateModel(version.id)} className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 font-medium ${isDark ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}>
+                                    <Save size={14} /> Save
+                                  </button>
                                 </div>
-                                <div>
-                                  <label className={`block text-sm font-medium mb-1 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                                    Stage
-                                  </label>
-                                  <select
-                                    value={editFormData.stage}
-                                    onChange={(e) => setEditFormData({...editFormData, stage: e.target.value as any})}
-                                    className={`w-full px-3 py-2 rounded-lg border ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}
-                                  >
-                                    <option value="dev">Development</option>
-                                    <option value="staging">Staging</option>
-                                    <option value="production">Production</option>
-                                  </select>
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-end gap-3 pt-4 border-t">
-                                <button
-                                  onClick={handleCancelEdit}
-                                  className={`px-4 py-2 rounded-lg font-medium ${theme === 'dark' ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'}`}
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  onClick={() => handleUpdateModel(version.id)}
-                                  className={`px-4 py-2 rounded-lg flex items-center gap-2 font-medium ${theme === 'dark' ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
-                                >
-                                  <Save size={16} />
-                                  Save Changes
-                                </button>
                               </div>
                             </div>
-                          </div>
-                        ) : (
-                          <ModelVersionCard
-                            version={version}
-                            modelName={selectedModel.name}
-                            onEdit={() => handleEditModel(version)}
-                            onDelete={() => handleDeleteModel(version.id, `${selectedModel.name} v${version.version}`)}
-                          />
-                        )}
-                      </React.Fragment>
-                    ))
-                  ) : (
-                    <div className={`p-4 rounded-lg border text-center ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                      <p className={`text-sm ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                        No versions available
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Governance Info */}
-              <div
-                className={`p-6 rounded-lg border ${
-                  theme === 'dark' ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'
-                }`}
-              >
-                <h3
-                  className={`text-lg font-semibold mb-4 ${
-                    theme === 'dark' ? 'text-white' : 'text-slate-900'
-                  }`}
-                >
-                  Governance & Lineage
-                </h3>
-
-                <div className="space-y-3">
-                  <div>
-                    <p
-                      className={`text-sm font-medium mb-2 ${
-                        theme === 'dark' ? 'text-slate-300' : 'text-slate-700'
-                      }`}
-                    >
-                      Version Lineage
-                    </p>
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {selectedModel.lineage.map((v, idx) => (
-                        <React.Fragment key={v}>
-                          <span
-                            className={`px-3 py-1 rounded text-xs font-medium ${
-                              theme === 'dark'
-                                ? 'bg-blue-600/20 text-blue-400'
-                                : 'bg-blue-50 text-blue-700'
-                            }`}
-                          >
-                            {v}
-                          </span>
-                          {idx < selectedModel.lineage.length - 1 && (
-                            <ChevronRight
-                              size={16}
-                              className={
-                                theme === 'dark' ? 'text-slate-400' : 'text-slate-600'
-                              }
+                          ) : (
+                            <ModelVersionCard
+                              version={version}
+                              modelName={selectedModel.name}
+                              onEdit={() => handleEditModel(version)}
+                              onDelete={() => handleDeleteModel(version.id, `${selectedModel.name} v${version.version}`)}
                             />
                           )}
                         </React.Fragment>
-                      ))}
+                      )) : (
+                        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No versions available.</p>
+                      )}
                     </div>
                   </div>
+                )}
 
-                  <div>
-                    <p
-                      className={`text-sm font-medium mb-2 ${
-                        theme === 'dark' ? 'text-slate-300' : 'text-slate-700'
-                      }`}
-                    >
-                      Governance Status
+                {/* ARTIFACTS TAB */}
+                {activeDetailTab === 'artifacts' && (
+                  <div className="space-y-4">
+                    <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                      Upload <code className={`px-1 rounded text-xs ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>model.pkl</code> and{' '}
+                      <code className={`px-1 rounded text-xs ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>metrics.json</code> for each version.
                     </p>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 size={16} className="text-green-500" />
-                      <span className={theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}>
-                        Active in Repository
-                      </span>
-                    </div>
+                    {selectedModel.versions.map(version => {
+                      const regModel = registryModels.find(r => r.id === version.id);
+                      if (!regModel) return null;
+                      return (
+                        <div key={version.id} className={`p-4 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                          <p className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                            {selectedModel.name} — v{version.version}
+                            {regModel.model_id && <span className={`ml-2 text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>({regModel.model_id})</span>}
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <p className={`text-xs font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model File (.pkl / .onnx / .pmml)</p>
+                              {regModel.modelPklFile ? (
+                                <div className={`flex items-center gap-2 p-2.5 rounded border ${isDark ? 'bg-green-900/20 border-green-600/30' : 'bg-green-50 border-green-200'}`}>
+                                  <HardDrive size={14} className="text-green-500 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className={`text-xs font-medium truncate ${isDark ? 'text-green-300' : 'text-green-700'}`}>{regModel.modelPklFile.name}</p>
+                                    <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-600'}`}>{(regModel.modelPklFile.size / 1024).toFixed(1)} KB</p>
+                                  </div>
+                                  <label className={`cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-green-600 text-green-300 hover:bg-green-900/30' : 'border-green-400 text-green-700 hover:bg-green-100'}`}>
+                                    Replace
+                                    <input type="file" accept=".pkl,.pickle,.onnx,.pmml,.h5,.pt,.pth" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString() } }); showNotification(`Model file updated`, 'success'); }} />
+                                  </label>
+                                </div>
+                              ) : (
+                                <label className={`cursor-pointer flex items-center gap-2 p-2.5 rounded border-2 border-dashed transition ${isDark ? 'border-slate-600 hover:border-blue-500 hover:bg-blue-500/10' : 'border-slate-300 hover:border-blue-400 hover:bg-blue-50'}`}>
+                                  <Upload size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
+                                  <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload model.pkl / .onnx / .pmml</span>
+                                  <input type="file" accept=".pkl,.pickle,.onnx,.pmml,.h5,.pt,.pth" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString() } }); showNotification(`Model file uploaded`, 'success'); }} />
+                                </label>
+                              )}
+                            </div>
+                            <div>
+                              <p className={`text-xs font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Metrics File (metrics.json)</p>
+                              {regModel.metricsJsonFile ? (
+                                <div className={`flex items-center gap-2 p-2.5 rounded border ${isDark ? 'bg-green-900/20 border-green-600/30' : 'bg-green-50 border-green-200'}`}>
+                                  <FileJson size={14} className="text-green-500 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className={`text-xs font-medium truncate ${isDark ? 'text-green-300' : 'text-green-700'}`}>{regModel.metricsJsonFile.name}</p>
+                                    <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-600'}`}>{(regModel.metricsJsonFile.size / 1024).toFixed(1)} KB</p>
+                                  </div>
+                                  <label className={`cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-green-600 text-green-300 hover:bg-green-900/30' : 'border-green-400 text-green-700 hover:bg-green-100'}`}>
+                                    Replace
+                                    <input type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateRegistryModel(regModel.id, { metricsJsonFile: { name: f.name, path: `/metrics/${f.name}`, size: f.size, uploadedAt: new Date().toISOString() } }); showNotification(`Metrics file updated`, 'success'); }} />
+                                  </label>
+                                </div>
+                              ) : (
+                                <label className={`cursor-pointer flex items-center gap-2 p-2.5 rounded border-2 border-dashed transition ${isDark ? 'border-slate-600 hover:border-green-500 hover:bg-green-500/10' : 'border-slate-300 hover:border-green-400 hover:bg-green-50'}`}>
+                                  <Upload size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
+                                  <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload metrics.json</span>
+                                  <input type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateRegistryModel(regModel.id, { metricsJsonFile: { name: f.name, path: `/metrics/${f.name}`, size: f.size, uploadedAt: new Date().toISOString() } }); showNotification(`Metrics file uploaded`, 'success'); }} />
+                                </label>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {selectedModel.versions.some(v => { const rm = registryModels.find(r => r.id === v.id); return rm && (!rm.modelPklFile || !rm.metricsJsonFile); }) && (
+                      <div className={`flex items-start gap-2 p-3 rounded-lg ${isDark ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-amber-50 border border-amber-200'}`}>
+                        <Info size={14} className={`flex-shrink-0 mt-0.5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
+                        <p className={`text-xs ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>Upload artifact files to enable scoring and full monitoring capabilities.</p>
+                      </div>
+                    )}
                   </div>
-                </div>
+                )}
+
+                {/* METADATA TAB */}
+                {activeDetailTab === 'metadata' && (
+                  <div className="space-y-4">
+                    <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                      <h3 className={`text-sm font-semibold mb-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Governance & Lineage</h3>
+                      <div className="space-y-3">
+                        <div>
+                          <p className={`text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Version Lineage</p>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {selectedModel.lineage.map((v, idx) => (
+                              <React.Fragment key={v}>
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-700'}`}>{v}</span>
+                                {idx < selectedModel.lineage.length - 1 && <ChevronRight size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />}
+                              </React.Fragment>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={14} className="text-green-500" />
+                          <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Active in Repository</span>
+                        </div>
+                      </div>
+                    </div>
+                    {selectedModel.versions.map(version => {
+                      const regModel = registryModels.find(r => r.id === version.id);
+                      if (!regModel?.bulkImported || !regModel.bulkMetadata) return null;
+                      const entries = [
+                        ['Product', regModel.bulkMetadata.product],
+                        ['Population Type', regModel.bulkMetadata.populationType],
+                        ['Usage', regModel.bulkMetadata.usage],
+                        ['Segment Variable', regModel.bulkMetadata.segmentVariable ?? regModel.bulkMetadata.segment],
+                        ['Risk Tier/MRR', regModel.bulkMetadata.riskTier],
+                        ['Status', regModel.bulkMetadata.modelStatus],
+                        ['Developer', regModel.bulkMetadata.developer],
+                        ['Approval Date', regModel.bulkMetadata.approvalDate],
+                        ['First Use', regModel.bulkMetadata.firstUseDate],
+                        ['Last Validation', regModel.bulkMetadata.lastValidationDate],
+                        ['Next Review', regModel.bulkMetadata.nextReviewDate],
+                        ['Upstream Models', regModel.bulkMetadata.upstreamModels],
+                        ['Downstream Models', regModel.bulkMetadata.downstreamModels],
+                      ].filter(([, v]) => v);
+                      if (entries.length === 0) return null;
+                      return (
+                        <div key={version.id} className={`p-4 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                          <p className={`text-xs font-semibold mb-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                            Bulk Import Metadata — v{version.version}
+                            <span className={`ml-2 px-1.5 py-0.5 rounded-full text-xs ${isDark ? 'bg-purple-500/20 text-purple-300' : 'bg-purple-100 text-purple-700'}`}>Bulk</span>
+                          </p>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1.5">
+                            {entries.map(([label, value]) => (
+                              <div key={label as string}>
+                                <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}: </span>
+                                <span className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           ) : (
-            <div
-              className={`p-12 rounded-lg border text-center ${
-                theme === 'dark' ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'
-              }`}
-            >
-              <Package
-                size={48}
-                className={`mx-auto mb-4 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-400'}`}
-              />
-              <p className={`text-lg font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                Model Repository is Empty
-              </p>
-              <p className={`mt-2 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                Import models from Projects workflow to populate the repository
-              </p>
+            <div className={`flex items-center justify-center h-64 rounded-xl border ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="text-center">
+                <Package size={40} className={`mx-auto mb-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
+                <p className={`font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  {groupedModels.length === 0 ? 'No models in repository' : 'Select a model'}
+                </p>
+                <p className={`text-sm mt-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                  {groupedModels.length === 0 ? 'Import models from Projects or use bulk upload' : 'Click a model in the left panel'}
+                </p>
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Import Model Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className={`max-w-2xl w-full max-h-[90vh] overflow-y-auto rounded-lg ${theme === 'dark' ? 'bg-slate-800' : 'bg-white'}`}>
-            <div className={`sticky top-0 p-6 border-b ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              <div className="flex items-center justify-between">
-                <h2 className={`text-2xl font-bold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-                  Import Model
-                </h2>
-                <button
-                  onClick={() => {
-                    setShowImportModal(false);
-                    setModelFile(null);
-                    setModelName('');
-                    setModelVersion('v1.0');
-                    setSelectedProjectId('');
-                  }}
-                  className={`p-2 rounded-lg ${theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-                >
-                  <X size={20} />
+      {/* CREATE INVENTORY MODAL */}
+      {showCreateInv && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className={`w-full max-w-md rounded-xl shadow-xl ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+            <div className={`flex items-center justify-between p-5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+              <h2 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>New Inventory Folder</h2>
+              <button onClick={() => setShowCreateInv(false)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Folder Name *</label>
+                <input value={newInvName} onChange={e => setNewInvName(e.target.value)} placeholder="e.g., US Credit Cards" className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`} />
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Level *</label>
+                <select value={newInvType} onChange={e => setNewInvType(e.target.value as InventoryLevel)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
+                  <option value="geography">Geography</option>
+                  <option value="domain">Domain</option>
+                  <option value="product">Product</option>
+                  <option value="modelType">Model Type</option>
+                  <option value="modelId">Model ID</option>
+                  <option value="modelVersion">Model Version</option>
+                </select>
+                <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Hierarchy: Geography › Domain › Product › Model Type › Model ID › Model Version</p>
+              </div>
+              {newInvType !== 'geography' && (
+                <div>
+                  <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Parent Folder <span className={`font-normal ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>(optional)</span></label>
+                  <select value={newInvParentId} onChange={e => setNewInvParentId(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
+                    <option value="">-- No parent --</option>
+                    {modelInventories.map(p => <option key={p.id} value={p.id}>{p.type ? p.type.charAt(0).toUpperCase() + p.type.slice(1) : ''}: {p.name}</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Description</label>
+                <input value={newInvDesc} onChange={e => setNewInvDesc(e.target.value)} placeholder="Optional description" className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`} />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setShowCreateInv(false)} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
+                <button onClick={handleCreateInventory} disabled={!newInvName} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${!newInvName ? isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed' : isDark ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}>
+                  Create Folder
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
 
-            <div className="p-6 space-y-6">
-              {/* Project Selection */}
+      {/* ASSIGN TO INVENTORY MODAL */}
+      {assignModelId && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className={`w-full max-w-md rounded-xl shadow-xl ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+            <div className={`flex items-center justify-between p-5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+              <h2 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Assign to Inventory</h2>
+              <button onClick={() => setAssignModelId(null)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Choose an inventory folder for <span className="font-semibold">{groupedModels.find(m => m.id === assignModelId)?.name ?? assignModelId}</span>.
+              </p>
               <div>
-                <label className={`block text-sm font-medium mb-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Target Project * 
-                  {selectedProjectId && (
-                    <span className={`text-xs ml-2 ${theme === 'dark' ? 'text-green-400' : 'text-green-600'}`}>
-                      ✓ Selected
-                    </span>
-                  )}
-                </label>
-                <select
-                  value={selectedProjectId}
-                  onChange={(e) => setSelectedProjectId(e.target.value)}
-                  className={`w-full px-4 py-2 rounded-lg border ${
-                    theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'
-                  }`}
-                >
-                  <option value="">-- Select Project --</option>
-                  {projects && projects.length > 0 ? (
-                    projects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="" disabled>
-                      No projects available
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Inventory Folder</label>
+                <select value={assignInvId} onChange={e => setAssignInvId(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
+                  <option value="">-- Unassigned --</option>
+                  {modelInventories.map(inv => (
+                    <option key={inv.id} value={inv.id}>
+                      {inv.type === 'category' ? '  \u2514 ' : ''}{inv.name} ({inv.type})
                     </option>
-                  )}
+                  ))}
                 </select>
-                {projects && projects.length === 0 && (
-                  <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`}>
-                    ℹ️ Create a project in the Projects section first
-                  </p>
-                )}
-                {projects && projects.length > 0 && (
-                  <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                    Model will be added to this project
-                  </p>
-                )}
               </div>
-
-              {/* Model File Upload */}
-              <div>
-                <label className={`block text-sm font-medium mb-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Model File *
-                </label>
-                <input
-                  type="file"
-                  accept=".pkl,.pmml,.onnx,.json,.h5"
-                  onChange={(e) => setModelFile(e.target.files?.[0] || null)}
-                  className={`w-full px-4 py-2 rounded-lg border ${
-                    theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'
-                  }`}
-                />
-                {modelFile && (
-                  <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-green-400' : 'text-green-600'}`}>
-                    ✓ Selected: {modelFile.name} ({(modelFile.size / 1024).toFixed(1)} KB)
-                  </p>
-                )}
-                <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                  Supported formats: .pkl, .pmml, .onnx, .json, .h5
+              {modelInventories.length === 0 && (
+                <p className={`text-xs ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+                  No inventory folders yet — create one first using "New Inventory Folder".
                 </p>
+              )}
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setAssignModelId(null)} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
+                <button onClick={handleAssignInventory} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${isDark ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}>
+                  Assign
+                </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
 
-              {/* Model Name */}
-              <div>
-                <label className={`block text-sm font-medium mb-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Model Name *
-                </label>
-                <input
-                  type="text"
-                  value={modelName}
-                  onChange={(e) => setModelName(e.target.value)}
-                  placeholder="e.g., Credit Risk Model"
-                  className={`w-full px-4 py-2 rounded-lg border ${
-                    theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
-                  }`}
-                />
+      {/* IMPORT MODEL MODAL */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className={`max-w-2xl w-full max-h-[90vh] overflow-y-auto rounded-xl ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+            <div className={`sticky top-0 p-5 border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="flex items-center justify-between">
+                <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Import Model</h2>
+                <button onClick={() => { setShowImportModal(false); setModelFile(null); setModelName(''); setModelVersion('v1.0'); setSelectedProjectId(''); setImportInvId(''); }} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><X size={18} /></button>
               </div>
-
-              {/* Model Version */}
+            </div>
+            <div className="p-5 space-y-4">
               <div>
-                <label className={`block text-sm font-medium mb-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Version *
-                </label>
-                <input
-                  type="text"
-                  value={modelVersion}
-                  onChange={(e) => setModelVersion(e.target.value)}
-                  placeholder="e.g., v1.0, v2.1"
-                  className={`w-full px-4 py-2 rounded-lg border ${
-                    theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
-                  }`}
-                />
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Target Project *</label>
+                <select value={selectedProjectId} onChange={e => setSelectedProjectId(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
+                  <option value="">-- Select Project --</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               </div>
-
-              {/* Model Type */}
               <div>
-                <label className={`block text-sm font-medium mb-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Model Type *
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  Model File <span className={`text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(Optional — upload later in Artifacts tab)</span>
                 </label>
-                <select
-                  value={modelType}
-                  onChange={(e) => setModelType(e.target.value as any)}
-                  className={`w-full px-4 py-2 rounded-lg border ${
-                    theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'
-                  }`}
-                >
+                <input type="file" accept=".pkl,.pmml,.onnx,.json,.h5" onChange={e => setModelFile(e.target.files?.[0] || null)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`} />
+                {modelFile && <p className={`text-xs mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>✓ {modelFile.name} ({(modelFile.size / 1024).toFixed(1)} KB)</p>}
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Name *</label>
+                <input type="text" value={modelName} onChange={e => setModelName(e.target.value)} placeholder="e.g., Credit Risk Model" className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`} />
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Version *</label>
+                <input type="text" value={modelVersion} onChange={e => setModelVersion(e.target.value)} placeholder="e.g., v1.0" className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`} />
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Type *</label>
+                <select value={modelType} onChange={e => setModelType(e.target.value as any)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
                   <option value="classification">Classification</option>
                   <option value="regression">Regression</option>
                   <option value="clustering">Clustering</option>
@@ -801,100 +1079,52 @@ export default function ModelRegistry() {
                   <option value="custom">Custom</option>
                 </select>
               </div>
-
-              {/* Stage */}
               <div>
-                <label className={`block text-sm font-medium mb-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Stage *
-                </label>
-                <select
-                  value={modelStage}
-                  onChange={(e) => setModelStage(e.target.value as any)}
-                  className={`w-full px-4 py-2 rounded-lg border ${
-                    theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'
-                  }`}
-                >
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Stage *</label>
+                <select value={modelStage} onChange={e => setModelStage(e.target.value as any)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
                   <option value="dev">Development</option>
                   <option value="staging">Staging</option>
                   <option value="production">Production</option>
                 </select>
               </div>
-
-              {/* Action Buttons */}
-              <div className="flex gap-3 pt-4">
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  Assign to Inventory <span className={`text-xs font-normal ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>(Optional)</span>
+                </label>
+                <p className={`text-xs mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Geography / Domain / Product / Model Type / Model ID / Model Version</p>
+                <select value={importInvId} onChange={e => setImportInvId(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
+                  <option value="">-- No inventory folder --</option>
+                  {modelInventories.map(inv => (
+                    <option key={inv.id} value={inv.id}>
+                      {inv.type ? inv.type.charAt(0).toUpperCase() + inv.type.slice(1) : ''}: {inv.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => { setShowImportModal(false); setModelFile(null); setModelName(''); setModelVersion('v1.0'); setSelectedProjectId(''); setImportInvId(''); }} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'}`}>Cancel</button>
                 <button
                   onClick={() => {
-                    setShowImportModal(false);
-                    setModelFile(null);
-                    setModelName('');
-                    setModelVersion('v1.0');
-                    setSelectedProjectId('');
-                  }}
-                  className={`flex-1 px-4 py-3 rounded-lg font-medium ${
-                    theme === 'dark'
-                      ? 'bg-slate-700 hover:bg-slate-600 text-white'
-                      : 'bg-slate-200 hover:bg-slate-300 text-slate-900'
-                  }`}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    if (!selectedProjectId || !modelFile || !modelName) {
-                      alert('Please fill in all required fields');
-                      return;
-                    }
-
-                    // Log creation event FIRST before any state changes
-                    const description = getCreationDescription.model(
-                      modelName,
-                      modelVersion,
-                      modelType,
-                      modelStage
-                    );
+                    if (!selectedProjectId || !modelName) { showNotification('Please fill in required fields', 'error'); return; }
                     const project = projects.find(p => p.id === selectedProjectId);
                     if (project) {
-                      createWorkflowLog(createCreationLogEntry(
-                        project.id,
-                        project.name,
-                        'Model Created',
-                        description
-                      ));
+                      createWorkflowLog(createCreationLogEntry(project.id, project.name, 'Model Created', getCreationDescription.model(modelName, modelVersion, modelType, modelStage)));
                     }
-
                     createRegistryModel({
                       name: modelName,
                       version: modelVersion,
                       projectId: selectedProjectId,
-                      modelType: modelType,
+                      modelType,
                       stage: modelStage,
                       status: 'active',
-                      uploadedFile: {
-                        name: modelFile.name,
-                        path: `/models/${modelFile.name}`,
-                        size: modelFile.size,
-                        type: modelFile.type,
-                      },
+                      inventoryId: importInvId || undefined,
+                      ...(modelFile ? { uploadedFile: { name: modelFile.name, path: `/models/${modelFile.name}`, size: modelFile.size, type: modelFile.type } } : {}),
                     });
-
-                    setShowImportModal(false);
-                    setModelFile(null);
-                    setModelName('');
-                    setModelVersion('v1.0');
-                    setSelectedProjectId('');
-                    
-                    alert(`✓ Model "${modelName} ${modelVersion}" imported successfully!`);
+                    setShowImportModal(false); setModelFile(null); setModelName(''); setModelVersion('v1.0'); setSelectedProjectId(''); setImportInvId('');
+                    showNotification(`"${modelName} ${modelVersion}" imported successfully`, 'success');
                   }}
-                  disabled={!selectedProjectId || !modelFile || !modelName}
-                  className={`flex-1 px-4 py-3 rounded-lg font-medium ${
-                    !selectedProjectId || !modelFile || !modelName
-                      ? theme === 'dark'
-                        ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                      : theme === 'dark'
-                      ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                      : 'bg-blue-500 hover:bg-blue-600 text-white'
-                  }`}
+                  disabled={!selectedProjectId || !modelName}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${!selectedProjectId || !modelName ? isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed' : isDark ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
                 >
                   Import Model
                 </button>
@@ -906,3 +1136,4 @@ export default function ModelRegistry() {
     </div>
   );
 }
+
