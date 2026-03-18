@@ -111,6 +111,28 @@ export interface RegistryModel {
   status: 'active' | 'inactive';
   createdAt: string;
   domain?: string;
+  // Bulk import support
+  bulkImported?: boolean;
+  bulkMetadata?: Record<string, string>;
+  // Artifact file uploads (model.pkl / metrics.json)
+  modelPklFile?: { name: string; path: string; size: number; uploadedAt: string; };
+  metricsJsonFile?: { name: string; path: string; size: number; uploadedAt: string; };
+  // Inventory assignment
+  inventoryId?: string;
+}
+
+export type InventoryLevel =
+  | 'geography' | 'domain' | 'product' | 'modelType' | 'modelId' | 'modelVersion'
+  | 'portfolio' | 'category'; // legacy values kept for backward compat
+
+export interface ModelInventory {
+  id: string;
+  name: string;
+  /** Semantic level: geography / domain / product / modelType / modelId / modelVersion */
+  type: InventoryLevel;
+  parentId?: string;
+  description?: string;
+  createdAt: string;
 }
 
 export interface DeploymentJob {
@@ -410,6 +432,11 @@ interface GlobalContextType {
   deleteRegistryModel: (id: string) => void;
   clearRegistryModels: () => void;
   getRegistryModel: (id: string) => RegistryModel | undefined;
+  // Model Inventories (folder structure)
+  modelInventories: ModelInventory[];
+  createModelInventory: (inv: Omit<ModelInventory, 'id' | 'createdAt'>) => ModelInventory;
+  updateModelInventory: (id: string, updates: Partial<ModelInventory>) => void;
+  deleteModelInventory: (id: string) => void;
 
   // Deployment Jobs
   deploymentJobs: DeploymentJob[];
@@ -475,6 +502,7 @@ const initialState: {
   ingestionJobs: IngestionJob[];
   preparationJobs: PreparationJob[];
   registryModels: RegistryModel[];
+  modelInventories: ModelInventory[];
   deploymentJobs: DeploymentJob[];
   inferencingJobs: InferencingJob[];
   monitoringJobs: MonitoringJob[];
@@ -492,6 +520,7 @@ const initialState: {
   ingestionJobs: [],
   preparationJobs: [],
   registryModels: [],
+  modelInventories: [],
   deploymentJobs: [],
   inferencingJobs: [],
   monitoringJobs: [],
@@ -883,13 +912,13 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       },
     ];
 
-    // Derive banking models/metrics from registry models (Projects workflow only)
-    const { bankingModels, bankingMetrics } = buildBankingDataFromRegistry(sampleModels);
+    // Start with empty registry — models will be populated from user uploads
+    const { bankingModels, bankingMetrics } = buildBankingDataFromRegistry([]);
 
     return {
       ...initialState,
       projects: [sampleProject],
-      registryModels: sampleModels,
+      registryModels: [],
       ingestionJobs: sampleDatasets,
       deploymentJobs: sampleDeployments,
       monitoringJobs: sampleMonitoringJobs,
@@ -1353,10 +1382,32 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setState(prev => ({
       ...prev,
       registryModels: [],
+      modelInventories: [],
     }));
   };
 
   const getRegistryModel = (id: string) => (state.registryModels || []).find(m => m.id === id);
+
+  // Model Inventories CRUD
+  const createModelInventory = (inv: Omit<ModelInventory, 'id' | 'createdAt'>): ModelInventory => {
+    const newInv: ModelInventory = { ...inv, id: generateId(), createdAt: new Date().toISOString() };
+    setState(prev => ({ ...prev, modelInventories: [...(prev.modelInventories || []), newInv] }));
+    return newInv;
+  };
+  const updateModelInventory = (id: string, updates: Partial<ModelInventory>) => {
+    setState(prev => ({
+      ...prev,
+      modelInventories: (prev.modelInventories || []).map(inv => inv.id === id ? { ...inv, ...updates } : inv),
+    }));
+  };
+  const deleteModelInventory = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      // Remove inventory and un-assign models that were in it
+      modelInventories: (prev.modelInventories || []).filter(inv => inv.id !== id),
+      registryModels: prev.registryModels.map(m => m.inventoryId === id ? { ...m, inventoryId: undefined } : m),
+    }));
+  };
 
   // Deployment Jobs
   const createDeploymentJob = (job: Omit<DeploymentJob, 'id' | 'createdAt'>): DeploymentJob => {
@@ -1823,6 +1874,10 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     deleteRegistryModel,
     clearRegistryModels,
     getRegistryModel,
+    modelInventories: state.modelInventories || [],
+    createModelInventory,
+    updateModelInventory,
+    deleteModelInventory,
     deploymentJobs: state.deploymentJobs || [],
     createDeploymentJob,
     updateDeploymentJob,
