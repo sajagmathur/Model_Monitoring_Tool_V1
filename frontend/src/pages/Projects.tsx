@@ -53,14 +53,11 @@ interface ModelMetadata {
   developer: string;
   segmentVariable: string;
   // Performance Benchmarks
-  fullPerfBenchmarkVintage: string;
-  fullPerfWindow: string;
+  fullPerf: string;
   fullPerfBadDef: string;
-  ew1BenchmarkVintage: string;
-  ew1Window: string;
+  ew1: string;
   ew1BadDef: string;
-  ew2BenchmarkVintage: string;
-  ew2Window: string;
+  ew2: string;
   ew2BadDef: string;
   // Governance / Dates
   approvalDate: string;
@@ -121,13 +118,14 @@ interface ModelTree {
 // Bulk-Upload Excel Template Schema
 // ─────────────────────────────────────────────────────────────────────────────
 const BULK_REQUIRED_COLUMNS = [
-  'Model Name', 'Model ID', 'Geography', 'Domain', 'Product', 'Model Type',
-  'Population Type', 'Usage', 'Risk Tier/MRR', 'Model Status', 'Developer', 'Segment Variable',
+  'Model Name', 'Model ID', 'Domain', 'Product', 'Model Type',
+  'Population Type', 'Usage', 'Risk Tier/MRR', 'Model Status',
 ];
 const BULK_OPTIONAL_COLUMNS = [
-  'Full Performance Benchmark Vintage', 'Full Performance Window', 'Full Performance Bad Definition',
-  'Early Warning 1 Benchmark Vintage', 'Early Warning 1 Window', 'Early Warning 1 Bad Definition',
-  'Early Warning 2 Benchmark Vintage', 'Early Warning 2 Window', 'Early Warning 2 Bad Definition',
+  'Model Version', 'Geography', 'Developer', 'Segment Variable',
+  'Full Performance', 'Full Performance Bad Definition',
+  'Early Warning 1', 'Early Warning 1 Bad Definition',
+  'Early Warning 2', 'Early Warning 2 Bad Definition',
   'Approval Date', 'First Use Date', 'Owner', 'Last Validation Date', 'Next Review Date',
   'Upstream Models', 'Downstream Models',
 ];
@@ -143,12 +141,18 @@ interface BulkSchemaResult {
   rowErrors: number;
 }
 
-const mapBulkModelType = (t: string): 'classification' | 'regression' | 'clustering' | 'nlp' | 'custom' => {
+const mapBulkModelType = (t: string): 'scorecard' | 'classification' | 'regression' | 'neural_network' | 'decision_tree' | 'ensemble' | 'time_series' | 'clustering' | 'nlp' | 'other' | 'custom' => {
   const l = t.toLowerCase();
-  if (l.includes('classif') || l.includes('scorecard') || l.includes('logistic')) return 'classification';
+  if (l.includes('scorecard')) return 'scorecard';
+  if (l.includes('classif') || l.includes('logistic')) return 'classification';
   if (l.includes('regress') || l.includes('linear')) return 'regression';
+  if (l.includes('neural') || l.includes('deep') || l.includes('cnn')) return 'neural_network';
+  if (l.includes('decision') || l.includes('tree') || l.includes('cart')) return 'decision_tree';
+  if (l.includes('ensemble') || l.includes('xgboost') || l.includes('gradient') || l.includes('random forest') || l.includes('gbm') || l.includes('lgbm')) return 'ensemble';
+  if (l.includes('time series') || l.includes('arima') || l.includes('timeseries') || l.includes('lstm')) return 'time_series';
   if (l.includes('clust')) return 'clustering';
-  if (l.includes('nlp') || l.includes('text')) return 'nlp';
+  if (l.includes('nlp') || l.includes('text') || l.includes('bert')) return 'nlp';
+  if (l.includes('other')) return 'other';
   return 'custom';
 };
 const mapBulkRiskTier = (t: string): 'dev' | 'staging' | 'production' => {
@@ -269,6 +273,12 @@ const BulkModelUploadStep: React.FC<{
         BULK_REQUIRED_COLUMNS.forEach(col => {
           if (headers.includes(col) && !data[col]) errors.push(`"${col}" is empty`);
         });
+        // Cross-field: at least Full Performance or Early Warning 1 must be specified
+        const hasFpCol = headers.includes('Full Performance');
+        const hasEw1Col = headers.includes('Early Warning 1');
+        if (hasFpCol && hasEw1Col && !data['Full Performance'] && !data['Early Warning 1']) {
+          errors.push(`At least one of "Full Performance" or "Early Warning 1" must be specified`);
+        }
         rows.push({ rowNum: i + 1, data, errors });
       }
 
@@ -306,15 +316,16 @@ const BulkModelUploadStep: React.FC<{
       const regModel = createRegistryModel({
         name: d['Model Name'],
         model_id: d['Model ID'] || undefined,
-        version: 'v1',
+        version: d['Model Version'] || 'v1',
         projectId,
         modelType: mapBulkModelType(d['Model Type'] || ''),
         stage: mapBulkRiskTier(d['Risk Tier/MRR'] || ''),
         status: 'active',
         domain: d['Domain'] || undefined,
-        bulkImported: true,
-        bulkMetadata: {
+        metadata: {
+          modelVersion: d['Model Version'] || '',
           geography: d['Geography'] || '',
+          domain: d['Domain'] || '',
           product: d['Product'] || '',
           populationType: d['Population Type'] || '',
           usage: d['Usage'] || '',
@@ -323,14 +334,11 @@ const BulkModelUploadStep: React.FC<{
           owner: d['Owner'] || '',
           riskTier: d['Risk Tier/MRR'] || '',
           modelStatus: d['Model Status'] || '',
-          fullPerfBenchmarkVintage: d['Full Performance Benchmark Vintage'] || '',
-          fullPerfWindow: d['Full Performance Window'] || '',
+          fullPerf: d['Full Performance'] || '',
           fullPerfBadDef: d['Full Performance Bad Definition'] || '',
-          ew1BenchmarkVintage: d['Early Warning 1 Benchmark Vintage'] || '',
-          ew1Window: d['Early Warning 1 Window'] || '',
+          ew1: d['Early Warning 1'] || '',
           ew1BadDef: d['Early Warning 1 Bad Definition'] || '',
-          ew2BenchmarkVintage: d['Early Warning 2 Benchmark Vintage'] || '',
-          ew2Window: d['Early Warning 2 Window'] || '',
+          ew2: d['Early Warning 2'] || '',
           ew2BadDef: d['Early Warning 2 Bad Definition'] || '',
           approvalDate: d['Approval Date'] || '',
           firstUseDate: d['First Use Date'] || '',
@@ -462,7 +470,7 @@ const BulkModelUploadStep: React.FC<{
           ))}
         </div>
         <p className={`text-xs mt-2 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
-          Schema DQ validation runs automatically on upload. Optional columns (performance windows, dates, lineage) are also supported.
+          Schema DQ validation runs automatically on upload. Optional columns (Geography, Developer, target specification, governance dates, lineage) are also supported.
         </p>
       </div>
 
@@ -812,9 +820,9 @@ const ModelRepositoryStep: React.FC<{
     modelId: '', modelName: '', modelVersion: 'v1',
     geography: '', domain: '', product: '', modelType: '', populationType: '', usage: '',
     riskTierMRR: '', modelStatus: '', developer: '', segmentVariable: '',
-    fullPerfBenchmarkVintage: '', fullPerfWindow: '', fullPerfBadDef: '',
-    ew1BenchmarkVintage: '', ew1Window: '', ew1BadDef: '',
-    ew2BenchmarkVintage: '', ew2Window: '', ew2BadDef: '',
+    fullPerf: '', fullPerfBadDef: '',
+    ew1: '', ew1BadDef: '',
+    ew2: '', ew2BadDef: '',
     approvalDate: '', firstUseDate: '', owner: '',
     lastValidationDate: '', nextReviewDate: '',
     upstreamModels: '', downstreamModels: '',
@@ -891,14 +899,11 @@ const ModelRepositoryStep: React.FC<{
             modelStatus: String(r['Model Status'] || '').trim(),
             developer: String(r['Developer'] || '').trim(),
             segmentVariable: String(r['Segment Variable'] || '').trim(),
-            fullPerfBenchmarkVintage: String(r['Full Performance Benchmark Vintage'] || '').trim(),
-            fullPerfWindow: String(r['Full Performance Window'] || '').trim(),
+            fullPerf: String(r['Full Performance'] || '').trim(),
             fullPerfBadDef: String(r['Full Performance Bad Definition'] || '').trim(),
-            ew1BenchmarkVintage: String(r['Early Warning 1 Benchmark Vintage'] || '').trim(),
-            ew1Window: String(r['Early Warning 1 Window'] || '').trim(),
+            ew1: String(r['Early Warning 1'] || '').trim(),
             ew1BadDef: String(r['Early Warning 1 Bad Definition'] || '').trim(),
-            ew2BenchmarkVintage: String(r['Early Warning 2 Benchmark Vintage'] || '').trim(),
-            ew2Window: String(r['Early Warning 2 Window'] || '').trim(),
+            ew2: String(r['Early Warning 2'] || '').trim(),
             ew2BadDef: String(r['Early Warning 2 Bad Definition'] || '').trim(),
             approvalDate: String(r['Approval Date'] || '').trim(),
             firstUseDate: String(r['First Use Date'] || '').trim(),
@@ -1025,9 +1030,9 @@ const ModelRepositoryStep: React.FC<{
       modelId: '', modelName: '', modelVersion: 'v1',
       geography: '', domain: '', product: '', modelType: '', populationType: '', usage: '',
       riskTierMRR: '', modelStatus: '', developer: '', segmentVariable: '',
-      fullPerfBenchmarkVintage: '', fullPerfWindow: '', fullPerfBadDef: '',
-      ew1BenchmarkVintage: '', ew1Window: '', ew1BadDef: '',
-      ew2BenchmarkVintage: '', ew2Window: '', ew2BadDef: '',
+      fullPerf: '', fullPerfBadDef: '',
+      ew1: '', ew1BadDef: '',
+      ew2: '', ew2BadDef: '',
       approvalDate: '', firstUseDate: '', owner: '',
       lastValidationDate: '', nextReviewDate: '',
       upstreamModels: '', downstreamModels: '',
@@ -1812,79 +1817,64 @@ const ModelRepositoryStep: React.FC<{
                   {activeTab === 'performance' && (
                     <>
                       {/* Full Performance */}
-                      <p className={`text-xs font-semibold pb-1 border-b ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Full Performance</p>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Benchmark Vintage</label>
-                          <input type="text" value={metadata.fullPerfBenchmarkVintage}
-                            onChange={(e) => setMetadata({ ...metadata, fullPerfBenchmarkVintage: e.target.value })}
-                            placeholder="e.g., Q1 2023"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Window</label>
-                          <input type="text" value={metadata.fullPerfWindow}
-                            onChange={(e) => setMetadata({ ...metadata, fullPerfWindow: e.target.value })}
-                            placeholder="e.g., 12 months"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Bad Definition</label>
-                          <input type="text" value={metadata.fullPerfBadDef}
-                            onChange={(e) => setMetadata({ ...metadata, fullPerfBadDef: e.target.value })}
-                            placeholder="e.g., 90+ DPD"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
+                      <div>
+                        <p className={`text-xs font-semibold pb-1 border-b ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Full Performance</p>
+                        <select value={metadata.fullPerf}
+                          onChange={(e) => setMetadata({ ...metadata, fullPerf: e.target.value })}
+                          className={`mt-2 w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}>
+                          <option value="">-- Select --</option>
+                          <option value="Yes">Yes</option>
+                          <option value="No">No</option>
+                        </select>
+                        {metadata.fullPerf === 'Yes' && (
+                          <div className="mt-2">
+                            <label className="block text-xs font-medium mb-1">Bad Definition</label>
+                            <input type="text" value={metadata.fullPerfBadDef}
+                              onChange={(e) => setMetadata({ ...metadata, fullPerfBadDef: e.target.value })}
+                              placeholder="e.g., 90+ DPD"
+                              className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                          </div>
+                        )}
                       </div>
                       {/* Early Warning 1 */}
-                      <p className={`text-xs font-semibold pb-1 border-b mt-2 ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Early Warning 1</p>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Benchmark Vintage</label>
-                          <input type="text" value={metadata.ew1BenchmarkVintage}
-                            onChange={(e) => setMetadata({ ...metadata, ew1BenchmarkVintage: e.target.value })}
-                            placeholder="e.g., Q1 2023"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Window</label>
-                          <input type="text" value={metadata.ew1Window}
-                            onChange={(e) => setMetadata({ ...metadata, ew1Window: e.target.value })}
-                            placeholder="e.g., 3 months"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Bad Definition</label>
-                          <input type="text" value={metadata.ew1BadDef}
-                            onChange={(e) => setMetadata({ ...metadata, ew1BadDef: e.target.value })}
-                            placeholder="e.g., 30+ DPD"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
+                      <div className="mt-3">
+                        <p className={`text-xs font-semibold pb-1 border-b ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Early Warning 1</p>
+                        <select value={metadata.ew1}
+                          onChange={(e) => setMetadata({ ...metadata, ew1: e.target.value })}
+                          className={`mt-2 w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}>
+                          <option value="">-- Select --</option>
+                          <option value="Yes">Yes</option>
+                          <option value="No">No</option>
+                        </select>
+                        {metadata.ew1 === 'Yes' && (
+                          <div className="mt-2">
+                            <label className="block text-xs font-medium mb-1">Bad Definition</label>
+                            <input type="text" value={metadata.ew1BadDef}
+                              onChange={(e) => setMetadata({ ...metadata, ew1BadDef: e.target.value })}
+                              placeholder="e.g., 30+ DPD"
+                              className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                          </div>
+                        )}
                       </div>
                       {/* Early Warning 2 */}
-                      <p className={`text-xs font-semibold pb-1 border-b mt-2 ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Early Warning 2</p>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Benchmark Vintage</label>
-                          <input type="text" value={metadata.ew2BenchmarkVintage}
-                            onChange={(e) => setMetadata({ ...metadata, ew2BenchmarkVintage: e.target.value })}
-                            placeholder="e.g., Q2 2023"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Window</label>
-                          <input type="text" value={metadata.ew2Window}
-                            onChange={(e) => setMetadata({ ...metadata, ew2Window: e.target.value })}
-                            placeholder="e.g., 6 months"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Bad Definition</label>
-                          <input type="text" value={metadata.ew2BadDef}
-                            onChange={(e) => setMetadata({ ...metadata, ew2BadDef: e.target.value })}
-                            placeholder="e.g., 60+ DPD"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
+                      <div className="mt-3">
+                        <p className={`text-xs font-semibold pb-1 border-b ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Early Warning 2</p>
+                        <select value={metadata.ew2}
+                          onChange={(e) => setMetadata({ ...metadata, ew2: e.target.value })}
+                          className={`mt-2 w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}>
+                          <option value="">-- Select --</option>
+                          <option value="Yes">Yes</option>
+                          <option value="No">No</option>
+                        </select>
+                        {metadata.ew2 === 'Yes' && (
+                          <div className="mt-2">
+                            <label className="block text-xs font-medium mb-1">Bad Definition</label>
+                            <input type="text" value={metadata.ew2BadDef}
+                              onChange={(e) => setMetadata({ ...metadata, ew2BadDef: e.target.value })}
+                              placeholder="e.g., 60+ DPD"
+                              className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
@@ -5012,14 +5002,11 @@ export default function Projects() {
                             owner: metadata.owner || '',
                             riskTier: metadata.riskTierMRR || '',
                             modelStatus: metadata.modelStatus || '',
-                            fullPerfBenchmarkVintage: metadata.fullPerfBenchmarkVintage || '',
-                            fullPerfWindow: metadata.fullPerfWindow || '',
+                            fullPerf: metadata.fullPerf || '',
                             fullPerfBadDef: metadata.fullPerfBadDef || '',
-                            ew1BenchmarkVintage: metadata.ew1BenchmarkVintage || '',
-                            ew1Window: metadata.ew1Window || '',
+                            ew1: metadata.ew1 || '',
                             ew1BadDef: metadata.ew1BadDef || '',
-                            ew2BenchmarkVintage: metadata.ew2BenchmarkVintage || '',
-                            ew2Window: metadata.ew2Window || '',
+                            ew2: metadata.ew2 || '',
                             ew2BadDef: metadata.ew2BadDef || '',
                             approvalDate: metadata.approvalDate || '',
                             firstUseDate: metadata.firstUseDate || '',

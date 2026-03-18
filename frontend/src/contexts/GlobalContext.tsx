@@ -105,18 +105,20 @@ export interface RegistryModel {
     size: number;
     type: string;
   };
-  modelType: 'classification' | 'regression' | 'clustering' | 'nlp' | 'custom';
+  modelType: 'scorecard' | 'classification' | 'regression' | 'neural_network' | 'decision_tree' | 'ensemble' | 'time_series' | 'clustering' | 'nlp' | 'other' | 'custom';
   metrics?: Record<string, number>;
   stage: 'dev' | 'staging' | 'production';
   status: 'active' | 'inactive';
   createdAt: string;
   domain?: string;
-  // Bulk import support
+  // Model metadata (populated by both single import and bulk import)
+  metadata?: Record<string, string>;
+  // Legacy: bulk import support (kept for backward compatibility)
   bulkImported?: boolean;
   bulkMetadata?: Record<string, string>;
   // Artifact file uploads (model.pkl / metrics.json)
-  modelPklFile?: { name: string; path: string; size: number; uploadedAt: string; };
-  metricsJsonFile?: { name: string; path: string; size: number; uploadedAt: string; };
+  modelPklFile?: { name: string; path: string; size: number; uploadedAt: string; dataUrl?: string; };
+  metricsJsonFile?: { name: string; path: string; size: number; uploadedAt: string; dataUrl?: string; };
   // Inventory assignment
   inventoryId?: string;
 }

@@ -10,6 +10,7 @@ import {
   User,
   Trash2,
   Upload,
+  Download,
   X,
   Edit,
   Save,
@@ -85,7 +86,7 @@ const ModelVersionCard: React.FC<{ version: any; modelName: string; onEdit?: () 
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
             <p className={`font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-              v{version.version}
+              {version.version}
             </p>
             <span className={`text-xs font-medium px-2 py-1 rounded border ${colors.bg} ${colors.text} ${colors.border}`}>
               {status}
@@ -284,10 +285,37 @@ export default function ModelRegistry() {
   const [modelFile, setModelFile] = useState<File | null>(null);
   const [modelName, setModelName] = useState('');
   const [modelVersion, setModelVersion] = useState('v1.0');
-  const [modelType, setModelType] = useState<'classification' | 'regression' | 'clustering' | 'nlp' | 'custom'>('classification');
   const [modelStage, setModelStage] = useState<'dev' | 'staging' | 'production'>('dev');
   const [importInvId, setImportInvId] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
+
+  const emptyImportForm = {
+    modelId: '', domain: '', product: '',
+    modelType: '', modelTypeOther: '',
+    populationType: '', populationTypeOther: '',
+    usage: '', usageOther: '',
+    riskTier: '', riskTierOther: '',
+    modelStatus: 'Active',
+    geography: '', developer: '', segmentVariable: '',
+    fullPerf: '', fullPerfBadDef: '',
+    ew1: '', ew1BadDef: '',
+    ew2: '', ew2BadDef: '',
+    approvalDate: '', firstUseDate: '', owner: '',
+    lastValidationDate: '', nextReviewDate: '',
+    upstreamModels: '', downstreamModels: '',
+  };
+  const [importForm, setImportForm] = useState({ ...emptyImportForm });
+  const setIF = (k: keyof typeof emptyImportForm, v: string) =>
+    setImportForm(f => ({ ...f, [k]: v }));
+  const closeImportModal = () => {
+    setShowImportModal(false);
+    setModelFile(null);
+    setModelName('');
+    setModelVersion('v1.0');
+    setSelectedProjectId('');
+    setImportInvId('');
+    setImportForm({ ...emptyImportForm });
+  };
 
   // â”€â”€ Create inventory modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [showCreateInv, setShowCreateInv] = useState(false);
@@ -310,7 +338,7 @@ export default function ModelRegistry() {
   const [editFormData, setEditFormData] = useState({
     name: '',
     version: '',
-    modelType: 'classification' as 'classification' | 'regression' | 'clustering' | 'nlp' | 'custom',
+    modelType: 'classification' as 'scorecard' | 'classification' | 'regression' | 'neural_network' | 'decision_tree' | 'ensemble' | 'time_series' | 'clustering' | 'nlp' | 'other' | 'custom',
     stage: 'dev' as 'dev' | 'staging' | 'production',
   });
 
@@ -339,7 +367,7 @@ export default function ModelRegistry() {
   };
   const handleCancelEdit = () => {
     setEditingModel(null);
-    setEditFormData({ name: '', version: '', modelType: 'classification', stage: 'dev' });
+    setEditFormData({ name: '', version: '', modelType: 'classification' as any, stage: 'dev' });
   };
 
   // â”€â”€ Inventory handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -390,7 +418,7 @@ export default function ModelRegistry() {
       });
 
       // Build lineage from versions
-      groups[model.name].lineage = groups[model.name].versions.map((v) => `v${v.version}`);
+      groups[model.name].lineage = groups[model.name].versions.map((v) => v.version);
     });
 
     return Object.values(groups);
@@ -739,7 +767,7 @@ export default function ModelRegistry() {
                         <React.Fragment key={version.id}>
                           {editingModel === version.id ? (
                             <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                              <h4 className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>Edit v{version.version}</h4>
+                              <h4 className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>Edit {version.version}</h4>
                               <div className="space-y-3">
                                 <div className="grid grid-cols-2 gap-3">
                                   <div>
@@ -755,10 +783,16 @@ export default function ModelRegistry() {
                                   <div>
                                     <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Type</label>
                                     <select value={editFormData.modelType} onChange={e => setEditFormData({...editFormData, modelType: e.target.value as any})} className={`w-full px-3 py-1.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}>
+                                      <option value="scorecard">Scorecard</option>
                                       <option value="classification">Classification</option>
                                       <option value="regression">Regression</option>
+                                      <option value="neural_network">Neural Network</option>
+                                      <option value="decision_tree">Decision Tree</option>
+                                      <option value="ensemble">Ensemble</option>
+                                      <option value="time_series">Time Series</option>
                                       <option value="clustering">Clustering</option>
                                       <option value="nlp">NLP</option>
+                                      <option value="other">Other</option>
                                       <option value="custom">Custom</option>
                                     </select>
                                   </div>
@@ -784,7 +818,7 @@ export default function ModelRegistry() {
                               version={version}
                               modelName={selectedModel.name}
                               onEdit={() => handleEditModel(version)}
-                              onDelete={() => handleDeleteModel(version.id, `${selectedModel.name} v${version.version}`)}
+                              onDelete={() => handleDeleteModel(version.id, `${selectedModel.name} ${version.version}`)}
                             />
                           )}
                         </React.Fragment>
@@ -808,7 +842,7 @@ export default function ModelRegistry() {
                       return (
                         <div key={version.id} className={`p-4 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                           <p className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                            {selectedModel.name} — v{version.version}
+                            {selectedModel.name} — {version.version}
                             {regModel.model_id && <span className={`ml-2 text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>({regModel.model_id})</span>}
                           </p>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -821,16 +855,21 @@ export default function ModelRegistry() {
                                     <p className={`text-xs font-medium truncate ${isDark ? 'text-green-300' : 'text-green-700'}`}>{regModel.modelPklFile.name}</p>
                                     <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-600'}`}>{(regModel.modelPklFile.size / 1024).toFixed(1)} KB</p>
                                   </div>
+                                  {regModel.modelPklFile.dataUrl && (
+                                    <a href={regModel.modelPklFile.dataUrl} download={regModel.modelPklFile.name} className={`inline-flex items-center gap-1 cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-blue-600 text-blue-300 hover:bg-blue-900/30' : 'border-blue-400 text-blue-700 hover:bg-blue-100'}`}>
+                                      <Download size={12} />Download
+                                    </a>
+                                  )}
                                   <label className={`cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-green-600 text-green-300 hover:bg-green-900/30' : 'border-green-400 text-green-700 hover:bg-green-100'}`}>
                                     Replace
-                                    <input type="file" accept=".pkl,.pickle,.onnx,.pmml,.h5,.pt,.pth" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString() } }); showNotification(`Model file updated`, 'success'); }} />
+                                    <input type="file" accept=".pkl,.pickle,.onnx,.pmml,.h5,.pt,.pth" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Model file updated`, 'success'); }} />
                                   </label>
                                 </div>
                               ) : (
                                 <label className={`cursor-pointer flex items-center gap-2 p-2.5 rounded border-2 border-dashed transition ${isDark ? 'border-slate-600 hover:border-blue-500 hover:bg-blue-500/10' : 'border-slate-300 hover:border-blue-400 hover:bg-blue-50'}`}>
                                   <Upload size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
                                   <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload model.pkl / .onnx / .pmml</span>
-                                  <input type="file" accept=".pkl,.pickle,.onnx,.pmml,.h5,.pt,.pth" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString() } }); showNotification(`Model file uploaded`, 'success'); }} />
+                                  <input type="file" accept=".pkl,.pickle,.onnx,.pmml,.h5,.pt,.pth" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Model file uploaded`, 'success'); }} />
                                 </label>
                               )}
                             </div>
@@ -843,16 +882,21 @@ export default function ModelRegistry() {
                                     <p className={`text-xs font-medium truncate ${isDark ? 'text-green-300' : 'text-green-700'}`}>{regModel.metricsJsonFile.name}</p>
                                     <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-600'}`}>{(regModel.metricsJsonFile.size / 1024).toFixed(1)} KB</p>
                                   </div>
+                                  {regModel.metricsJsonFile.dataUrl && (
+                                    <a href={regModel.metricsJsonFile.dataUrl} download={regModel.metricsJsonFile.name} className={`inline-flex items-center gap-1 cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-blue-600 text-blue-300 hover:bg-blue-900/30' : 'border-blue-400 text-blue-700 hover:bg-blue-100'}`}>
+                                      <Download size={12} />Download
+                                    </a>
+                                  )}
                                   <label className={`cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-green-600 text-green-300 hover:bg-green-900/30' : 'border-green-400 text-green-700 hover:bg-green-100'}`}>
                                     Replace
-                                    <input type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateRegistryModel(regModel.id, { metricsJsonFile: { name: f.name, path: `/metrics/${f.name}`, size: f.size, uploadedAt: new Date().toISOString() } }); showNotification(`Metrics file updated`, 'success'); }} />
+                                    <input type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { metricsJsonFile: { name: f.name, path: `/metrics/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Metrics file updated`, 'success'); }} />
                                   </label>
                                 </div>
                               ) : (
                                 <label className={`cursor-pointer flex items-center gap-2 p-2.5 rounded border-2 border-dashed transition ${isDark ? 'border-slate-600 hover:border-green-500 hover:bg-green-500/10' : 'border-slate-300 hover:border-green-400 hover:bg-green-50'}`}>
                                   <Upload size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
                                   <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload metrics.json</span>
-                                  <input type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateRegistryModel(regModel.id, { metricsJsonFile: { name: f.name, path: `/metrics/${f.name}`, size: f.size, uploadedAt: new Date().toISOString() } }); showNotification(`Metrics file uploaded`, 'success'); }} />
+                                  <input type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { metricsJsonFile: { name: f.name, path: `/metrics/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Metrics file uploaded`, 'success'); }} />
                                 </label>
                               )}
                             </div>
@@ -894,37 +938,62 @@ export default function ModelRegistry() {
                     </div>
                     {selectedModel.versions.map(version => {
                       const regModel = registryModels.find(r => r.id === version.id);
-                      if (!regModel?.bulkImported || !regModel.bulkMetadata) return null;
-                      const entries = [
-                        ['Product', regModel.bulkMetadata.product],
-                        ['Population Type', regModel.bulkMetadata.populationType],
-                        ['Usage', regModel.bulkMetadata.usage],
-                        ['Segment Variable', regModel.bulkMetadata.segmentVariable ?? regModel.bulkMetadata.segment],
-                        ['Risk Tier/MRR', regModel.bulkMetadata.riskTier],
-                        ['Status', regModel.bulkMetadata.modelStatus],
-                        ['Developer', regModel.bulkMetadata.developer],
-                        ['Approval Date', regModel.bulkMetadata.approvalDate],
-                        ['First Use', regModel.bulkMetadata.firstUseDate],
-                        ['Last Validation', regModel.bulkMetadata.lastValidationDate],
-                        ['Next Review', regModel.bulkMetadata.nextReviewDate],
-                        ['Upstream Models', regModel.bulkMetadata.upstreamModels],
-                        ['Downstream Models', regModel.bulkMetadata.downstreamModels],
-                      ].filter(([, v]) => v);
-                      if (entries.length === 0) return null;
+                      const meta = regModel?.metadata ?? regModel?.bulkMetadata;
+                      if (!meta || Object.values(meta).every(v => !v)) return null;
+
+                      const metaSection = (title: string, pairs: [string, string | undefined][]) => {
+                        const filtered = pairs.filter(([, v]) => v);
+                        if (filtered.length === 0) return null;
+                        return (
+                          <div key={title} className="mb-3">
+                            <p className={`text-xs font-semibold mb-1.5 uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{title}</p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1.5">
+                              {filtered.map(([label, value]) => (
+                                <div key={label}>
+                                  <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}: </span>
+                                  <span className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      };
+
                       return (
                         <div key={version.id} className={`p-4 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
                           <p className={`text-xs font-semibold mb-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                            Bulk Import Metadata — v{version.version}
-                            <span className={`ml-2 px-1.5 py-0.5 rounded-full text-xs ${isDark ? 'bg-purple-500/20 text-purple-300' : 'bg-purple-100 text-purple-700'}`}>Bulk</span>
+                            Model Metadata — {version.version}
                           </p>
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1.5">
-                            {entries.map(([label, value]) => (
-                              <div key={label as string}>
-                                <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}: </span>
-                                <span className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{value}</span>
-                              </div>
-                            ))}
-                          </div>
+                          {metaSection('Identity', [
+                            ['Domain', meta.domain],
+                            ['Product', meta.product],
+                            ['Population Type', meta.populationType],
+                            ['Usage', meta.usage],
+                            ['Geography', meta.geography],
+                            ['Segment Variable', meta.segmentVariable ?? (meta as any).segment],
+                            ['Developer', meta.developer],
+                            ['Risk Tier/MRR', meta.riskTier],
+                            ['Model Status', meta.modelStatus],
+                          ])}
+                          {metaSection('Target Specification', [
+                            ['Full Performance', meta.fullPerf],
+                            ['Full Performance Bad Def', meta.fullPerfBadDef],
+                            ['Early Warning 1', meta.ew1],
+                            ['Early Warning 1 Bad Def', meta.ew1BadDef],
+                            ['Early Warning 2', meta.ew2],
+                            ['Early Warning 2 Bad Def', meta.ew2BadDef],
+                          ])}
+                          {metaSection('Governance', [
+                            ['Approval Date', meta.approvalDate],
+                            ['First Use Date', meta.firstUseDate],
+                            ['Owner', meta.owner],
+                            ['Last Validation', meta.lastValidationDate],
+                            ['Next Review', meta.nextReviewDate],
+                          ])}
+                          {metaSection('Interconnectivity', [
+                            ['Upstream Models', meta.upstreamModels],
+                            ['Downstream Models', meta.downstreamModels],
+                          ])}
                         </div>
                       );
                     })}
@@ -1040,91 +1109,350 @@ export default function ModelRegistry() {
       {showImportModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className={`max-w-2xl w-full max-h-[90vh] overflow-y-auto rounded-xl ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
-            <div className={`sticky top-0 p-5 border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className={`sticky top-0 z-10 p-5 border-b ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
               <div className="flex items-center justify-between">
                 <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Import Model</h2>
-                <button onClick={() => { setShowImportModal(false); setModelFile(null); setModelName(''); setModelVersion('v1.0'); setSelectedProjectId(''); setImportInvId(''); }} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><X size={18} /></button>
+                <button onClick={closeImportModal} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}><X size={18} /></button>
               </div>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-6">
+
+              {/* ── SYSTEM ── */}
               <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Target Project *</label>
-                <select value={selectedProjectId} onChange={e => setSelectedProjectId(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
-                  <option value="">-- Select Project --</option>
-                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>— System —</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Target Project <span className="text-red-400">*</span></label>
+                    <select value={selectedProjectId} onChange={e => setSelectedProjectId(e.target.value)} className={inputCls}>
+                      <option value="">-- Select Project --</option>
+                      {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                      Model File <span className={`text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(Optional — upload later in Artifacts tab)</span>
+                    </label>
+                    <input type="file" accept=".pkl,.pmml,.onnx,.json,.h5" onChange={e => setModelFile(e.target.files?.[0] || null)} className={inputCls} />
+                    {modelFile && <p className={`text-xs mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>✓ {modelFile.name} ({(modelFile.size / 1024).toFixed(1)} KB)</p>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Lifecycle Stage</label>
+                      <select value={modelStage} onChange={e => setModelStage(e.target.value as any)} className={inputCls}>
+                        <option value="dev">Development</option>
+                        <option value="staging">Staging</option>
+                        <option value="production">Production</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        Assign to Inventory <span className={`text-xs font-normal ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>(Optional)</span>
+                      </label>
+                      <select value={importInvId} onChange={e => setImportInvId(e.target.value)} className={inputCls}>
+                        <option value="">-- No inventory folder --</option>
+                        {modelInventories.map(inv => (
+                          <option key={inv.id} value={inv.id}>
+                            {inv.type ? inv.type.charAt(0).toUpperCase() + inv.type.slice(1) : ''}: {inv.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
               </div>
+
+              {/* ── MODEL DETAILS ── */}
               <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Model File <span className={`text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(Optional — upload later in Artifacts tab)</span>
-                </label>
-                <input type="file" accept=".pkl,.pmml,.onnx,.json,.h5" onChange={e => setModelFile(e.target.files?.[0] || null)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`} />
-                {modelFile && <p className={`text-xs mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>✓ {modelFile.name} ({(modelFile.size / 1024).toFixed(1)} KB)</p>}
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>— Model Details —</p>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Name <span className="text-red-400">*</span></label>
+                      <input type="text" value={modelName} onChange={e => setModelName(e.target.value)} placeholder="e.g., Credit Risk Model" className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model ID <span className="text-red-400">*</span></label>
+                      <input type="text" value={importForm.modelId} onChange={e => setIF('modelId', e.target.value)} placeholder="e.g., MODEL-001" className={inputCls} />
+                    </div>
+                  </div>
+                  <div className="w-1/2 pr-1.5">
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Version</label>
+                    <input type="text" value={modelVersion} onChange={e => setModelVersion(e.target.value)} placeholder="e.g., v1.0" className={inputCls} />
+                  </div>
+                </div>
               </div>
+
+              {/* ── IDENTITY ── */}
               <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Name *</label>
-                <input type="text" value={modelName} onChange={e => setModelName(e.target.value)} placeholder="e.g., Credit Risk Model" className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`} />
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>— Identity —</p>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Domain <span className="text-red-400">*</span></label>
+                      <input type="text" value={importForm.domain} onChange={e => setIF('domain', e.target.value)} placeholder="e.g., Credit Risk" className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Product <span className="text-red-400">*</span></label>
+                      <input type="text" value={importForm.product} onChange={e => setIF('product', e.target.value)} placeholder="e.g., Mortgage" className={inputCls} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Type <span className="text-red-400">*</span></label>
+                    <select value={importForm.modelType} onChange={e => setIF('modelType', e.target.value)} className={inputCls}>
+                      <option value="">-- Select --</option>
+                      <option value="scorecard">Scorecard</option>
+                      <option value="regression">Regression</option>
+                      <option value="classification">Classification</option>
+                      <option value="neural_network">Neural Network</option>
+                      <option value="decision_tree">Decision Tree</option>
+                      <option value="ensemble">Ensemble</option>
+                      <option value="time_series">Time Series</option>
+                      <option value="clustering">Clustering</option>
+                      <option value="other">Other</option>
+                    </select>
+                    {importForm.modelType === 'other' && (
+                      <input type="text" value={importForm.modelTypeOther} onChange={e => setIF('modelTypeOther', e.target.value)} placeholder="Specify model type…" className={`${inputCls} mt-1.5`} />
+                    )}
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Population Type <span className="text-red-400">*</span></label>
+                    <select value={importForm.populationType} onChange={e => setIF('populationType', e.target.value)} className={inputCls}>
+                      <option value="">-- Select --</option>
+                      <option value="Retail">Retail</option>
+                      <option value="Commercial">Commercial</option>
+                      <option value="Consumer">Consumer</option>
+                      <option value="Corporate">Corporate</option>
+                      <option value="SME">SME</option>
+                      <option value="other">Other</option>
+                    </select>
+                    {importForm.populationType === 'other' && (
+                      <input type="text" value={importForm.populationTypeOther} onChange={e => setIF('populationTypeOther', e.target.value)} placeholder="Specify population type…" className={`${inputCls} mt-1.5`} />
+                    )}
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Usage <span className="text-red-400">*</span></label>
+                    <select value={importForm.usage} onChange={e => setIF('usage', e.target.value)} className={inputCls}>
+                      <option value="">-- Select --</option>
+                      <option value="Origination">Origination</option>
+                      <option value="Account Management">Account Management</option>
+                      <option value="Collections">Collections</option>
+                      <option value="Pricing">Pricing</option>
+                      <option value="Marketing">Marketing</option>
+                      <option value="Risk Monitoring">Risk Monitoring</option>
+                      <option value="Stress Testing">Stress Testing</option>
+                      <option value="other">Other</option>
+                    </select>
+                    {importForm.usage === 'other' && (
+                      <input type="text" value={importForm.usageOther} onChange={e => setIF('usageOther', e.target.value)} placeholder="Specify usage…" className={`${inputCls} mt-1.5`} />
+                    )}
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Risk Tier / MRR <span className="text-red-400">*</span></label>
+                    <select value={importForm.riskTier} onChange={e => setIF('riskTier', e.target.value)} className={inputCls}>
+                      <option value="">-- Select --</option>
+                      <option value="Tier 1">Tier 1</option>
+                      <option value="Tier 2">Tier 2</option>
+                      <option value="Tier 3">Tier 3</option>
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                      <option value="MRR-1">MRR-1</option>
+                      <option value="MRR-2">MRR-2</option>
+                      <option value="MRR-3">MRR-3</option>
+                      <option value="other">Other</option>
+                    </select>
+                    {importForm.riskTier === 'other' && (
+                      <input type="text" value={importForm.riskTierOther} onChange={e => setIF('riskTierOther', e.target.value)} placeholder="Specify risk tier…" className={`${inputCls} mt-1.5`} />
+                    )}
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Status <span className="text-red-400">*</span></label>
+                    <select value={importForm.modelStatus} onChange={e => setIF('modelStatus', e.target.value)} className={inputCls}>
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                      <option value="In Development">In Development</option>
+                      <option value="Under Review">Under Review</option>
+                      <option value="Retired">Retired</option>
+                      <option value="Deprecated">Deprecated</option>
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Geography</label>
+                      <input type="text" value={importForm.geography} onChange={e => setIF('geography', e.target.value)} placeholder="e.g., US, EMEA" className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Developer</label>
+                      <input type="text" value={importForm.developer} onChange={e => setIF('developer', e.target.value)} placeholder="Name or team" className={inputCls} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Segment Variable</label>
+                    <input type="text" value={importForm.segmentVariable} onChange={e => setIF('segmentVariable', e.target.value)} placeholder="e.g., Prime, Near-Prime, Sub-Prime" className={inputCls} />
+                  </div>
+                </div>
               </div>
+
+              {/* ── TARGET SPECIFICATION ── */}
               <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Version *</label>
-                <input type="text" value={modelVersion} onChange={e => setModelVersion(e.target.value)} placeholder="e.g., v1.0" className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`} />
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>— Target Specification —</p>
+                <p className={`text-xs mb-3 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>At least one of Full Performance or Early Warning 1 must be specified.</p>
+                <div className="space-y-3">
+                  {/* Full Performance */}
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Full Performance</label>
+                    <select value={importForm.fullPerf} onChange={e => setIF('fullPerf', e.target.value)} className={inputCls}>
+                      <option value="">-- Select --</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                    {importForm.fullPerf === 'Yes' && (
+                      <div className="mt-2">
+                        <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Bad Definition</label>
+                        <input type="text" value={importForm.fullPerfBadDef} onChange={e => setIF('fullPerfBadDef', e.target.value)} placeholder="e.g., Ever 90+DPD in 12 months" className={inputCls} />
+                      </div>
+                    )}
+                  </div>
+                  {/* Early Warning 1 */}
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Early Warning 1</label>
+                    <select value={importForm.ew1} onChange={e => setIF('ew1', e.target.value)} className={inputCls}>
+                      <option value="">-- Select --</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                    {importForm.ew1 === 'Yes' && (
+                      <div className="mt-2">
+                        <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Bad Definition</label>
+                        <input type="text" value={importForm.ew1BadDef} onChange={e => setIF('ew1BadDef', e.target.value)} placeholder="e.g., Ever 30+ in 3 months" className={inputCls} />
+                      </div>
+                    )}
+                  </div>
+                  {/* Early Warning 2 (Optional) */}
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Early Warning 2 <span className={`font-normal text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>(Optional)</span></label>
+                    <select value={importForm.ew2} onChange={e => setIF('ew2', e.target.value)} className={inputCls}>
+                      <option value="">-- Select --</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                    {importForm.ew2 === 'Yes' && (
+                      <div className="mt-2">
+                        <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Bad Definition</label>
+                        <input type="text" value={importForm.ew2BadDef} onChange={e => setIF('ew2BadDef', e.target.value)} placeholder="e.g., Ever 30+ in 3 months" className={inputCls} />
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
+
+              {/* ── GOVERNANCE ── */}
               <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Type *</label>
-                <select value={modelType} onChange={e => setModelType(e.target.value as any)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
-                  <option value="classification">Classification</option>
-                  <option value="regression">Regression</option>
-                  <option value="clustering">Clustering</option>
-                  <option value="nlp">NLP</option>
-                  <option value="custom">Custom</option>
-                </select>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>— Governance (Optional) —</p>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Approval Date</label>
+                      <input type="date" value={importForm.approvalDate} onChange={e => setIF('approvalDate', e.target.value)} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>First Use Date</label>
+                      <input type="date" value={importForm.firstUseDate} onChange={e => setIF('firstUseDate', e.target.value)} className={inputCls} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Owner</label>
+                    <input type="text" value={importForm.owner} onChange={e => setIF('owner', e.target.value)} placeholder="Business or model owner name" className={inputCls} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Last Validation Date</label>
+                      <input type="date" value={importForm.lastValidationDate} onChange={e => setIF('lastValidationDate', e.target.value)} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Next Review Date</label>
+                      <input type="date" value={importForm.nextReviewDate} onChange={e => setIF('nextReviewDate', e.target.value)} className={inputCls} />
+                    </div>
+                  </div>
+                </div>
               </div>
+
+              {/* ── INTERCONNECTIVITY ── */}
               <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Stage *</label>
-                <select value={modelStage} onChange={e => setModelStage(e.target.value as any)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
-                  <option value="dev">Development</option>
-                  <option value="staging">Staging</option>
-                  <option value="production">Production</option>
-                </select>
+                <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>— Interconnectivity (Optional) —</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Upstream Models</label>
+                    <input type="text" value={importForm.upstreamModels} onChange={e => setIF('upstreamModels', e.target.value)} placeholder="Comma-separated Model IDs" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Downstream Models</label>
+                    <input type="text" value={importForm.downstreamModels} onChange={e => setIF('downstreamModels', e.target.value)} placeholder="Comma-separated Model IDs" className={inputCls} />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Assign to Inventory <span className={`text-xs font-normal ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>(Optional)</span>
-                </label>
-                <p className={`text-xs mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Geography / Domain / Product / Model Type / Model ID / Model Version</p>
-                <select value={importInvId} onChange={e => setImportInvId(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${inputCls}`}>
-                  <option value="">-- No inventory folder --</option>
-                  {modelInventories.map(inv => (
-                    <option key={inv.id} value={inv.id}>
-                      {inv.type ? inv.type.charAt(0).toUpperCase() + inv.type.slice(1) : ''}: {inv.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button onClick={() => { setShowImportModal(false); setModelFile(null); setModelName(''); setModelVersion('v1.0'); setSelectedProjectId(''); setImportInvId(''); }} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'}`}>Cancel</button>
+
+              {/* ── ACTION BUTTONS ── */}
+              <div className={`flex gap-3 pt-2 sticky bottom-0 pb-2 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+                <button onClick={closeImportModal} className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'}`}>Cancel</button>
                 <button
                   onClick={() => {
-                    if (!selectedProjectId || !modelName) { showNotification('Please fill in required fields', 'error'); return; }
+                    const effectiveModelType = importForm.modelType === 'other' ? importForm.modelTypeOther : importForm.modelType;
+                    const effectivePopType = importForm.populationType === 'other' ? importForm.populationTypeOther : importForm.populationType;
+                    const effectiveUsage = importForm.usage === 'other' ? importForm.usageOther : importForm.usage;
+                    const effectiveRiskTier = importForm.riskTier === 'other' ? importForm.riskTierOther : importForm.riskTier;
+                    if (!selectedProjectId || !modelName || !importForm.modelId || !importForm.domain || !importForm.product || !effectiveModelType || !effectivePopType || !effectiveUsage || !effectiveRiskTier || !importForm.modelStatus) {
+                      showNotification('Please fill in all required fields (marked *)', 'error'); return;
+                    }
+                    if (!importForm.fullPerf && !importForm.ew1) {
+                      showNotification('At least one of Full Performance or Early Warning 1 must be specified', 'error'); return;
+                    }
                     const project = projects.find(p => p.id === selectedProjectId);
                     if (project) {
-                      createWorkflowLog(createCreationLogEntry(project.id, project.name, 'Model Created', getCreationDescription.model(modelName, modelVersion, modelType, modelStage)));
+                      createWorkflowLog(createCreationLogEntry(project.id, project.name, 'Model Created', getCreationDescription.model(modelName, modelVersion, effectiveModelType, modelStage)));
                     }
                     createRegistryModel({
                       name: modelName,
-                      version: modelVersion,
+                      model_id: importForm.modelId || undefined,
+                      version: modelVersion || 'v1.0',
                       projectId: selectedProjectId,
-                      modelType,
+                      modelType: (importForm.modelType as any) || 'custom',
                       stage: modelStage,
                       status: 'active',
+                      domain: importForm.domain || undefined,
+                      metadata: {
+                        modelVersion: modelVersion,
+                        geography: importForm.geography,
+                        domain: importForm.domain,
+                        product: importForm.product,
+                        populationType: effectivePopType,
+                        usage: effectiveUsage,
+                        segmentVariable: importForm.segmentVariable,
+                        developer: importForm.developer,
+                        owner: importForm.owner,
+                        riskTier: effectiveRiskTier,
+                        modelStatus: importForm.modelStatus,
+                        fullPerf: importForm.fullPerf,
+                        fullPerfBadDef: importForm.fullPerfBadDef,
+                        ew1: importForm.ew1,
+                        ew1BadDef: importForm.ew1BadDef,
+                        ew2: importForm.ew2,
+                        ew2BadDef: importForm.ew2BadDef,
+                        approvalDate: importForm.approvalDate,
+                        firstUseDate: importForm.firstUseDate,
+                        lastValidationDate: importForm.lastValidationDate,
+                        nextReviewDate: importForm.nextReviewDate,
+                        upstreamModels: importForm.upstreamModels,
+                        downstreamModels: importForm.downstreamModels,
+                      },
                       inventoryId: importInvId || undefined,
-                      ...(modelFile ? { uploadedFile: { name: modelFile.name, path: `/models/${modelFile.name}`, size: modelFile.size, type: modelFile.type } } : {}),
+                      ...(modelFile ? { modelPklFile: { name: modelFile.name, path: `/models/${modelFile.name}`, size: modelFile.size, uploadedAt: new Date().toISOString(), dataUrl: URL.createObjectURL(modelFile) } } : {}),
                     });
-                    setShowImportModal(false); setModelFile(null); setModelName(''); setModelVersion('v1.0'); setSelectedProjectId(''); setImportInvId('');
+                    closeImportModal();
                     showNotification(`"${modelName} ${modelVersion}" imported successfully`, 'success');
                   }}
-                  disabled={!selectedProjectId || !modelName}
-                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${!selectedProjectId || !modelName ? isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed' : isDark ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
+                  disabled={!selectedProjectId || !modelName || !importForm.modelId}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${(!selectedProjectId || !modelName || !importForm.modelId) ? isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed' : isDark ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
                 >
                   Import Model
                 </button>
