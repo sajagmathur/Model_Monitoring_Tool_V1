@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Upload, FileText, X, Brain, ChevronDown, ChevronRight } from 'lucide-react';
+import { Upload, FileText, X, Brain, Plus } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 export interface UploadedDataset {
@@ -13,17 +13,23 @@ export interface UploadedDataset {
 }
 
 export interface ReferenceDatasetConfig {
-  observationVintages: string[];
+  vintageFrom: string;
+  vintageTo: string;
+  /** @deprecated use vintageFrom/vintageTo */
+  observationVintages?: string[];
   performanceWindow: string;
   // Score Level
   scoreField: string;
   targetVariable: string;
-  segment: string;
+  segments: string[];
+  /** @deprecated use segments */
+  segment?: string;
   // Account Level (only when granularity = 'account')
   uniqueKey?: string;
   scoreNode?: string;
   targetVariableAccount?: string;
-  exclusionField?: string;
+  segmentAccounts?: string[];
+  /** @deprecated use segmentAccounts */
   segmentAccount?: string;
   // Shared
   features: string[];
@@ -315,116 +321,81 @@ function computeEnhancedSummary(rows: Record<string, any>[], targetCol: string, 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // VintageSelector Component
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const VintageSelector: React.FC<{
-  selected: string[];
-  onChange: (vintages: string[]) => void;
+const VintageRangeInput: React.FC<{
+  vintageFrom: string;
+  vintageTo: string;
+  onFromChange: (v: string) => void;
+  onToChange: (v: string) => void;
   isDark: boolean;
-}> = ({ selected, onChange, isDark }) => {
-  const [expandedYears, setExpandedYears] = useState<Record<number, boolean>>({});
-  const [customVintage, setCustomVintage] = useState('');
+}> = ({ vintageFrom, vintageTo, onFromChange, onToChange, isDark }) => {
+  const [aiSuggestion, setAiSuggestion] = useState<{ from: string; to: string } | null>(null);
 
-  const toggle = (v: string) => {
-    if (selected.includes(v)) onChange(selected.filter(x => x !== v));
-    else onChange([...selected, v]);
+  const suggestRange = () => {
+    const now = new Date();
+    const toDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const fromDate = new Date(toDate.getFullYear(), toDate.getMonth() - 11, 1);
+    const fmt = (d: Date) => `${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`;
+    setAiSuggestion({ from: fmt(fromDate), to: fmt(toDate) });
   };
 
-  const toggleYear = (year: number) => {
-    const yearVintages = VINTAGES_BY_YEAR[year] ?? [];
-    const allSelected = yearVintages.every(v => selected.includes(v));
-    if (allSelected) onChange(selected.filter(v => !yearVintages.includes(v)));
-    else onChange([...new Set([...selected, ...yearVintages])]);
+  const acceptSuggestion = () => {
+    if (!aiSuggestion) return;
+    onFromChange(aiSuggestion.from);
+    onToChange(aiSuggestion.to);
+    setAiSuggestion(null);
   };
 
-  const toggleExpand = (year: number) =>
-    setExpandedYears(prev => ({ ...prev, [year]: !prev[year] }));
-
-  const addCustom = () => {
-    const v = customVintage.trim();
-    if (v && !selected.includes(v)) onChange([...selected, v]);
-    setCustomVintage('');
-  };
-
-  const years = Object.keys(VINTAGES_BY_YEAR).map(Number).sort((a, b) => b - a);
-
-  const monthBtn = (sel: boolean) =>
-    `px-2 py-0.5 rounded text-xs font-medium transition-colors ${
-      sel ? 'bg-blue-600 text-white' : isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-    }`;
+  const inp = `rounded-md px-3 py-2 text-sm border w-full ${
+    isDark ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+  } focus:outline-none focus:ring-2 focus:ring-blue-500`;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <span className={`text-xs font-medium ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          {selected.length} vintage{selected.length !== 1 ? 's' : ''} selected
+          Observation Vintage Range
         </span>
+        <button
+          type="button"
+          onClick={suggestRange}
+          className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-medium ${isDark ? 'text-purple-300 hover:bg-purple-900/30' : 'text-purple-600 hover:bg-purple-50'}`}
+        >
+          <Brain size={11} /> AI Suggest
+        </button>
       </div>
-
-      {/* Year accordion */}
-      <div className={`rounded-lg border ${isDark ? 'border-gray-600 bg-gray-900' : 'border-gray-300 bg-gray-50'} max-h-64 overflow-y-auto`}>
-        {years.map(year => {
-          const yearVintages = VINTAGES_BY_YEAR[year] ?? [];
-          const selectedCount = yearVintages.filter(v => selected.includes(v)).length;
-          const allSel = selectedCount === yearVintages.length;
-          const expanded = expandedYears[year] ?? false;
-          return (
-            <div key={year} className={`border-b last:border-b-0 ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
-              <div
-                className={`flex items-center gap-2 px-3 py-2 cursor-pointer text-xs font-semibold transition-colors ${isDark ? 'hover:bg-gray-700 text-gray-200' : 'hover:bg-gray-100 text-gray-800'}`}
-                onClick={() => toggleExpand(year)}
-              >
-                {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                <span>{year}</span>
-                <span className={`ml-0.5 font-normal ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                  ({selectedCount}/{yearVintages.length})
-                </span>
-                <button
-                  type="button"
-                  onClick={e => { e.stopPropagation(); toggleYear(year); }}
-                  className={`ml-auto text-xs px-2 py-0.5 rounded font-medium ${
-                    allSel
-                      ? isDark ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-100 text-blue-700'
-                      : isDark ? 'bg-gray-700 text-gray-400' : 'bg-gray-200 text-gray-600'
-                  }`}
-                >
-                  {allSel ? 'Deselect All' : 'Select All'}
-                </button>
-              </div>
-              {expanded && (
-                <div className="px-4 pb-2 flex flex-wrap gap-1">
-                  {yearVintages.map(v => (
-                    <button key={v} type="button" onClick={() => toggle(v)} className={monthBtn(selected.includes(v))}>
-                      {v}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>From</label>
+          <input
+            type="text"
+            value={vintageFrom}
+            onChange={e => onFromChange(e.target.value)}
+            placeholder="e.g. Jan-23"
+            className={inp}
+          />
+        </div>
+        <div>
+          <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>To</label>
+          <input
+            type="text"
+            value={vintageTo}
+            onChange={e => onToChange(e.target.value)}
+            placeholder="e.g. Dec-24"
+            className={inp}
+          />
+        </div>
       </div>
-
-      {/* Custom vintage input */}
-      <div className="flex gap-2 mt-2">
-        <input
-          type="text"
-          value={customVintage}
-          onChange={e => setCustomVintage(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') addCustom(); }}
-          placeholder="Custom vintage (e.g. Mar-25)"
-          className={`flex-1 rounded-md px-3 py-1.5 text-xs border ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'}`}
-        />
-        <button type="button" onClick={addCustom} className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700">Add</button>
-      </div>
-
-      {/* Selected tags */}
-      {selected.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {selected.map(v => (
-            <span key={v} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${isDark ? 'bg-blue-900 text-blue-300' : 'bg-blue-100 text-blue-700'}`}>
-              {v}
-              <button type="button" onClick={() => toggle(v)} className="hover:text-red-400"><X size={10} /></button>
-            </span>
-          ))}
+      {vintageFrom && vintageTo && (
+        <p className={`text-xs mt-1.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+          Range: <strong>{vintageFrom}</strong> to <strong>{vintageTo}</strong>
+        </p>
+      )}
+      {aiSuggestion && (
+        <div className={`mt-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs ${isDark ? 'bg-purple-900/30 border border-purple-700/40 text-purple-300' : 'bg-purple-50 border border-purple-200 text-purple-700'}`}>
+          <Brain size={11} />
+          <span className="flex-1">AI suggests: <strong>{aiSuggestion.from}</strong> to <strong>{aiSuggestion.to}</strong> (last 12 months)</span>
+          <button type="button" onClick={acceptSuggestion} className="font-semibold underline">Accept</button>
+          <button type="button" onClick={() => setAiSuggestion(null)} className="opacity-60 hover:opacity-100"><X size={10} /></button>
         </div>
       )}
     </div>
@@ -502,6 +473,7 @@ export const DataIngestionStepComponent: React.FC<{
   const isDark = theme === 'dark';
 
   // â”€â”€ Dataset state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const [datasetType, setDatasetType] = useState<'score' | 'account' | null>(null);
   const [scoreLevelDataset, setScoreLevelDataset] = useState<UploadedDataset | null>(null);
   const [scoreParsedRows, setScoreParsedRows] = useState<Record<string, any>[]>([]);
   const [accountParsedRows, setAccountParsedRows] = useState<Record<string, any>[]>([]);
@@ -509,26 +481,27 @@ export const DataIngestionStepComponent: React.FC<{
 
   // â”€â”€ Score level config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [scoreConfig, setScoreConfig] = useState<Partial<ReferenceDatasetConfig>>({
-    observationVintages: [],
+    vintageFrom: '',
+    vintageTo: '',
     performanceWindow: '',
     scoreField: '',
     targetVariable: '',
-    segment: '',
+    segments: [],
     features: [],
   });
 
   // â”€â”€ Account level config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [accountConfig, setAccountConfig] = useState<Partial<ReferenceDatasetConfig>>({
-    observationVintages: [],
+    vintageFrom: '',
+    vintageTo: '',
     performanceWindow: '',
     scoreField: '',
     targetVariable: '',
-    segment: '',
+    segments: [],
     uniqueKey: '',
     scoreNode: '',
     targetVariableAccount: '',
-    exclusionField: '',
-    segmentAccount: '',
+    segmentAccounts: [],
     features: [],
   });
 
@@ -582,7 +555,7 @@ export const DataIngestionStepComponent: React.FC<{
         ...prev,
         targetVariable: findColumn(headers, TARGET_HEURISTICS),
         scoreField: findColumn(headers, SCORE_HEURISTICS),
-        segment: findColumn(headers, SEGMENT_HEURISTICS),
+        segments: findColumn(headers, SEGMENT_HEURISTICS) ? [findColumn(headers, SEGMENT_HEURISTICS)] : [],
         features: suggestFeatures(headers),
       }));
       setConfigSaved(false);
@@ -613,7 +586,7 @@ export const DataIngestionStepComponent: React.FC<{
         uniqueKey: findColumn(headers, KEY_HEURISTICS),
         scoreNode: findColumn(headers, SCORE_HEURISTICS),
         targetVariableAccount: findColumn(headers, TARGET_HEURISTICS),
-        segmentAccount: findColumn(headers, SEGMENT_HEURISTICS),
+        segmentAccounts: findColumn(headers, SEGMENT_HEURISTICS) ? [findColumn(headers, SEGMENT_HEURISTICS)] : [],
         features: suggestFeatures(headers),
       }));
       setConfigSaved(false);
@@ -662,14 +635,6 @@ export const DataIngestionStepComponent: React.FC<{
       setSaveError('Please upload at least one dataset (Score Level or Account Level) before saving the configuration.');
       return;
     }
-    if (scoreLevelDataset && !scoreConfig.targetVariable) {
-      setSaveError('Score Level dataset uploaded but no Target Variable selected. Please select a Target Variable in Step 3.');
-      return;
-    }
-    if (accountLevelDataset && !accountConfig.targetVariableAccount) {
-      setSaveError('Account Level dataset uploaded but no Target Variable selected. Please select a Target Variable in the Account Level Configuration.');
-      return;
-    }
 
     try {
       if (scoreLevelDataset) {
@@ -680,13 +645,17 @@ export const DataIngestionStepComponent: React.FC<{
         const summary = computeDataSummary(
           scoreParsedRows,
           scoreConfig.targetVariable ?? '',
-          scoreConfig.segment ?? ''
+          scoreConfig.segments?.[0] ?? ''
         );
         setDataSummary(summary);
-        setScoreEnhancedSummary(computeEnhancedSummary(scoreParsedRows, scoreConfig.targetVariable ?? '', scoreConfig.segment ?? ''));
+        setScoreEnhancedSummary(computeEnhancedSummary(scoreParsedRows, scoreConfig.targetVariable ?? '', scoreConfig.segments?.[0] ?? ''));
       }
-      if (accountLevelDataset && accountParsedRows.length > 0) {
-        setAccountEnhancedSummary(computeEnhancedSummary(accountParsedRows, accountConfig.targetVariableAccount ?? '', accountConfig.segmentAccount ?? ''));
+      if (accountLevelDataset) {
+        if (accountParsedRows.length === 0) {
+          setSaveError('Account Level CSV appears to be empty or could not be parsed. Please verify the file format (UTF-8 CSV with headers).');
+          return;
+        }
+        setAccountEnhancedSummary(computeEnhancedSummary(accountParsedRows, accountConfig.targetVariableAccount ?? '', accountConfig.segmentAccounts?.[0] ?? ''));
       }
       setConfigSaved(true);
       setSaveSuccess(true);
@@ -796,14 +765,80 @@ export const DataIngestionStepComponent: React.FC<{
         </p>
       </div>
 
-      {/* Step 1: Upload Datasets */}
+      {/* Step 1: Select Dataset Type + Upload */}
       <div className={card}>
-        <p className={secTitle}>Step 1 &mdash; Upload Reference Datasets</p>
+        <p className={secTitle}>Step 1 &mdash; Select Dataset Type</p>
         <p className={`text-xs mb-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-          Upload one or both datasets. Score Level data is used for discriminatory and stability metrics; Account Level data drives feature-based analysis.
+          Choose one dataset type. Score Level data drives discriminatory &amp; stability metrics; Account Level data drives feature-based analysis.
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Score Level */}
+        {/* Type selector */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+          {/* Score Level card */}
+          <button
+            type="button"
+            onClick={() => {
+              if (datasetType === 'account') {
+                setAccountLevelDataset(null);
+                setAccountParsedRows([]);
+                setConfigSaved(false);
+              }
+              setDatasetType('score');
+            }}
+            className={`text-left p-4 rounded-xl border-2 transition-all ${
+              datasetType === 'score'
+                ? (isDark ? 'border-blue-500 bg-blue-900/20' : 'border-blue-500 bg-blue-50')
+                : (isDark ? 'border-gray-700 bg-gray-900/30 hover:border-blue-700/60' : 'border-gray-200 bg-white hover:border-blue-300')
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                datasetType === 'score' ? 'border-blue-500 bg-blue-500' : (isDark ? 'border-gray-500' : 'border-gray-400')
+              }`}>
+                {datasetType === 'score' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+              </div>
+              <div>
+                <p className={`text-sm font-semibold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Score Level</p>
+                <p className={`text-xs mt-0.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  One row per scored observation. Enables KS, AUC, Gini, PSI, Rank Order &amp; more.
+                </p>
+              </div>
+            </div>
+          </button>
+          {/* Account Level card */}
+          <button
+            type="button"
+            onClick={() => {
+              if (datasetType === 'score') {
+                setScoreLevelDataset(null);
+                setScoreParsedRows([]);
+                setConfigSaved(false);
+              }
+              setDatasetType('account');
+            }}
+            className={`text-left p-4 rounded-xl border-2 transition-all ${
+              datasetType === 'account'
+                ? (isDark ? 'border-purple-500 bg-purple-900/20' : 'border-purple-500 bg-purple-50')
+                : (isDark ? 'border-gray-700 bg-gray-900/30 hover:border-purple-700/60' : 'border-gray-200 bg-white hover:border-purple-300')
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                datasetType === 'account' ? 'border-purple-500 bg-purple-500' : (isDark ? 'border-gray-500' : 'border-gray-400')
+              }`}>
+                {datasetType === 'account' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+              </div>
+              <div>
+                <p className={`text-sm font-semibold ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>Account Level</p>
+                <p className={`text-xs mt-0.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  One row per account with feature values. Enables CSI, IV, WoE Shift &amp; feature drift.
+                </p>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        {/* Upload zone — shown only after type is selected */}
+        {datasetType === 'score' && (
           <div className={`p-4 rounded-lg border ${isDark ? 'bg-gray-900/40 border-blue-700/30' : 'bg-blue-50 border-blue-200'}`}>
             <p className={`text-xs font-bold uppercase tracking-wide mb-3 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
               Score Level Dataset
@@ -832,7 +867,8 @@ export const DataIngestionStepComponent: React.FC<{
               Connect to Dataset / Database
             </button>
           </div>
-          {/* Account Level */}
+        )}
+        {datasetType === 'account' && (
           <div className={`p-4 rounded-lg border ${isDark ? 'bg-gray-900/40 border-purple-700/30' : 'bg-purple-50 border-purple-200'}`}>
             <p className={`text-xs font-bold uppercase tracking-wide mb-3 ${isDark ? 'text-purple-400' : 'text-purple-600'}`}>
               Account Level Dataset
@@ -840,7 +876,7 @@ export const DataIngestionStepComponent: React.FC<{
             <FileDropZone
               dataset={accountLevelDataset}
               onFile={handleAccountFile}
-              onClear={() => { setAccountLevelDataset(null); setConfigSaved(false); }}
+              onClear={() => { setAccountLevelDataset(null); setAccountParsedRows([]); setConfigSaved(false); }}
               inputId="account-csv-input"
               description="One row per account with feature values"
               isDark={isDark}
@@ -861,7 +897,7 @@ export const DataIngestionStepComponent: React.FC<{
               Connect to Dataset / Database
             </button>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Raw Data Preview */}
@@ -945,14 +981,13 @@ export const DataIngestionStepComponent: React.FC<{
         <div className={card}>
           <p className={secTitle}>Step 2 &mdash; Reference Vintage</p>
           <p className={`text-xs mb-3 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-            Select which monthly cohorts to include in the monitoring run. Applies to both Score and Account datasets.
+            Specify the observation vintage date range for this monitoring run. Applies to both Score and Account datasets.
           </p>
-          <VintageSelector
-            selected={scoreConfig.observationVintages ?? []}
-            onChange={vintages => {
-              updateScore({ observationVintages: vintages });
-              updateAccount({ observationVintages: vintages });
-            }}
+          <VintageRangeInput
+            vintageFrom={scoreConfig.vintageFrom ?? ''}
+            vintageTo={scoreConfig.vintageTo ?? ''}
+            onFromChange={v => { updateScore({ vintageFrom: v }); updateAccount({ vintageFrom: v }); }}
+            onToChange={v => { updateScore({ vintageTo: v }); updateAccount({ vintageTo: v }); }}
             isDark={isDark}
           />
 
@@ -1029,7 +1064,7 @@ export const DataIngestionStepComponent: React.FC<{
         <div className={card}>
           <p className={secTitle}>Step 3 &mdash; Score Level Configuration</p>
           <div className={`p-4 rounded-lg ${isDark ? 'bg-gray-900/60' : 'bg-blue-50/50'}`}>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               {/* Score Field */}
               <div>
                 <label className={lbl}>Score Field</label>
@@ -1064,31 +1099,58 @@ export const DataIngestionStepComponent: React.FC<{
                   />
                 )}
               </div>
-              {/* Segment */}
-              <div>
-                <label className={lbl}>Segment Column</label>
-                <div className="flex gap-1">
-                  <select className={`${sel} flex-1`} value={scoreConfig.segment ?? ''} onChange={e => updateScore({ segment: e.target.value })}>
-                    <option value="">None</option>
-                    {scoreColumns.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <button
-                    type="button"
-                    title="AI Suggest"
-                    onClick={() => triggerSuggest('score_segment')}
-                    className={`px-2 rounded border ${isDark ? 'border-gray-600 bg-gray-700 text-purple-300 hover:bg-purple-900/30' : 'border-gray-300 bg-white text-purple-600 hover:bg-purple-50'}`}
-                  >
-                    <Brain size={13} />
-                  </button>
-                </div>
-                {aiSuggestions['score_segment'] && typeof aiSuggestions['score_segment'] === 'string' && (
-                  <AISuggestBadge
-                    suggestion={aiSuggestions['score_segment']}
-                    onAccept={() => { updateScore({ segment: aiSuggestions['score_segment'] as string }); dismissSuggestion('score_segment'); }}
-                    onDismiss={() => dismissSuggestion('score_segment')}
-                    isDark={isDark}
-                  />
-                )}
+            </div>
+            {/* Segment Variables — multiple */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className={lbl}>Segment Variables</label>
+                <button
+                  type="button"
+                  onClick={() => triggerSuggest('score_segment')}
+                  className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded font-medium ${isDark ? 'text-purple-300 hover:bg-purple-900/30' : 'text-purple-600 hover:bg-purple-50'}`}
+                >
+                  <Brain size={11} /> AI Suggest
+                </button>
+              </div>
+              {aiSuggestions['score_segment'] && typeof aiSuggestions['score_segment'] === 'string' && (
+                <AISuggestBadge
+                  suggestion={aiSuggestions['score_segment']}
+                  onAccept={() => { updateScore({ segments: [...(scoreConfig.segments ?? []), aiSuggestions['score_segment'] as string] }); dismissSuggestion('score_segment'); }}
+                  onDismiss={() => dismissSuggestion('score_segment')}
+                  isDark={isDark}
+                />
+              )}
+              <div className="space-y-2 mt-1.5">
+                {(scoreConfig.segments ?? []).map((seg, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <select
+                      className={`${sel} flex-1`}
+                      value={seg}
+                      onChange={e => {
+                        const segs = [...(scoreConfig.segments ?? [])];
+                        segs[idx] = e.target.value;
+                        updateScore({ segments: segs });
+                      }}
+                    >
+                      <option value="">Select column</option>
+                      {scoreColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => updateScore({ segments: (scoreConfig.segments ?? []).filter((_, i) => i !== idx) })}
+                      className={`p-1.5 rounded ${isDark ? 'text-red-400 hover:bg-red-900/20' : 'text-red-500 hover:bg-red-50'}`}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => updateScore({ segments: [...(scoreConfig.segments ?? []), ''] })}
+                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${isDark ? 'border-blue-700/50 text-blue-400 hover:bg-blue-900/20' : 'border-blue-300 text-blue-600 hover:bg-blue-50'}`}
+                >
+                  <Plus size={12} /> Add Segment Variable
+                </button>
               </div>
             </div>
             {/* Feature columns */}
@@ -1125,7 +1187,7 @@ export const DataIngestionStepComponent: React.FC<{
                 </select>
               </div>
               {/* Target Variable */}
-              <div>
+              <div className="md:col-span-2">
                 <label className={lbl}>Target Variable</label>
                 <div className="flex gap-1">
                   <select className={`${sel} flex-1`} value={accountConfig.targetVariableAccount ?? ''} onChange={e => updateAccount({ targetVariableAccount: e.target.value })}>
@@ -1150,39 +1212,58 @@ export const DataIngestionStepComponent: React.FC<{
                   />
                 )}
               </div>
-              {/* Segment */}
-              <div>
-                <label className={lbl}>Segment Column</label>
-                <div className="flex gap-1">
-                  <select className={`${sel} flex-1`} value={accountConfig.segmentAccount ?? ''} onChange={e => updateAccount({ segmentAccount: e.target.value })}>
-                    <option value="">None</option>
-                    {accountColumns.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <button
-                    type="button"
-                    title="AI Suggest"
-                    onClick={() => triggerSuggest('account_segment')}
-                    className={`px-2 rounded border ${isDark ? 'border-gray-600 bg-gray-700 text-purple-300 hover:bg-purple-900/30' : 'border-gray-300 bg-white text-purple-600 hover:bg-purple-50'}`}
-                  >
-                    <Brain size={13} />
-                  </button>
-                </div>
-                {aiSuggestions['account_segment'] && typeof aiSuggestions['account_segment'] === 'string' && (
-                  <AISuggestBadge
-                    suggestion={aiSuggestions['account_segment']}
-                    onAccept={() => { updateAccount({ segmentAccount: aiSuggestions['account_segment'] as string }); dismissSuggestion('account_segment'); }}
-                    onDismiss={() => dismissSuggestion('account_segment')}
-                    isDark={isDark}
-                  />
-                )}
+            </div>
+            {/* Segment Variables — multiple */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className={lbl}>Segment Variables</label>
+                <button
+                  type="button"
+                  onClick={() => triggerSuggest('account_segment')}
+                  className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded font-medium ${isDark ? 'text-purple-300 hover:bg-purple-900/30' : 'text-purple-600 hover:bg-purple-50'}`}
+                >
+                  <Brain size={11} /> AI Suggest
+                </button>
               </div>
-              {/* Exclusion Field */}
-              <div>
-                <label className={lbl}>Exclusion Field</label>
-                <select className={sel} value={accountConfig.exclusionField ?? ''} onChange={e => updateAccount({ exclusionField: e.target.value })}>
-                  <option value="">None</option>
-                  {accountColumns.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+              {aiSuggestions['account_segment'] && typeof aiSuggestions['account_segment'] === 'string' && (
+                <AISuggestBadge
+                  suggestion={aiSuggestions['account_segment']}
+                  onAccept={() => { updateAccount({ segmentAccounts: [...(accountConfig.segmentAccounts ?? []), aiSuggestions['account_segment'] as string] }); dismissSuggestion('account_segment'); }}
+                  onDismiss={() => dismissSuggestion('account_segment')}
+                  isDark={isDark}
+                />
+              )}
+              <div className="space-y-2 mt-1.5">
+                {(accountConfig.segmentAccounts ?? []).map((seg, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <select
+                      className={`${sel} flex-1`}
+                      value={seg}
+                      onChange={e => {
+                        const segs = [...(accountConfig.segmentAccounts ?? [])];
+                        segs[idx] = e.target.value;
+                        updateAccount({ segmentAccounts: segs });
+                      }}
+                    >
+                      <option value="">Select column</option>
+                      {accountColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => updateAccount({ segmentAccounts: (accountConfig.segmentAccounts ?? []).filter((_, i) => i !== idx) })}
+                      className={`p-1.5 rounded ${isDark ? 'text-red-400 hover:bg-red-900/20' : 'text-red-500 hover:bg-red-50'}`}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => updateAccount({ segmentAccounts: [...(accountConfig.segmentAccounts ?? []), ''] })}
+                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${isDark ? 'border-purple-700/50 text-purple-400 hover:bg-purple-900/20' : 'border-purple-300 text-purple-600 hover:bg-purple-50'}`}
+                >
+                  <Plus size={12} /> Add Segment Variable
+                </button>
               </div>
             </div>
             {/* Feature columns */}
@@ -1201,6 +1282,7 @@ export const DataIngestionStepComponent: React.FC<{
         <button
           type="button"
           onClick={handleSaveConfig}
+          disabled={!scoreLevelDataset && !accountLevelDataset}
           className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-colors ${
             scoreLevelDataset || accountLevelDataset
               ? 'bg-green-600 hover:bg-green-700 text-white cursor-pointer'
