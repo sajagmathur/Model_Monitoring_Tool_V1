@@ -2591,9 +2591,12 @@ const DataQualityStep: React.FC<{
   const isDark = theme === 'dark';
   const { addIngestionJob, registryModels, createDataQualityReport, createGeneratedReport, createReportConfiguration, reportConfigurations, cloneDatasetAsResolved, ingestionJobs, projects, createWorkflowLog } = useGlobal();
   
+  const hasScoreDataset = !!(workflow as any).dataIngestionConfig?.scoreLevelDataset;
+  const hasAccountDataset = !!(workflow as any).dataIngestionConfig?.accountLevelDataset;
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'distributions' | 'volume'>('overview');
-  const [dqLevelTab, setDqLevelTab] = useState<'score' | 'account'>('score');
+  const [dqLevelTab, setDqLevelTab] = useState<'score' | 'account'>(() =>
+    !hasScoreDataset && hasAccountDataset ? 'account' : 'score'
+  );
   const [dqCheckResults, setDqCheckResults] = useState<Record<string, DQCheckResult>>({});
   
   // Initialize state from persisted workflow data or use defaults
@@ -2726,7 +2729,7 @@ const DataQualityStep: React.FC<{
         rows.push(`"${result.datasetName}","${result.level}","${check.group}","${check.name}","${check.value}","${check.threshold}","${check.status}"`);
       });
     });
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const blob = new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url;
     a.download = `DQ_Report_${new Date().toISOString().split('T')[0]}.csv`;
@@ -2735,14 +2738,14 @@ const DataQualityStep: React.FC<{
 
   const handleExportPPT = () => {
     if (Object.keys(dqCheckResults).length === 0) return;
-    let html = `<!DOCTYPE html><html><head><title>DQ Report</title><style>body{font-family:Arial,sans-serif;background:#1e293b;color:#e2e8f0;margin:0}.slide{width:900px;min-height:500px;margin:24px auto;padding:40px;background:#0f172a;border-radius:12px;page-break-after:always}h1{color:#60a5fa;font-size:2rem}h2{color:#34d399;font-size:1.4rem;margin-bottom:1rem}table{width:100%;border-collapse:collapse}th{background:#1e40af;padding:8px 14px;text-align:left;font-size:.85rem}td{padding:6px 14px;border-bottom:1px solid #334155;font-size:.85rem}.pass{color:#34d399}.warn{color:#fbbf24}.fail{color:#f87171}</style></head><body>`;
+    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>DQ Report</title><style>body{font-family:Arial,sans-serif;background:#1e293b;color:#e2e8f0;margin:0}.slide{width:900px;min-height:500px;margin:24px auto;padding:40px;background:#0f172a;border-radius:12px;page-break-after:always}h1{color:#60a5fa;font-size:2rem}h2{color:#34d399;font-size:1.4rem;margin-bottom:1rem}table{width:100%;border-collapse:collapse}th{background:#1e40af;padding:8px 14px;text-align:left;font-size:.85rem}td{padding:6px 14px;border-bottom:1px solid #334155;font-size:.85rem}.pass{color:#34d399}.warn{color:#fbbf24}.fail{color:#f87171}</style></head><body>`;
     html += `<div class="slide"><h1>Data Quality Check Report</h1><p style="color:#94a3b8">Generated: ${new Date().toLocaleString()}</p><p style="color:#94a3b8">Datasets analysed: ${Object.keys(dqCheckResults).length}</p><ul>`;
-    Object.values(dqCheckResults).forEach(r => { html += `<li style="margin:.4rem 0">${r.datasetName} (${r.level}) — Overall Score: <strong style="color:#34d399">${r.overallScore}%</strong></li>`; });
+    Object.values(dqCheckResults).forEach(r => { html += `<li style="margin:.4rem 0">${r.datasetName} (${r.level}) &mdash; Overall Score: <strong style="color:#34d399">${r.overallScore}%</strong></li>`; });
     html += `</ul></div>`;
     Object.values(dqCheckResults).forEach(result => {
       const groups = [...new Set(result.checks.map(c => c.group))];
       groups.forEach(group => {
-        html += `<div class="slide"><h2>${result.datasetName} — ${group}</h2><table><tr><th>Check</th><th>Value</th><th>Threshold</th><th>Status</th></tr>`;
+        html += `<div class="slide"><h2>${result.datasetName} &mdash; ${group}</h2><table><tr><th>Check</th><th>Value</th><th>Threshold</th><th>Status</th></tr>`;
         result.checks.filter(c => c.group === group).forEach(c => {
           html += `<tr><td>${c.name}</td><td>${c.value}</td><td>${c.threshold}</td><td class="${c.status}">${c.status.toUpperCase()}</td></tr>`;
         });
@@ -2750,7 +2753,7 @@ const DataQualityStep: React.FC<{
       });
     });
     html += `</body></html>`;
-    const blob = new Blob([html], { type: 'text/html' });
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url;
     a.download = `DQ_Report_${new Date().toISOString().split('T')[0]}.html`;
@@ -2818,14 +2821,6 @@ const DataQualityStep: React.FC<{
       ],
     };
   };
-
-  const metrics = selectedDataset ? getComprehensiveMetrics(selectedDataset) : null;
-
-  const tabs = [
-    { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'distributions', label: 'Distributions', icon: TrendingUp },
-    { id: 'volume', label: 'Volume/Event Rate', icon: Database },
-  ];
 
   // Generate comprehensive data quality analysis for all datasets
   const analyzeAllDatasets = async () => {
@@ -3317,227 +3312,8 @@ const DataQualityStep: React.FC<{
             </div>
           </div>
 
-          {/* Tab Navigation */}
-          <div className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-            <div className="flex gap-1 overflow-x-auto">
-              {tabs.map((tab) => {
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={`px-4 py-3 font-medium text-sm whitespace-nowrap flex items-center gap-2 border-b-2 transition ${
-                      activeTab === tab.id
-                        ? isDark
-                          ? 'border-blue-500 text-blue-400'
-                          : 'border-blue-600 text-blue-600'
-                        : isDark
-                        ? 'border-transparent text-slate-400 hover:text-slate-300'
-                        : 'border-transparent text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Icon size={16} />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Tab Content - Show detailed analysis for selected dataset */}
-          {selectedDataset && metrics && (
-            <>
-              {/* Overview Tab */}
-              {activeTab === 'overview' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <div className="flex items-center gap-3 mb-2">
-                      <Database className={`${isDark ? 'text-blue-400' : 'text-blue-600'}`} size={24} />
-                      <h4 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Total Records
-                      </h4>
-                    </div>
-                    <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      {selectedDataset.rows?.toLocaleString() || 0}
-                    </p>
-                    <p className={`text-sm mt-2 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                      {selectedDataset.columns || 0} variables
-                    </p>
-                  </div>
-
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <div className="flex items-center gap-3 mb-2">
-                      <CheckCircle className={`${isDark ? 'text-green-400' : 'text-green-600'}`} size={24} />
-                      <h4 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        After Exclusion
-                      </h4>
-                    </div>
-                    <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      {((selectedDataset.rows || 0) * 0.98).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                    </p>
-                    <p className={`text-sm mt-2 ${isDark ? 'text-green-400' : 'text-green-600'}`}>
-                      98% retained
-                    </p>
-                  </div>
-
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <div className="flex items-center gap-3 mb-2">
-                      <Shield className={`${isDark ? 'text-purple-400' : 'text-purple-600'}`} size={24} />
-                      <h4 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Quality Score
-                      </h4>
-                    </div>
-                    <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      94.2%
-                    </p>
-                    <p className={`text-sm mt-2 ${isDark ? 'text-green-400' : 'text-green-600'}`}>
-                      Excellent
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Distributions Tab */}
-              {activeTab === 'distributions' && (
-                <div className="space-y-6">
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      Numerical Variable Summary
-                    </h4>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                            <th className={`text-left py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Variable</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Mean</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Std</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Min</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>25%</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>50%</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>75%</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Max</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {metrics.statisticalSummary.map((stat, idx) => (
-                            <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                              <td className={`py-2 px-3 font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                {stat.variable}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.mean.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.std.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.min.toLocaleString()}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.p25.toLocaleString()}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.p50.toLocaleString()}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.p75.toLocaleString()}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.max.toLocaleString()}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      Categorical Variable Distribution
-                    </h4>
-                    <div className="space-y-4">
-                      {metrics.categoricalDistributions.map((dist, idx) => (
-                        <div key={idx} className={`p-4 rounded-lg ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-                          <div className="flex justify-between items-start mb-2">
-                            <span className={`font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                              {dist.variable}
-                            </span>
-                            <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                              {dist.categories} categories
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              Top: <strong>{dist.topCategory}</strong>
-                            </span>
-                            <span className={`text-sm ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
-                              {dist.topPercent.toFixed(1)}%
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Volume/Event Rate Tab */}
-              {activeTab === 'volume' && (
-                <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                    Volume & Event Rate by Segment
-                  </h4>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <th className={`text-left py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Segment</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Count</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Event Rate</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Baseline</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Delta</th>
-                          <th className={`text-center py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metrics.volumeMetrics.map((vol, idx) => (
-                          <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                            <td className={`py-3 px-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>{vol.segment}</td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {vol.count.toLocaleString()}
-                            </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'  }`}>
-                              {vol.eventRate.toFixed(1)}%
-                            </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {vol.baselineEventRate.toFixed(1)}%
-                            </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {vol.delta > 0 ? '+' : ''}{vol.delta.toFixed(1)}%
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs ${
-                                Math.abs(vol.delta) < 0.5
-                                  ? isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
-                                  : Math.abs(vol.delta) < 1.0
-                                  ? isDark ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
-                                  : isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
-                              }`}>
-                                {Math.abs(vol.delta) < 0.5 ? '● Green' : Math.abs(vol.delta) < 1.0 ? '● Amber' : '● Red'}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Dataset Analysis Section - NOW BELOW DETAILED ANALYSIS */}
+          
+{/* Dataset Analysis Section - NOW BELOW DETAILED ANALYSIS */}
           <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
               Analyze Datasets for Quality Issues
@@ -3591,7 +3367,7 @@ const DataQualityStep: React.FC<{
                   Comprehensive Data Quality Checks (18 Checks)
                 </h3>
                 <div className={`flex border rounded-lg overflow-hidden ${ isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-                  {(['score', 'account'] as const).map(lvl => (
+                  {([...(hasScoreDataset ? ['score' as const] : []), ...(hasAccountDataset ? ['account' as const] : [])]).map(lvl => (
                     <button
                       key={lvl}
                       onClick={() => setDqLevelTab(lvl)}
@@ -5138,12 +4914,12 @@ const KpiGenerationStep: React.FC<{
       r.value.toString(),
       r.unit,
       r.isPrimary ? 'Yes' : 'No',
-      r.innerThreshold || '—',
-      r.outerThreshold || '—',
+      r.innerThreshold || 'N/A',
+      r.outerThreshold || 'N/A',
       r.status,
     ]);
     const csv = [header, ...rows].map(row => row.map(v => `"${v}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `KPI_Report_${project.name.replace(/\s+/g, '_')}.csv`; a.click();
     URL.revokeObjectURL(url);
@@ -5153,7 +4929,7 @@ const KpiGenerationStep: React.FC<{
   const downloadPDF = () => {
     if (!results) return;
     const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>KPI Report — ${project.name}</title>
+<html><head><meta charset="utf-8"><title>KPI Report - ${project.name}</title>
 <style>body{font-family:Arial,sans-serif;padding:32px;color:#111}
 h1{font-size:18px;margin-bottom:4px}p.sub{font-size:12px;color:#666;margin-bottom:20px}
 table{width:100%;border-collapse:collapse;font-size:12px}
