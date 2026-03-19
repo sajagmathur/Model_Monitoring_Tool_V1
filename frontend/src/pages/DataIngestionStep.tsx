@@ -353,7 +353,7 @@ const VintageRangeInput: React.FC<{
     <div>
       <div className="flex items-center justify-between mb-2">
         <span className={`text-xs font-medium ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          Observation Vintage Range
+          Reference Vintage Range
         </span>
         <button
           type="button"
@@ -981,7 +981,7 @@ export const DataIngestionStepComponent: React.FC<{
         <div className={card}>
           <p className={secTitle}>Step 2 &mdash; Reference Vintage</p>
           <p className={`text-xs mb-3 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-            Specify the observation vintage date range for this monitoring run. Applies to both Score and Account datasets.
+            Specify the reference vintage date range for this monitoring run. Applies to both Score and Account datasets.
           </p>
           <VintageRangeInput
             vintageFrom={scoreConfig.vintageFrom ?? ''}
@@ -1009,7 +1009,7 @@ export const DataIngestionStepComponent: React.FC<{
                   onChange={e => setCustomPerfUnit(e.target.value)}
                   className={sel}
                 >
-                  {['Minutes', 'Hours', 'Days', 'Weeks', 'Months', 'Quarters', 'Years'].map(u => (
+                  {['Days', 'Weeks', 'Months', 'Quarters', 'Years'].map(u => (
                     <option key={u} value={u}>{u}</option>
                   ))}
                 </select>

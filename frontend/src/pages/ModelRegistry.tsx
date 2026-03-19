@@ -216,9 +216,6 @@ export default function ModelRegistry() {
   const { showNotification } = useNotification();
 
   // â”€â”€ Left panel view mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const [leftView, setLeftView] = useState<'inventory' | 'all'>('inventory');
-  const [expandedPortfolios, setExpandedPortfolios] = useState<Set<string>>(new Set());
-  const [selectedInventoryId, setSelectedInventoryId] = useState<string | null>(null);
   const [allSearch, setAllSearch] = useState('');
   // â”€â”€ Detail tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('overview');
@@ -439,152 +436,10 @@ export default function ModelRegistry() {
 
         {/* â”€â”€ LEFT PANEL â”€â”€ */}
         <div className={`lg:col-span-1 rounded-xl border overflow-hidden ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
-          {/* View toggle */}
-          <div className={`flex border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-            {([['inventory', 'Inventories', <LayoutGrid size={12} key="ig"/>], ['all', 'All Models', <List size={12} key="li"/>]] as [string, string, React.ReactNode][]).map(([v, label, icon]) => (
-              <button
-                key={v}
-                onClick={() => setLeftView(v as any)}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition border-b-2 ${
-                  leftView === v
-                    ? isDark ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-blue-500 text-blue-600 bg-blue-50'
-                    : isDark ? 'border-transparent text-slate-400 hover:text-slate-300' : 'border-transparent text-slate-600 hover:text-slate-700'
-                }`}
-              >
-                {icon}{label}
-              </button>
-            ))}
-          </div>
-
           <div className="p-3 space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 17rem)' }}>
 
-            {/* â”€â”€ INVENTORY VIEW â”€â”€ */}
-            {leftView === 'inventory' && (
-              <>
-                <button
-                  onClick={() => setShowCreateInv(true)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition mb-2 ${isDark ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'}`}
-                >
-                  <FolderPlus size={13} /> New Inventory Folder
-                </button>
-
-                {portfolios.length === 0 && unassignedModels.length === 0 && (
-                  <div className={`text-center py-8 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    <Folder size={28} className="mx-auto mb-2 opacity-50" />
-                    <p className="text-xs">No models yet</p>
-                    <p className="text-xs mt-1 opacity-70">Import models from Projects to get started</p>
-                  </div>
-                )}
-
-                {/* Portfolio folders */}
-                {portfolios.map(portfolio => {
-                  const childCats = categories.filter(c => c.parentId === portfolio.id);
-                  const directModels = modelsInInventory(portfolio.id);
-                  const isExpanded = expandedPortfolios.has(portfolio.id);
-                  // Recursive count — walks the full Geography›Domain›Product›ModelType›ModelID›ModelVersion tree
-                  const totalCount = countModelsUnder(portfolio.id, modelInventories, registryModels);
-
-                  return (
-                    <div key={portfolio.id}>
-                      <div className={`group flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer transition ${
-                        selectedInventoryId === portfolio.id && !selectedModelId
-                          ? isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-700'
-                          : isDark ? 'hover:bg-slate-700/50 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
-                      }`}>
-                        <button onClick={() => setExpandedPortfolios(prev => { const s = new Set(prev); s.has(portfolio.id) ? s.delete(portfolio.id) : s.add(portfolio.id); return s; })} className="p-0.5 rounded flex-shrink-0">
-                          {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                        </button>
-                        <button onClick={() => { setSelectedInventoryId(portfolio.id); setSelectedModelId(null); }} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
-                          {isExpanded ? <FolderOpen size={13} className="flex-shrink-0 text-amber-400" /> : <Folder size={13} className="flex-shrink-0 text-amber-400" />}
-                          <span className="text-xs font-medium truncate">{portfolio.name}</span>
-                          {portfolio.type && !['portfolio','category'].includes(portfolio.type) && (
-                            <span className={`text-[10px] px-1 py-0.5 rounded flex-shrink-0 font-medium ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'}`}>{portfolio.type}</span>
-                          )}
-                          <span className={`ml-auto text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-600'}`}>{totalCount}</span>
-                        </button>
-                        <button
-                          onClick={e => { e.stopPropagation(); if (confirm(`Delete inventory "${portfolio.name}"? Models will be unassigned.`)) deleteModelInventory(portfolio.id); }}
-                          className={`opacity-0 group-hover:opacity-100 p-0.5 rounded flex-shrink-0 ${isDark ? 'text-red-400 hover:bg-slate-700' : 'text-red-500 hover:bg-red-50'}`}
-                          title="Delete folder"
-                        ><Trash2 size={11} /></button>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="ml-5 border-l pl-2 space-y-0.5 mt-0.5" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                          {directModels.map(m => (
-                            <button
-                              key={m.id}
-                              onClick={() => { setSelectedModelId(m.id); setSelectedInventoryId(null); setActiveDetailTab('overview'); }}
-                              className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-left transition ${
-                                selectedModelId === m.id
-                                  ? isDark ? 'bg-blue-600/20 text-blue-300' : 'bg-blue-50 text-blue-700'
-                                  : isDark ? 'text-slate-400 hover:bg-slate-700/50' : 'text-slate-600 hover:bg-slate-100'
-                              }`}
-                            >
-                              <Package size={11} className="flex-shrink-0" />
-                              <span className="truncate">{m.name}</span>
-                              <span className={`ml-auto flex-shrink-0 text-xs ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>{m.versions.length}v</span>
-                            </button>
-                          ))}
-                          {childCats.map(child => (
-                            <CategoryNode
-                              key={child.id}
-                              inventory={child}
-                              allInventories={modelInventories}
-                              isDark={isDark}
-                              selectedModelId={selectedModelId}
-                              groupedModels={groupedModels}
-                              registryModels={registryModels}
-                              onModelSelect={id => { setSelectedModelId(id); setSelectedInventoryId(null); setActiveDetailTab('overview'); }}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {/* Unfoldered models — no inventoryId assigned */}
-                {unassignedModels.length > 0 && (
-                  <div>
-                    <div
-                      onClick={() => setSelectedInventoryId(prev => prev === '__unassigned__' ? null : '__unassigned__')}
-                      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition ${
-                        selectedInventoryId === '__unassigned__'
-                          ? isDark ? 'bg-slate-600/30 text-slate-300' : 'bg-slate-100 text-slate-700'
-                          : isDark ? 'hover:bg-slate-700/50 text-slate-400' : 'hover:bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      <Folder size={13} className={isDark ? 'text-slate-500' : 'text-slate-400'} />
-                      <span className="text-xs font-medium flex-1">Unfoldered</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'}`}>{unassignedModels.length}</span>
-                    </div>
-                    {selectedInventoryId === '__unassigned__' && (
-                      <div className="ml-5 border-l pl-2 mt-0.5 space-y-0.5" style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
-                        {unassignedModels.map(m => (
-                          <button
-                            key={m.id}
-                            onClick={() => { setSelectedModelId(m.id); setSelectedInventoryId(null); setActiveDetailTab('overview'); }}
-                            className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-left transition ${
-                              selectedModelId === m.id
-                                ? isDark ? 'bg-blue-600/20 text-blue-300' : 'bg-blue-50 text-blue-700'
-                                : isDark ? 'text-slate-400 hover:bg-slate-700/50' : 'text-slate-600 hover:bg-slate-100'
-                            }`}
-                          >
-                            <Package size={11} className="flex-shrink-0" />
-                            <span className="truncate">{m.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-
             {/* â”€â”€ ALL MODELS VIEW â”€â”€ */}
-            {leftView === 'all' && (
-              <>
+            {<>
                 <input
                   type="text"
                   value={allSearch}
@@ -617,14 +472,13 @@ export default function ModelRegistry() {
                               : isDark ? 'text-slate-300 hover:bg-slate-700/30 border-slate-700' : 'text-slate-700 hover:bg-slate-50 border-slate-200'
                           }`}
                         >
-                          <p className="text-sm font-medium truncate">{regModel?.model_id || '—'} — {model.name}</p>
+                        <p className="text-sm font-medium truncate">{projects.find(p => p.id === regModel?.projectId)?.name ? `${projects.find(p => p.id === regModel?.projectId)!.name} – ` : ''}{regModel?.model_id || '—'} – {model.name}</p>
                         </button>
                       );
                     })}
                   </div>
                 )}
-              </>
-            )}
+              </>}
           </div>
         </div>
 

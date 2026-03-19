@@ -14,6 +14,7 @@ import {
   Calendar,
   ClipboardList,
   Brain,
+  ShieldCheck,
 } from 'lucide-react';
 import Logo from './Logo';
 
@@ -47,6 +48,13 @@ const LeftNavigation: React.FC = () => {
       label: 'Projects',
       path: '/projects',
       icon: <Folder size={20} />,
+      section: 'main',
+    },
+    {
+      id: 'validation',
+      label: 'Validation',
+      path: '/validation',
+      icon: <ShieldCheck size={20} />,
       section: 'main',
     },
     {

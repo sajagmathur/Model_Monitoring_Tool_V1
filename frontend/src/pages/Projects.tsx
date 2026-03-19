@@ -72,14 +72,14 @@ interface ModelMetadata {
   metrics?: { [key: string]: number };
 }
 
-interface WorkflowStep {
+export interface WorkflowStep {
   id: number;
   name: string;
   status: 'not-started' | 'in-progress' | 'completed' | 'error' | 'locked';
   locked?: boolean;
 }
 
-interface Workflow {
+export interface Workflow {
   id: string;
   name: string;
   description: string;
@@ -104,7 +104,7 @@ interface Workflow {
   };
 }
 
-interface Project {
+export interface Project {
   id: string;
   name: string;
   description: string;
@@ -126,7 +126,7 @@ const BULK_REQUIRED_COLUMNS = [
   'Population Type', 'Usage', 'Risk Tier/MRR', 'Model Status',
 ];
 const BULK_OPTIONAL_COLUMNS = [
-  'Model Version', 'Geography', 'Developer', 'Segment Variable',
+  'Model Version', 'Geography', 'Developer',
   'Full Performance', 'Full Performance Bad Definition',
   'Early Warning 1', 'Early Warning 1 Bad Definition',
   'Early Warning 2', 'Early Warning 2 Bad Definition',
@@ -359,7 +359,7 @@ const BulkModelUploadStep: React.FC<{
         tier: d['Risk Tier/MRR'] || 'Medium',
         status: d['Model Status'] || 'Active',
         version: 'v1',
-        environment: 'Development',
+        environment: 'Reference',
         owner: d['Owner'] || '',
         lastValidation: d['Last Validation Date'] || '',
         nextReview: d['Next Review Date'] || '',
@@ -524,14 +524,7 @@ const BulkModelUploadStep: React.FC<{
                 </p>
               </div>
             </div>
-            {validationResult.rows.length > 0 && (
-              <button
-                onClick={() => setShowPreview(!showPreview)}
-                className={`text-xs px-3 py-1.5 rounded border transition ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
-              >
-                {showPreview ? 'Hide' : 'Preview'} Data
-              </button>
-            )}
+
           </div>
 
           {/* Column check grid */}
@@ -581,30 +574,30 @@ const BulkModelUploadStep: React.FC<{
           </div>
 
           {/* Preview table */}
-          {showPreview && validationResult.rows.length > 0 && (
+          {validationResult.rows.length > 0 && (
             <div className={`border-t overflow-x-auto max-h-52 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
               <table className="w-full text-xs">
                 <thead>
                   <tr className={isDark ? 'bg-slate-800' : 'bg-slate-50'}>
                     <th className={`sticky left-0 px-3 py-2 text-left font-semibold ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>#</th>
-                    {validationResult.presentRequired.map(col => (
+                    {[...validationResult.presentRequired, ...(validationResult.presentOptional ?? [])].map(col => (
                       <th key={col} className="px-3 py-2 text-left font-semibold whitespace-nowrap">{col}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {validationResult.rows.slice(0, 8).map(row => (
+                  {validationResult.rows.slice(0, 5).map(row => (
                     <tr key={row.rowNum} className={`border-t ${row.errors.length > 0 ? (isDark ? 'bg-red-900/10 border-slate-700' : 'bg-red-50 border-slate-200') : (isDark ? 'border-slate-700' : 'border-slate-200')}`}>
                       <td className={`sticky left-0 px-3 py-2 font-medium ${isDark ? 'bg-slate-800 text-slate-400' : 'bg-white text-slate-500'}`}>{row.rowNum}</td>
-                      {validationResult.presentRequired.map(col => (
+                      {[...validationResult.presentRequired, ...(validationResult.presentOptional ?? [])].map(col => (
                         <td key={col} className={`px-3 py-2 whitespace-nowrap ${!row.data[col] ? (isDark ? 'text-red-400 italic' : 'text-red-600 italic') : (isDark ? 'text-slate-300' : 'text-slate-700')}`}>
                           {row.data[col] || '—'}
                         </td>
                       ))}
                     </tr>
                   ))}
-                  {validationResult.rows.length > 8 && (
-                    <tr><td colSpan={validationResult.presentRequired.length + 1} className={`px-3 py-2 text-center italic text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>… {validationResult.rows.length - 8} more row(s)</td></tr>
+                  {validationResult.rows.length > 5 && (
+                    <tr><td colSpan={validationResult.presentRequired.length + (validationResult.presentOptional?.length ?? 0) + 1} className={`px-3 py-2 text-center italic text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>… {validationResult.rows.length - 5} more row(s)</td></tr>
                   )}
                 </tbody>
               </table>
@@ -794,10 +787,19 @@ const KPI_METRICS: KpiMetric[] = [
   {
     id: 'ks',
     label: 'KS (Kolmogorov-Smirnov)',
-    description: 'Measures maximum separation between cumulative good and bad distributions.',
+    description: 'Measures maximum separation between cumulative distributions. Inner threshold formula: [(KS_Ref − KS_Val) / KS_Ref] × 100.',
     defaultEnabled: true,
     defaultInner: '',
     defaultOuter: '5%',
+    section: 'standard',
+  },
+  {
+    id: 'change_in_ks',
+    label: 'Change in KS%',
+    description: 'Percentage change in KS relative to reference: [(KS_Ref − KS_Val) / KS_Ref] × 100.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
     section: 'standard',
   },
   {
@@ -903,6 +905,33 @@ const KPI_METRICS: KpiMetric[] = [
     id: 'f1_score',
     label: 'F1 Score',
     description: 'Harmonic mean of precision and recall.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'r2',
+    label: 'R² (R-Squared)',
+    description: 'R-Squared coefficient of determination — proportion of variance explained.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'adjusted_r2',
+    label: 'Adjusted R²',
+    description: 'R-Squared adjusted for number of predictors in the model.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'rmse',
+    label: 'RMSE (Root Mean Squared Error)',
+    description: 'Root Mean Squared Error — measures average magnitude of prediction errors.',
     defaultEnabled: true,
     defaultInner: '',
     defaultOuter: '',
@@ -1019,7 +1048,7 @@ const KPI_METRICS: KpiMetric[] = [
   },
 ];
 
-const ModelMetricsStep: React.FC<{
+export const ModelMetricsStep: React.FC<{
   workflow: Workflow;
   onComplete: (config: Workflow['modelMetricsConfig']) => void;
 }> = ({ workflow, onComplete }) => {
@@ -1029,9 +1058,14 @@ const ModelMetricsStep: React.FC<{
   // Determine dataset type from the data ingestion step
   const hasScoreDataset = !!(workflow as any).dataIngestionConfig?.scoreLevelDataset;
   const hasAccountDataset = !!(workflow as any).dataIngestionConfig?.accountLevelDataset;
-  // If only score → show standard; if only account → show feature; if both or neither → show all
-  const showStandard = hasScoreDataset || (!hasScoreDataset && !hasAccountDataset);
-  const showFeature = hasAccountDataset || (!hasScoreDataset && !hasAccountDataset);
+
+  // Allowlist by data type
+  const SCORE_ONLY_IDS = ['ks', 'change_in_ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape'];
+  const ACCOUNT_ALLOWED_IDS = ['ks', 'change_in_ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape', 'type1_error', 'type2_error', 'accuracy', 'precision', 'recall', 'f1_score', 'r2', 'adjusted_r2', 'rmse', 'hrl'];
+  const allowedIds: string[] = hasScoreDataset && !hasAccountDataset ? SCORE_ONLY_IDS
+    : hasAccountDataset ? ACCOUNT_ALLOWED_IDS
+    : KPI_METRICS.map(k => k.id);
+  const visibleKpis = KPI_METRICS.filter(k => allowedIds.includes(k.id));
 
   const [metrics, setMetrics] = useState<Array<{ id: string; enabled: boolean; isPrimary: boolean; innerThreshold: string; outerThreshold: string }>>(
     KPI_METRICS.map(kpi => {
@@ -1051,16 +1085,13 @@ const ModelMetricsStep: React.FC<{
   const updateThreshold = (id: string, field: 'innerThreshold' | 'outerThreshold', value: string) =>
     setMetrics(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
 
-  const toggleSection = (section: 'standard' | 'feature', enabled: boolean) =>
-    setMetrics(prev => prev.map(m => {
-      const kpi = KPI_METRICS.find(k => k.id === m.id);
-      return kpi?.section === section ? { ...m, enabled, isPrimary: enabled ? m.isPrimary : false } : m;
-    }));
+  const toggleAll = (enabled: boolean) =>
+    setMetrics(prev => prev.map(m =>
+      allowedIds.includes(m.id) ? { ...m, enabled, isPrimary: enabled ? m.isPrimary : false } : m
+    ));
 
-  const selectedCount = metrics.filter(m => m.enabled).length;
-  const primaryCount = metrics.filter(m => m.isPrimary).length;
-  const standardMetrics = KPI_METRICS.filter(k => k.section === 'standard');
-  const featureMetrics = KPI_METRICS.filter(k => k.section === 'feature');
+  const selectedCount = metrics.filter(m => m.enabled && allowedIds.includes(m.id)).length;
+  const primaryCount = metrics.filter(m => m.isPrimary && allowedIds.includes(m.id)).length;
 
   const renderMetricRow = (kpi: KpiMetric) => {
     const m = metrics.find(x => x.id === kpi.id)!;
@@ -1133,14 +1164,8 @@ const ModelMetricsStep: React.FC<{
     );
   };
 
-  const SectionHeader: React.FC<{
-    title: string;
-    subtitle: string;
-    section: 'standard' | 'feature';
-    color: string;
-  }> = ({ title, subtitle, section, color }) => {
-    const sectionMetrics = metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === section);
-    const allEnabled = sectionMetrics.every(m => m.enabled);
+  const SectionHeader: React.FC<{ title: string; subtitle: string; color: string }> = ({ title, subtitle, color }) => {
+    const allEnabled = visibleKpis.every(k => metrics.find(m => m.id === k.id)?.enabled);
     return (
       <div className={`flex items-center justify-between mb-3 pb-2 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
         <div>
@@ -1149,7 +1174,7 @@ const ModelMetricsStep: React.FC<{
         </div>
         <button
           type="button"
-          onClick={() => toggleSection(section, !allEnabled)}
+          onClick={() => toggleAll(!allEnabled)}
           className={`text-xs px-3 py-1 rounded-lg font-medium transition-colors ${
             allEnabled
               ? isDark ? 'bg-blue-900/40 text-blue-300 hover:bg-blue-900/60' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
@@ -1174,14 +1199,14 @@ const ModelMetricsStep: React.FC<{
         </p>
         {(hasScoreDataset || hasAccountDataset) && (
           <div className="mt-2 flex flex-wrap gap-2">
-            {hasScoreDataset && (
+            {hasScoreDataset && !hasAccountDataset && (
               <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-100 text-blue-700'}`}>
-                Score Level — Standard Metrics
+                Score Level — {SCORE_ONLY_IDS.length} metrics
               </span>
             )}
             {hasAccountDataset && (
               <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${isDark ? 'bg-purple-900/40 text-purple-300' : 'bg-purple-100 text-purple-700'}`}>
-                Account Level — Feature Metrics
+                Account Level — {ACCOUNT_ALLOWED_IDS.length} metrics
               </span>
             )}
           </div>
@@ -1194,45 +1219,27 @@ const ModelMetricsStep: React.FC<{
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded border-2 border-amber-400 inline-block bg-amber-100 dark:bg-amber-900/30" /> Primary KPI (thresholds visible)</span>
       </div>
 
-      {/* Section 1: Standard Metrics (Score Level) */}
-      {showStandard && (
-        <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
-          <SectionHeader
-            title="Standard Metrics — Score Level"
-            subtitle={`${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'standard' && m.enabled).length} of ${standardMetrics.length} selected · ${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'standard' && m.isPrimary).length} primary`}
-            section="standard"
-            color={isDark ? 'text-blue-300' : 'text-blue-700'}
-          />
-          <div className="text-xs mb-3 flex items-center gap-6">
-            <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>
-              Check "Primary KPI" on an enabled metric to set inner/outer thresholds.
-            </span>
-          </div>
-          <div className="space-y-2">
-            {standardMetrics.map(renderMetricRow)}
-          </div>
+      {/* KPI Metrics — filtered by dataset type */}
+      <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+        <SectionHeader
+          title={hasScoreDataset && !hasAccountDataset ? 'Metrics — Score Level' : hasAccountDataset ? 'Metrics — Account Level' : 'KPI Metrics'}
+          subtitle={`${selectedCount} of ${visibleKpis.length} selected · ${primaryCount} primary`}
+          color={hasAccountDataset ? (isDark ? 'text-purple-300' : 'text-purple-700') : (isDark ? 'text-blue-300' : 'text-blue-700')}
+        />
+        <div className="text-xs mb-3">
+          <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>
+            Check "Primary KPI" on an enabled metric to set inner/outer thresholds.
+          </span>
         </div>
-      )}
-
-      {/* Section 2: Feature Based Metrics (Account Level) */}
-      {showFeature && (
-        <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
-          <SectionHeader
-            title="Feature Based Metrics — Account Level"
-            subtitle={`${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'feature' && m.enabled).length} of ${featureMetrics.length} selected · ${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'feature' && m.isPrimary).length} primary`}
-            section="feature"
-            color={isDark ? 'text-purple-300' : 'text-purple-700'}
-          />
-          <div className="space-y-2">
-            {featureMetrics.map(renderMetricRow)}
-          </div>
+        <div className="space-y-2">
+          {visibleKpis.map(renderMetricRow)}
         </div>
-      )}
+      </div>
 
       {/* Continue */}
       <div className="flex items-center justify-between">
         <div className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-          <span>{selectedCount} metric{selectedCount !== 1 ? 's' : ''} enabled</span>
+          <span>{selectedCount} of {visibleKpis.length} metric{visibleKpis.length !== 1 ? 's' : ''} enabled</span>
           {primaryCount > 0 && (
             <span className={`ml-3 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>· {primaryCount} primary (with thresholds)</span>
           )}
@@ -2227,13 +2234,6 @@ const ModelRepositoryStep: React.FC<{
                             placeholder="e.g., Data Science Team"
                             className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
                         </div>
-                        <div>
-                          <label className="block text-xs font-medium mb-1">Segment Variable</label>
-                          <input type="text" value={metadata.segmentVariable}
-                            onChange={(e) => setMetadata({ ...metadata, segmentVariable: e.target.value })}
-                            placeholder="e.g., Score Band"
-                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                        </div>
                       </div>
                     </>
                   )}
@@ -2290,17 +2290,14 @@ const ModelRepositoryStep: React.FC<{
                           <option value="Yes">Yes</option>
                           <option value="No">No</option>
                         </select>
-                        {metadata.fullPerf === 'Yes' && (
-                          <div className="mt-2">
-                            <label className="block text-xs font-medium mb-1">Bad Definition</label>
-                            <input type="text" value={metadata.fullPerfBadDef}
-                              onChange={(e) => setMetadata({ ...metadata, fullPerfBadDef: e.target.value })}
-                              placeholder="e.g., 90+ DPD"
-                              className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
-                          </div>
-                        )}
+                        <div className="mt-2">
+                          <label className="block text-xs font-medium mb-1">Bad Definition</label>
+                          <input type="text" value={metadata.fullPerfBadDef}
+                            onChange={(e) => setMetadata({ ...metadata, fullPerfBadDef: e.target.value })}
+                            placeholder="e.g., 90+ DPD"
+                            className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`} />
+                        </div>
                       </div>
-                      {/* Early Warning 1 */}
                       <div className="mt-3">
                         <p className={`text-xs font-semibold pb-1 border-b ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Early Warning 1</p>
                         <select value={metadata.ew1}
@@ -2581,7 +2578,7 @@ interface DataQualityMetrics {
   }>;
 }
 
-const DataQualityStep: React.FC<{ 
+export const DataQualityStep: React.FC<{ 
   workflow: Workflow;
   projectId: string;
   onComplete: () => void;
@@ -3312,8 +3309,7 @@ const DataQualityStep: React.FC<{
             </div>
           </div>
 
-          
-{/* Dataset Analysis Section - NOW BELOW DETAILED ANALYSIS */}
+          {/* Dataset Analysis Section - NOW BELOW DETAILED ANALYSIS */}
           <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
             <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
               Analyze Datasets for Quality Issues
@@ -3630,7 +3626,7 @@ const ModelImportStep: React.FC<{ onComplete: () => void }> = ({ onComplete }) =
   );
 };
 
-const ReportConfigurationStep: React.FC<{ onComplete: () => void; workflow: Workflow }> = ({ onComplete, workflow }) => {
+export const ReportConfigurationStep: React.FC<{ onComplete: () => void; workflow: Workflow }> = ({ onComplete, workflow }) => {
   const { theme } = useTheme();
   const { reportConfigurations, registryModels, ingestionJobs, createReportConfiguration } = useGlobal();
   const isDark = theme === 'dark';
@@ -3821,7 +3817,7 @@ const ReportConfigurationStep: React.FC<{ onComplete: () => void; workflow: Work
                   ))}
                 </select>
                 <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                  Development or training dataset
+                  Reference dataset
                 </p>
               </div>
 
@@ -4041,7 +4037,7 @@ const ReportConfigurationStep: React.FC<{ onComplete: () => void; workflow: Work
 };
 
 // Schedule Reports Step - Workflow summary and automatic scheduling
-const ScheduleReportsStep: React.FC<{ onComplete: () => void; workflow: Workflow; project: Project }> = ({ onComplete, workflow, project }) => {
+export const ScheduleReportsStep: React.FC<{ onComplete: () => void; workflow: Workflow; project: Project }> = ({ onComplete, workflow, project }) => {
   const { theme } = useTheme();
   const { reportConfigurations, createSchedulingJob, createWorkflowLog, ingestionJobs, schedulingJobs } = useGlobal();
   const isDark = theme === 'dark';
@@ -4796,19 +4792,24 @@ interface KpiResult {
   unit: string;
 }
 
-const KpiGenerationStep: React.FC<{
+export const KpiGenerationStep: React.FC<{
   workflow: Workflow;
   project: Project;
   onComplete: (results: KpiResult[]) => void;
-}> = ({ workflow, project, onComplete }) => {
+  onIngestAnotherModel?: (modelId: string) => void;
+}> = ({ workflow, project, onComplete, onIngestAnotherModel }) => {
   const { theme } = useTheme();
-  const { createIngestionJob } = useGlobal();
+  const { createIngestionJob, registryModels } = useGlobal();
   const isDark = theme === 'dark';
 
   const [results, setResults] = useState<KpiResult[] | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [calcProgress, setCalcProgress] = useState(0);
   const [reportSaved, setReportSaved] = useState(false);
+  const [showAnotherModelDialog, setShowAnotherModelDialog] = useState(false);
+  const [anotherModelId, setAnotherModelId] = useState('');
+
+  const projectModels = registryModels.filter(m => m.projectId === project.id);
 
   const enabledMetrics = (workflow.modelMetricsConfig?.selectedMetrics ?? []).filter(m => m.enabled);
 
@@ -5095,7 +5096,7 @@ tr:nth-child(even)td{background:#f9fafb}
               <table className="w-full text-xs">
                 <thead>
                   <tr className={isDark ? 'bg-gray-700/50' : 'bg-gray-100'}>
-                    {['Metric', 'Section', 'Value', 'Primary', 'Inner', 'Outer', 'Status'].map(h => (
+                    {['Metric', 'Value', 'Primary KPI', 'Inner Threshold', 'Outer Threshold'].map(h => (
                       <th key={h} className={`px-4 py-2.5 text-left font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{h}</th>
                     ))}
                   </tr>
@@ -5104,14 +5105,12 @@ tr:nth-child(even)td{background:#f9fafb}
                   {results.map((r, i) => (
                     <tr key={r.id} className={`border-t ${isDark ? 'border-gray-700/50' : 'border-gray-100'} ${i % 2 === 0 ? (isDark ? 'bg-gray-800' : 'bg-white') : (isDark ? 'bg-gray-800/50' : 'bg-gray-50/50')}`}>
                       <td className={`px-4 py-2.5 font-medium ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>{r.label}</td>
-                      <td className={`px-4 py-2.5 capitalize ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{r.section}</td>
                       <td className={`px-4 py-2.5 font-mono ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>{r.value}{r.unit}</td>
                       <td className="px-4 py-2.5">
                         {r.isPrimary ? <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-amber-900/30 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>★ Primary</span> : <span className={isDark ? 'text-gray-600' : 'text-gray-400'}>—</span>}
                       </td>
-                      <td className={`px-4 py-2.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{r.innerThreshold || '—'}</td>
-                      <td className={`px-4 py-2.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{r.outerThreshold || '—'}</td>
-                      <td className="px-4 py-2.5">{statusBadge(r.status)}</td>
+                      <td className={`px-4 py-2.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{r.innerThreshold || 'N/A'}</td>
+                      <td className={`px-4 py-2.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{r.outerThreshold || 'N/A'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -5119,14 +5118,59 @@ tr:nth-child(even)td{background:#f9fafb}
             </div>
           </div>
 
-          {/* Continue button */}
-          <div className="flex justify-end pt-2">
-            <button
-              onClick={() => onComplete(results)}
-              className="px-6 py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all"
-            >
-              Continue to Report Configuration →
-            </button>
+          {/* Action buttons */}
+          <div className={`flex flex-col gap-3 pt-2 p-4 rounded-xl border ${isDark ? 'bg-gray-800/50 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+            <p className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>What would you like to do next?</p>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => onComplete(results)}
+                className="px-6 py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all"
+              >
+                Complete Reference Data Ingestion →
+              </button>
+              <button
+                onClick={() => setShowAnotherModelDialog(v => !v)}
+                className={`px-6 py-2.5 rounded-xl text-sm font-bold shadow-md transition-all ${isDark ? 'bg-slate-600 hover:bg-slate-500 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-800'}`}
+              >
+                Do Ingestion for Another Model
+              </button>
+            </div>
+            {showAnotherModelDialog && (
+              <div className={`flex flex-col gap-3 mt-1 p-3 rounded-lg border ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}>
+                <p className={`text-sm font-medium ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>Select a model to redo ingestion:</p>
+                <div className="flex gap-2">
+                  <select
+                    value={anotherModelId}
+                    onChange={e => setAnotherModelId(e.target.value)}
+                    className={`flex-1 px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                  >
+                    <option value="">— Select model —</option>
+                    {projectModels.map(m => (
+                      <option key={m.id} value={m.id}>{m.model_id ? `${m.model_id} — ` : ''}{m.name}</option>
+                    ))}
+                    {projectModels.length === 0 && (
+                      <option value="__any__">Any model (default ingestion)</option>
+                    )}
+                  </select>
+                  <button
+                    disabled={!anotherModelId && projectModels.length > 0}
+                    onClick={() => {
+                      if (onIngestAnotherModel) onIngestAnotherModel(anotherModelId || '__any__');
+                      setShowAnotherModelDialog(false);
+                    }}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${(!anotherModelId && projectModels.length > 0) ? (isDark ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-gray-200 text-gray-400 cursor-not-allowed') : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}
+                  >
+                    Start Ingestion
+                  </button>
+                  <button
+                    onClick={() => { setShowAnotherModelDialog(false); setAnotherModelId(''); }}
+                    className={`px-3 py-2 rounded-lg text-sm ${isDark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -5686,7 +5730,7 @@ export default function Projects() {
                           tier: metadata.riskTierMRR,
                           status: metadata.modelStatus,
                           version: metadata.modelVersion,
-                          environment: 'Development',
+                          environment: 'Reference',
                           owner: metadata.owner,
                           lastValidation: metadata.lastValidationDate,
                           nextReview: metadata.nextReviewDate,
@@ -5895,6 +5939,22 @@ export default function Projects() {
                           steps: newSteps,
                           currentStep: 5,
                           kpiResults: results,
+                        } as any);
+                      }}
+                      onIngestAnotherModel={(_modelId) => {
+                        // Reset workflow back to Reference Data Ingestion (step 1)
+                        const resetSteps = selectedProject.workflow.steps.map((s, idx) => {
+                          if (idx === 0) return s; // Keep Model Import completed
+                          if (idx === 1) return { ...s, status: 'not-started' as const, locked: false };
+                          return { ...s, status: 'not-started' as const, locked: true };
+                        });
+                        updateProjectWorkflow(selectedProject.id, {
+                          ...selectedProject.workflow,
+                          steps: resetSteps,
+                          currentStep: 1,
+                          dataIngestionConfig: undefined,
+                          dataQualityAnalysis: undefined,
+                          modelMetricsConfig: undefined,
                         } as any);
                       }}
                     />

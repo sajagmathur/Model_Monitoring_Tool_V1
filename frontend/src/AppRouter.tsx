@@ -11,6 +11,7 @@ import { Clock, RefreshCw } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Projects from './pages/Projects';
+import Validation from './pages/Validation';
 import ModelRegistry from './pages/ModelRegistry';
 import Admin from './pages/Admin';
 import Profile from './pages/Profile';
@@ -157,6 +158,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/" element={<Dashboard />} />
         <Route path="/dashboard/model/:modelId" element={<ModelDetail />} />
         <Route path="/projects" element={<Projects />} />
+        <Route path="/validation" element={<Validation />} />
         <Route path="/model-repository" element={<ModelRegistry />} />
         <Route path="/data-quality" element={<DataQuality />} />
         <Route path="/report-configuration" element={<ReportConfiguration />} />
