@@ -90,6 +90,10 @@ interface Workflow {
   owner: string;
   selectedModel?: string;
   models?: ModelVersion[];
+  modelMetricsConfig?: {
+    granularity: 'score' | 'account';
+    selectedMetrics?: Array<{ id: string; enabled: boolean; innerThreshold: string; outerThreshold: string }>;
+  };
   dataIngestionConfig?: DataIngestionConfig;
   // Data Quality Analysis persistence
   dataQualityAnalysis?: {
@@ -179,7 +183,7 @@ const mapBulkRiskTier = (t: string): 'dev' | 'staging' | 'production' => {
  * (prevents duplicates when multiple models share the same folder hierarchy).
  */
 function findOrCreateInventoryPath(
-  segments: { geo: string; domain: string; product: string; modelType: string; modelId: string; modelVersion: string },
+  segments: { domain: string; product: string; modelType: string },
   inventories: ModelInventory[] | null | undefined,
   createInv: ((inv: Omit<ModelInventory, 'id' | 'createdAt'>) => ModelInventory) | null | undefined
 ): string {
@@ -189,12 +193,9 @@ function findOrCreateInventoryPath(
   }
 
   const levels = [
-    { type: 'geography' as const,    value: segments.geo.trim() },
-    { type: 'domain' as const,       value: segments.domain.trim() },
-    { type: 'product' as const,      value: segments.product.trim() },
-    { type: 'modelType' as const,    value: segments.modelType.trim() },
-    { type: 'modelId' as const,      value: segments.modelId.trim() },
-    { type: 'modelVersion' as const, value: segments.modelVersion.trim() },
+    { type: 'domain' as const,    value: segments.domain.trim() },
+    { type: 'product' as const,   value: segments.product.trim() },
+    { type: 'modelType' as const, value: segments.modelType.trim() },
   ].filter(l => l.value);
 
   let parentId: string | undefined;
@@ -207,7 +208,6 @@ function findOrCreateInventoryPath(
       lastId = existing.id;
     } else {
       const newInv = createInv({ name: level.value, type: level.type, parentId });
-      // Push into the working array so subsequent iterations see what was just created
       inventories.push(newInv);
       lastId = newInv.id;
     }
@@ -236,7 +236,7 @@ const BulkModelUploadStep: React.FC<{
   const [showPreview, setShowPreview] = useState(false);
   // Inventory assignment state (per-model)
   const [uploadedRowData, setUploadedRowData] = useState<Record<string, Record<string, string>>>({});
-  const [bulkInvMode, setBulkInvMode] = useState<Record<string, 'suggested' | 'existing' | 'skip'>>({});
+  const [bulkInvMode, setBulkInvMode] = useState<Record<string, 'suggested' | 'custom'>>({});
   const [bulkExistingInv, setBulkExistingInv] = useState<Record<string, string>>({});
 
   const parseAndValidate = async (file: File) => {
@@ -398,17 +398,14 @@ const BulkModelUploadStep: React.FC<{
       let invId = '';
       if (mode === 'suggested') {
         const segs = {
-          geo: row['Geography'] || '',
           domain: row['Domain'] || '',
           product: row['Product'] || '',
           modelType: row['Model Type'] || '',
-          modelId: row['Model ID'] || '',
-          modelVersion: String(row['Model Version'] || 'v1'),
         };
         if (Object.values(segs).some(v => v.trim())) {
           invId = findOrCreateInventoryPath(segs, workingInventories, createModelInventory);
         }
-      } else if (mode === 'existing') {
+      } else if (mode === 'custom') {
         invId = bulkExistingInv[m.id] || '';
       }
       if (invId) {
@@ -646,7 +643,7 @@ const BulkModelUploadStep: React.FC<{
             </div>
             <button
               onClick={() => {
-                const all: Record<string, 'suggested' | 'existing' | 'skip'> = {};
+                const all: Record<string, 'suggested' | 'custom'> = {};
                 uploadedModels.forEach(m => { all[m.id] = 'suggested'; });
                 setBulkInvMode(all);
               }}
@@ -660,14 +657,14 @@ const BulkModelUploadStep: React.FC<{
             {uploadedModels.map(m => {
               const row = uploadedRowData[m.id] || {};
               const mode = bulkInvMode[m.id] || 'suggested';
-              const pathParts = [row['Geography'], row['Domain'], row['Product'], row['Model Type'], row['Model ID'], 'v1'].filter(Boolean);
+              const pathParts = [row['Domain'], row['Product'], row['Model Type']].filter(Boolean);
               return (
                 <div key={m.id} className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <p className={`text-sm font-medium truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{m.name}</p>
                     {/* Mode toggle */}
                     <div className={`flex text-xs rounded-lg overflow-hidden border flex-shrink-0 ${isDark ? 'border-slate-600' : 'border-slate-300'}`}>
-                      {(['suggested', 'existing', 'skip'] as const).map(v => (
+                      {(['suggested', 'custom'] as const).map(v => (
                         <button
                           key={v}
                           onClick={() => setBulkInvMode(prev => ({ ...prev, [m.id]: v }))}
@@ -676,7 +673,7 @@ const BulkModelUploadStep: React.FC<{
                             : isDark ? 'bg-slate-700 text-slate-400 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-50'
                           }`}
                         >
-                          {v === 'suggested' ? '📂 Suggested' : v === 'existing' ? '📋 Existing' : '⊘ Skip'}
+                          {v === 'suggested' ? '📂 Suggested' : '✏️ Custom'}
                         </button>
                       ))}
                     </div>
@@ -694,27 +691,18 @@ const BulkModelUploadStep: React.FC<{
                         <span className={`ml-auto text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Missing folders will be created automatically</span>
                       </div>
                     ) : (
-                      <p className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No path data in this row — fill Geography/Domain/Product in the Excel file.</p>
+                      <p className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No domain/product/type data in this row.</p>
                     )
                   )}
 
-                  {mode === 'existing' && (
-                    <select
+                  {mode === 'custom' && (
+                    <input
+                      type="text"
+                      placeholder="Enter custom folder path (e.g. Banking / Credit Cards)"
                       value={bulkExistingInv[m.id] || ''}
                       onChange={e => setBulkExistingInv(prev => ({ ...prev, [m.id]: e.target.value }))}
                       className={`w-full px-2 py-1.5 rounded border text-xs ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                    >
-                      <option value="">-- Select existing folder --</option>
-                      {modelInventories.map(inv => (
-                        <option key={inv.id} value={inv.id}>
-                          {inv.type ? inv.type.charAt(0).toUpperCase() + inv.type.slice(1) : ''}: {inv.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
-                  {mode === 'skip' && (
-                    <p className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>This model will not be assigned to any inventory folder. You can assign it later from Model Repository.</p>
+                    />
                   )}
                 </div>
               );
@@ -783,6 +771,425 @@ const BulkModelUploadStep: React.FC<{
           </button>
         </div>
       )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ModelMetricsStep Component — KPI & Performance Metrics Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+interface KpiMetric {
+  id: string;
+  label: string;
+  description: string;
+  defaultEnabled: boolean;
+  defaultInner: string;
+  defaultOuter: string;
+  section: 'standard' | 'feature';
+}
+
+// Classification + Both metrics from the monitoring standards table
+const KPI_METRICS: KpiMetric[] = [
+  // ── Standard Metrics (Score Level) ────────────────────────────────────────
+  {
+    id: 'ks',
+    label: 'KS (Kolmogorov-Smirnov)',
+    description: 'Measures maximum separation between cumulative good and bad distributions.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '5%',
+    section: 'standard',
+  },
+  {
+    id: 'auc',
+    label: 'AUC (Area Under Curve)',
+    description: 'Probability that the model ranks a bad higher than a good.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'gini',
+    label: 'Gini Coefficient',
+    description: 'Linear transformation of AUC: Gini = 2 * AUC - 1.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'psi',
+    label: 'PSI (Population Stability Index)',
+    description: 'Detects score distribution drift compared to the reference population.',
+    defaultEnabled: true,
+    defaultInner: '6',
+    defaultOuter: '5%',
+    section: 'standard',
+  },
+  {
+    id: 'jsd',
+    label: 'Jensen Shannon Divergence',
+    description: 'Symmetric measure of divergence between two score distributions.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'rob',
+    label: 'ROB (Rate of Bad)',
+    description: 'Tracks the rate of bad outcomes across score bands.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'mape',
+    label: 'MAPE (Mean Absolute Percentage Error)',
+    description: 'Measures average absolute percentage error of model predictions.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'type1_error',
+    label: 'Type I Error (False Positive Rate)',
+    description: 'Rate at which good accounts are incorrectly classified as bad.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'type2_error',
+    label: 'Type II Error (False Negative Rate)',
+    description: 'Rate at which bad accounts are incorrectly classified as good.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'accuracy',
+    label: 'Accuracy',
+    description: 'Proportion of correctly classified observations.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'precision',
+    label: 'Precision',
+    description: 'Proportion of predicted positives that are truly positive.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'recall',
+    label: 'Recall (Sensitivity)',
+    description: 'Proportion of actual positives correctly identified.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'f1_score',
+    label: 'F1 Score',
+    description: 'Harmonic mean of precision and recall.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'standard',
+  },
+  {
+    id: 'hrl',
+    label: 'HRL (Hosmer-Lemeshow)',
+    description: 'Goodness-of-fit test comparing actual vs predicted event rates across deciles.',
+    defaultEnabled: true,
+    defaultInner: '6',
+    defaultOuter: '5%',
+    section: 'standard',
+  },
+  // ── Feature Based Metrics (Account Level) ─────────────────────────────────
+  {
+    id: 'univariate',
+    label: 'Univariate Analysis',
+    description: 'Distribution analysis of individual features across observation periods.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'csi_features',
+    label: 'CSI of Features',
+    description: 'Characteristic Stability Index — measures drift in individual feature distributions.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'iv',
+    label: 'IV (Information Value)',
+    description: 'Measures predictive strength of each feature with respect to the target.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'feature_importance',
+    label: 'Feature Importance',
+    description: 'Relative contribution of each feature to model predictions.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'shap',
+    label: 'SHAP Values',
+    description: 'SHapley Additive exPlanations — consistent and locally accurate feature attributions.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'wald_chi_sq',
+    label: 'Wald Chi-Square',
+    description: 'Statistical significance test for each feature coefficient.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'p_values',
+    label: 'p-Values',
+    description: 'Significance probability for each feature in the model.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'estimate',
+    label: 'Estimate (Coefficient)',
+    description: 'Model coefficient for each feature indicating direction and magnitude.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'var_level_rob',
+    label: 'Variable Level ROB',
+    description: 'Rate of Bad broken down by individual feature bins.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'outlier_detection',
+    label: 'Outlier Detection',
+    description: 'Identifies anomalous values in features that deviate from historical patterns.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+  {
+    id: 'missing_value',
+    label: 'Missing Value Check',
+    description: 'Tracks missing value rates per feature across observation vintages.',
+    defaultEnabled: true,
+    defaultInner: '',
+    defaultOuter: '',
+    section: 'feature',
+  },
+];
+
+const ModelMetricsStep: React.FC<{
+  workflow: Workflow;
+  onComplete: (config: Workflow['modelMetricsConfig']) => void;
+}> = ({ workflow, onComplete }) => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
+  const [metrics, setMetrics] = useState<Array<{ id: string; enabled: boolean; innerThreshold: string; outerThreshold: string }>>(
+    KPI_METRICS.map(kpi => {
+      const existing = workflow.modelMetricsConfig?.selectedMetrics?.find(m => m.id === kpi.id);
+      return existing ?? { id: kpi.id, enabled: kpi.defaultEnabled, innerThreshold: kpi.defaultInner, outerThreshold: kpi.defaultOuter };
+    })
+  );
+
+  const toggleMetric = (id: string) =>
+    setMetrics(prev => prev.map(m => m.id === id ? { ...m, enabled: !m.enabled } : m));
+
+  const updateThreshold = (id: string, field: 'innerThreshold' | 'outerThreshold', value: string) =>
+    setMetrics(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
+
+  const toggleSection = (section: 'standard' | 'feature', enabled: boolean) =>
+    setMetrics(prev => prev.map(m => {
+      const kpi = KPI_METRICS.find(k => k.id === m.id);
+      return kpi?.section === section ? { ...m, enabled } : m;
+    }));
+
+  const selectedCount = metrics.filter(m => m.enabled).length;
+  const standardMetrics = KPI_METRICS.filter(k => k.section === 'standard');
+  const featureMetrics = KPI_METRICS.filter(k => k.section === 'feature');
+
+  const renderMetricRow = (kpi: KpiMetric) => {
+    const m = metrics.find(x => x.id === kpi.id)!;
+    return (
+      <div
+        key={kpi.id}
+        className={`rounded-lg border transition-all ${
+          m.enabled
+            ? isDark ? 'border-blue-600/60 bg-blue-900/20' : 'border-blue-200 bg-blue-50'
+            : isDark ? 'border-gray-700 bg-gray-900/30' : 'border-gray-200 bg-gray-50'
+        }`}
+      >
+        <div className="flex items-start gap-3 p-3">
+          <input
+            type="checkbox"
+            checked={m.enabled}
+            onChange={() => toggleMetric(kpi.id)}
+            className="mt-0.5 rounded accent-blue-600"
+          />
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-semibold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>{kpi.label}</p>
+            <p className={`text-xs mt-0.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{kpi.description}</p>
+          </div>
+          {m.enabled && (
+            <div className="flex gap-2 shrink-0">
+              <div>
+                <p className={`text-xs mb-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Inner</p>
+                <input
+                  type="text"
+                  value={m.innerThreshold}
+                  onChange={e => updateThreshold(kpi.id, 'innerThreshold', e.target.value)}
+                  placeholder={kpi.defaultInner || '—'}
+                  className={`w-20 px-2 py-1 rounded border text-xs text-center ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300'}`}
+                />
+              </div>
+              <div>
+                <p className={`text-xs mb-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Outer</p>
+                <input
+                  type="text"
+                  value={m.outerThreshold}
+                  onChange={e => updateThreshold(kpi.id, 'outerThreshold', e.target.value)}
+                  placeholder={kpi.defaultOuter || '—'}
+                  className={`w-20 px-2 py-1 rounded border text-xs text-center ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300'}`}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const SectionHeader: React.FC<{
+    title: string;
+    subtitle: string;
+    section: 'standard' | 'feature';
+    color: string;
+  }> = ({ title, subtitle, section, color }) => {
+    const sectionMetrics = metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === section);
+    const allEnabled = sectionMetrics.every(m => m.enabled);
+    return (
+      <div className={`flex items-center justify-between mb-3 pb-2 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+        <div>
+          <p className={`text-sm font-bold ${color}`}>{title}</p>
+          <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{subtitle}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => toggleSection(section, !allEnabled)}
+          className={`text-xs px-3 py-1 rounded-lg font-medium transition-colors ${
+            allEnabled
+              ? isDark ? 'bg-blue-900/40 text-blue-300 hover:bg-blue-900/60' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+              : isDark ? 'bg-gray-700 text-gray-400 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          {allEnabled ? 'Deselect All' : 'Select All'}
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header info */}
+      <div className={`p-4 rounded-xl border ${isDark ? 'bg-blue-900/20 border-blue-700/40' : 'bg-blue-50 border-blue-200'}`}>
+        <p className={`text-sm font-semibold ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
+          KPI & Metrics Configuration
+        </p>
+        <p className={`text-xs mt-1 ${isDark ? 'text-blue-400/70' : 'text-blue-600'}`}>
+          All classification and stability metrics are selected by default. Inner and outer breach thresholds are pre-filled per monitoring standards — you can override them.
+        </p>
+      </div>
+
+      {/* Section 1: Standard Metrics (Score Level) */}
+      <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+        <SectionHeader
+          title="Standard Metrics — Score Level"
+          subtitle={`${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'standard' && m.enabled).length} of ${standardMetrics.length} selected`}
+          section="standard"
+          color={isDark ? 'text-blue-300' : 'text-blue-700'}
+        />
+        <div className="text-xs mb-3 flex items-center gap-6">
+          <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>
+            Threshold columns appear when a metric is enabled. Leave blank to use default.
+          </span>
+          <span className={`ml-auto font-medium ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Inner | Outer</span>
+        </div>
+        <div className="space-y-2">
+          {standardMetrics.map(renderMetricRow)}
+        </div>
+      </div>
+
+      {/* Section 2: Feature Based Metrics (Account Level) */}
+      <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+        <SectionHeader
+          title="Feature Based Metrics — Account Level"
+          subtitle={`${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'feature' && m.enabled).length} of ${featureMetrics.length} selected`}
+          section="feature"
+          color={isDark ? 'text-purple-300' : 'text-purple-700'}
+        />
+        <div className="space-y-2">
+          {featureMetrics.map(renderMetricRow)}
+        </div>
+      </div>
+
+      {/* Continue */}
+      <div className="flex items-center justify-between">
+        <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+          {selectedCount} metric{selectedCount !== 1 ? 's' : ''} selected
+        </span>
+        <button
+          onClick={() => onComplete({ granularity: 'score', selectedMetrics: metrics })}
+          disabled={selectedCount === 0}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${
+            selectedCount > 0
+              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md'
+              : isDark ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+          }`}
+        >
+          Continue →
+        </button>
+      </div>
     </div>
   );
 };
@@ -1902,85 +2309,26 @@ const ModelRepositoryStep: React.FC<{
                 </div>
               </div>
 
-              {/* Step 4: Upload Metrics */}
+              {/* Step 4: Assign to Inventory */}
               <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
-                <p className={`text-sm font-medium mb-3 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                  Step 4: Model Metrics (Optional)
-                </p>
-                <p className={`text-xs mb-3 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
-                  Upload metrics.json to include model performance metrics
-                </p>
-                <label className={`cursor-pointer flex items-center justify-center gap-2 py-4 rounded-lg border-2 border-dashed transition ${
-                  theme === 'dark' ? 'border-slate-600 hover:bg-slate-800/50' : 'border-slate-300 hover:bg-slate-100'
-                }`}>
-                  <Upload size={20} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} />
-                  <div className="text-center">
-                    <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                      {metricsFile ? metricsFile.name : 'Upload metrics.json'}
-                    </p>
-                    <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-500'}`}>
-                      {metricsFile ? 'Click to replace' : 'Click to select file'}
-                    </p>
-                  </div>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleMetricsFileUpload(file);
-                    }}
-                    className="hidden"
-                  />
-                </label>
-                {metricsFile && Object.keys(metrics).length > 0 && (
-                  <div className={`mt-3 p-3 rounded-lg ${theme === 'dark' ? 'bg-green-900/20 border border-green-600' : 'bg-green-50 border border-green-200'}`}>
-                    <p className={`text-xs font-medium ${theme === 'dark' ? 'text-green-400' : 'text-green-700'}`}>
-                      ✓ Metrics loaded: {Object.keys(metrics).join(', ')}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Step 5: Assign to Inventory */}
-              <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                      Step 5: Inventory Folder
-                      <span className={`text-xs font-normal ml-1 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>(Optional)</span>
-                    </p>
-                  </div>
-                  {/* Mode toggle */}
-                  <div className={`flex text-xs rounded-lg overflow-hidden border ${theme === 'dark' ? 'border-slate-600' : 'border-slate-300'}`}>
-                    {(['suggested', 'existing'] as const).map(m => (
-                      <button
-                        key={m}
-                        onClick={() => { setInvMode(m); if (m === 'suggested') setAssignInvId(''); }}
-                        className={`px-3 py-1.5 transition ${invMode === m
-                          ? theme === 'dark' ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
-                          : theme === 'dark' ? 'bg-slate-700 text-slate-400 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        {m === 'suggested' ? '📂 Suggested' : '📋 Pick Existing'}
-                      </button>
-                    ))}
-                  </div>
+                <div className="mb-3">
+                  <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                    Step 4: Inventory Folder
+                    <span className={`text-xs font-normal ml-1 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>(Optional)</span>
+                  </p>
                 </div>
 
-                {invMode === 'suggested' && (() => {
+                {(() => {
                   const filledSegs = [
-                    { label: 'Geography', value: metadata.geography },
-                    { label: 'Domain',    value: metadata.domain },
-                    { label: 'Product',   value: metadata.product },
-                    { label: 'Type',      value: metadata.modelType },
-                    { label: 'Model ID',  value: metadata.modelId },
-                    { label: 'Version',   value: metadata.modelVersion },
+                    { label: 'Domain',  value: metadata.domain },
+                    { label: 'Product', value: metadata.product },
+                    { label: 'Type',    value: metadata.modelType },
                   ].filter(s => s.value.trim());
 
                   if (filledSegs.length === 0) {
                     return (
                       <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
-                        Fill in Geography, Domain, Product, Model Type, and Model ID in the <strong>Identity</strong> tab above to generate a suggested folder path.
+                        Fill in Domain, Product, and Model Type in the <strong>Identity</strong> tab above to generate a suggested folder path.
                       </p>
                     );
                   }
@@ -2010,7 +2358,7 @@ const ModelRepositoryStep: React.FC<{
                             return;
                           }
                           const id = findOrCreateInventoryPath(
-                            { geo: metadata.geography, domain: metadata.domain, product: metadata.product, modelType: metadata.modelType, modelId: metadata.modelId, modelVersion: metadata.modelVersion },
+                            { domain: metadata.domain, product: metadata.product, modelType: metadata.modelType },
                             modelInventories, createModelInventory
                           );
                           if (id) {
@@ -2030,30 +2378,6 @@ const ModelRepositoryStep: React.FC<{
                     </>
                   );
                 })()}
-
-                {invMode === 'existing' && (
-                  modelInventories.length > 0 ? (
-                    <select
-                      value={assignInvId}
-                      onChange={e => setAssignInvId(e.target.value)}
-                      className={`w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                    >
-                      <option value="">-- No folder (unassigned) --</option>
-                      {modelInventories.map(inv => {
-                        const typeLabel = inv.type ? `${inv.type.charAt(0).toUpperCase()}${inv.type.slice(1)}` : 'Folder';
-                        return (
-                          <option key={inv.id} value={inv.id}>
-                            {typeLabel}: {inv.name}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  ) : (
-                    <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
-                      No inventory folders yet. Use the <strong>Suggested</strong> mode to auto-create one, or go to Model Repository to create folders first.
-                    </p>
-                  )
-                )}
               </div>
 
               <div className="flex gap-2">
@@ -4631,11 +4955,12 @@ export default function Projects() {
         models: [],
         steps: [
           { id: 0, name: 'Model Import', status: 'not-started' },
-          { id: 1, name: 'Data Ingestion & Dataset Config', status: 'not-started', locked: true },
-          { id: 2, name: 'Data Quality Reporting', status: 'not-started', locked: true },
-          { id: 3, name: 'Report Configuration', status: 'not-started', locked: true },
-          { id: 4, name: 'Report Generation', status: 'not-started', locked: true },
-          { id: 5, name: 'Schedule Reports', status: 'not-started', locked: true },
+          { id: 1, name: 'KPI & Metrics Configuration', status: 'not-started', locked: true },
+          { id: 2, name: 'Reference Data Ingestion', status: 'not-started', locked: true },
+          { id: 3, name: 'Data Quality Reporting', status: 'not-started', locked: true },
+          { id: 4, name: 'Report Configuration', status: 'not-started', locked: true },
+          { id: 5, name: 'Report Generation', status: 'not-started', locked: true },
+          { id: 6, name: 'Schedule Reports', status: 'not-started', locked: true },
         ],
       },
     };
@@ -4970,11 +5295,10 @@ export default function Projects() {
                         // Auto-assign inventory from metadata if user skipped Step 5
                         let resolvedInventoryId: string | undefined = (metadata as any).inventoryId || undefined;
                         if (!resolvedInventoryId && projectsCreateModelInventory &&
-                            (metadata.geography || metadata.domain || metadata.product || metadata.modelType || metadata.modelId)) {
-                          // Use a mutable working copy so nodes created here are visible within this call
+                            (metadata.domain || metadata.product || metadata.modelType)) {
                           const workingInventories = [...(projectsModelInventories || [])];
                           resolvedInventoryId = findOrCreateInventoryPath(
-                            { geo: metadata.geography || '', domain: metadata.domain || '', product: metadata.product || '', modelType: metadata.modelType || '', modelId: metadata.modelId || '', modelVersion: metadata.modelVersion || '' },
+                            { domain: metadata.domain || '', product: metadata.product || '', modelType: metadata.modelType || '' },
                             workingInventories, projectsCreateModelInventory
                           ) || undefined;
                         }
@@ -5035,41 +5359,63 @@ export default function Projects() {
                     />
                   )}
                   {selectedProject.workflow.currentStep === 1 && (
+                    <ModelMetricsStep
+                      workflow={selectedProject.workflow}
+                      onComplete={(config) => {
+                        const newSteps = selectedProject.workflow.steps.map((s, idx) => {
+                          if (idx === 1) return { ...s, status: 'completed' as const };
+                          if (idx === 2) return { ...s, locked: false };
+                          return s;
+                        });
+                        updateProjectWorkflow(selectedProject.id, {
+                          ...selectedProject.workflow,
+                          steps: newSteps,
+                          currentStep: 2,
+                          modelMetricsConfig: config,
+                        });
+                      }}
+                    />
+                  )}
+                  {selectedProject.workflow.currentStep === 2 && (
                     <DataIngestionStepComponent
                       workflow={selectedProject.workflow}
                       onComplete={(config: DataIngestionConfig) => {
-                        // Collect dataset information for logging
-                        const allDatasets = Object.values(config.trackDatasets).flat();
-                        const datasetCount = allDatasets.length;
-                        const datasetNames = allDatasets.map(d => d.name);
-                        const description = getStepDescription.dataIngestion(datasetCount, datasetNames);
-                        
-                        // Create ingestion jobs for each dataset
-                        allDatasets.forEach((dataset) => {
-                          const datasetConfig = config.datasetConfigs[dataset.id];
-                          if (datasetConfig) {
-                            createIngestionJob({
-                              name: dataset.name,
-                              projectId: selectedProject.id,
-                              modelId: config.modelId,
-                              dataSource: 'desktop',
-                              source: dataset.track.toLowerCase() as 'csv' | 'database' | 'cloud' | 'treated',
-                              datasetType: datasetConfig.datasetType || 'monitoring',
-                              status: 'completed',
-                              outputPath: `/datasets/${dataset.id}`,
-                              outputShape: { rows: dataset.rows, columns: dataset.columns },
-                              outputColumns: dataset.columnsList,
-                              uploadedFile: {
-                                name: dataset.name,
-                                path: `/datasets/${dataset.id}/${dataset.name}`,
-                                size: 0,
-                                type: 'csv',
-                              },
-                            });
-                          }
+                        // Build dataset names for logging
+                        const datasetNames: string[] = [];
+                        if (config.scoreLevelDataset) datasetNames.push(`${config.scoreLevelDataset.name} (score)`);
+                        if (config.accountLevelDataset) datasetNames.push(`${config.accountLevelDataset.name} (account)`);
+                        if (datasetNames.length === 0 && config.referenceDataset) datasetNames.push(config.referenceDataset.name);
+                        const description = getStepDescription.dataIngestion(datasetNames.length, datasetNames);
+
+                        // Create ingestion jobs for each uploaded dataset
+                        const datasetsToRegister = [
+                          config.scoreLevelDataset,
+                          config.accountLevelDataset,
+                        ].filter(Boolean) as import('./DataIngestionStep').UploadedDataset[];
+                        if (datasetsToRegister.length === 0 && config.referenceDataset) {
+                          datasetsToRegister.push(config.referenceDataset);
+                        }
+                        datasetsToRegister.forEach(ds => {
+                          createIngestionJob({
+                            name: ds.name,
+                            projectId: selectedProject.id,
+                            modelId: config.modelId,
+                            dataSource: 'desktop',
+                            source: 'csv',
+                            datasetType: 'monitoring',
+                            status: 'completed',
+                            outputPath: `/datasets/${ds.id}`,
+                            outputShape: { rows: ds.rows, columns: ds.columns },
+                            outputColumns: ds.columnsList,
+                            uploadedFile: {
+                              name: ds.name,
+                              path: `/datasets/${ds.id}/${ds.name}`,
+                              size: 0,
+                              type: 'csv',
+                            },
+                          });
                         });
-                        
-                        // Complete step with logging
+
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
                           if (idx === selectedProject.workflow.currentStep) {
                             return { ...s, status: 'completed' as const };
@@ -5083,25 +5429,25 @@ export default function Projects() {
                           selectedProject.workflow.currentStep + 1,
                           selectedProject.workflow.steps.length - 1
                         );
-                        
+
                         createWorkflowLog(createWorkflowLogEntry(
                           selectedProject.id,
                           selectedProject.name,
                           'Data Ingestion',
                           description
                         ));
-                        
+
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           steps: newSteps,
                           currentStep: newCurrentStep,
                           dataIngestionConfig: config,
-                          selectedModel: config.modelId, // Save the selected model ID
+                          selectedModel: config.modelId,
                         });
                       }}
                     />
                   )}
-                  {selectedProject.workflow.currentStep === 2 && (
+                  {selectedProject.workflow.currentStep === 3 && (
                     <DataQualityStep
                       workflow={selectedProject.workflow}
                       projectId={selectedProject.id}
@@ -5143,7 +5489,7 @@ export default function Projects() {
                       }}
                     />
                   )}
-                  {selectedProject.workflow.currentStep === 3 && (
+                  {selectedProject.workflow.currentStep === 4 && (
                     <ReportConfigurationStep
                       workflow={selectedProject.workflow}
                       onComplete={() => {
@@ -5182,7 +5528,7 @@ export default function Projects() {
                       }}
                     />
                   )}
-                  {selectedProject.workflow.currentStep === 4 && (
+                  {selectedProject.workflow.currentStep === 5 && (
                     <ReportsStep
                       onComplete={() => {
                         // Get report generation information for logging
@@ -5219,7 +5565,7 @@ export default function Projects() {
                       }}
                     />
                   )}
-                  {selectedProject.workflow.currentStep === 5 && (
+                  {selectedProject.workflow.currentStep === 6 && (
                     <ScheduleReportsStep
                       workflow={selectedProject.workflow}
                       project={selectedProject}
@@ -5236,7 +5582,7 @@ export default function Projects() {
                           }
                           return s;
                         });
-                        const isLastStep = selectedProject.workflow.currentStep === 5; // Schedule Reports is final step
+                        const isLastStep = selectedProject.workflow.currentStep === 6; // Schedule Reports is final step
                         
                         createWorkflowLog(createWorkflowLogEntry(
                           selectedProject.id,

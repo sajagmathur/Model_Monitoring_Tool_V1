@@ -42,40 +42,6 @@ interface DisplayModel {
 const ModelVersionCard: React.FC<{ version: any; modelName: string; onEdit?: () => void; onDelete?: () => void }> = ({ version, modelName, onEdit, onDelete }) => {
   const { theme } = useTheme();
 
-  // Derive status from stage
-  const statusMap: Record<string, 'champion' | 'challenger' | 'archive' | 'deprecated'> = {
-    production: 'champion',
-    staging: 'challenger',
-    dev: 'archive',
-  };
-  const status = statusMap[version.stage || 'dev'] || 'archive';
-
-  const statusColors = {
-    champion: {
-      bg: theme === 'dark' ? 'bg-yellow-500/20' : 'bg-yellow-100',
-      text: theme === 'dark' ? 'text-yellow-400' : 'text-yellow-700',
-      border: 'border-yellow-500/30',
-    },
-    challenger: {
-      bg: theme === 'dark' ? 'bg-blue-500/20' : 'bg-blue-100',
-      text: theme === 'dark' ? 'text-blue-400' : 'text-blue-700',
-      border: 'border-blue-500/30',
-    },
-    archive: {
-      bg: theme === 'dark' ? 'bg-slate-500/20' : 'bg-slate-100',
-      text: theme === 'dark' ? 'text-slate-400' : 'text-slate-700',
-      border: 'border-slate-500/30',
-    },
-    deprecated: {
-      bg: theme === 'dark' ? 'bg-red-500/20' : 'bg-red-100',
-      text: theme === 'dark' ? 'text-red-400' : 'text-red-700',
-      border: 'border-red-500/30',
-    },
-  };
-
-  const colors = statusColors[status];
-  const auc = version.metrics?.auc || 0;
-
   return (
     <div
       className={`p-4 rounded-lg border ${
@@ -88,9 +54,6 @@ const ModelVersionCard: React.FC<{ version: any; modelName: string; onEdit?: () 
             <p className={`font-semibold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
               {version.version}
             </p>
-            <span className={`text-xs font-medium px-2 py-1 rounded border ${colors.bg} ${colors.text} ${colors.border}`}>
-              {status}
-            </span>
           </div>
           <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
             {modelName}
@@ -98,27 +61,6 @@ const ModelVersionCard: React.FC<{ version: any; modelName: string; onEdit?: () 
         </div>
         <div className="flex items-center gap-2">
           <CheckCircle2 size={18} className="text-green-500" />
-        </div>
-      </div>
-
-      <div className="space-y-2 mb-3">
-        <div className="flex items-center justify-between text-xs">
-          <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>Stage:</span>
-          <span
-            className={`font-medium ${
-              version.stage === 'production'
-                ? 'text-red-500'
-                : version.stage === 'staging'
-                ? 'text-yellow-500'
-                : 'text-blue-500'
-            }`}
-          >
-            {version.stage?.charAt(0).toUpperCase() + version.stage?.slice(1)}
-          </span>
-        </div>
-        <div className="flex items-center justify-between text-xs">
-          <span className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}>AUC:</span>
-          <span className={theme === 'dark' ? 'text-white' : 'text-slate-900'}>{auc.toFixed(3)}</span>
         </div>
       </div>
 
@@ -277,6 +219,7 @@ export default function ModelRegistry() {
   const [leftView, setLeftView] = useState<'inventory' | 'all'>('inventory');
   const [expandedPortfolios, setExpandedPortfolios] = useState<Set<string>>(new Set());
   const [selectedInventoryId, setSelectedInventoryId] = useState<string | null>(null);
+  const [allSearch, setAllSearch] = useState('');
   // â”€â”€ Detail tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('overview');
 
@@ -339,7 +282,6 @@ export default function ModelRegistry() {
     name: '',
     version: '',
     modelType: 'classification' as 'scorecard' | 'classification' | 'regression' | 'neural_network' | 'decision_tree' | 'ensemble' | 'time_series' | 'clustering' | 'nlp' | 'other' | 'custom',
-    stage: 'dev' as 'dev' | 'staging' | 'production',
   });
 
   const handleClearAll = () => {
@@ -351,10 +293,10 @@ export default function ModelRegistry() {
   };
   const handleEditModel = (model: any) => {
     setEditingModel(model.id);
-    setEditFormData({ name: model.name, version: model.version, modelType: model.modelType, stage: model.stage });
+    setEditFormData({ name: model.name, version: model.version, modelType: model.modelType });
   };
   const handleUpdateModel = (modelId: string) => {
-    updateRegistryModel(modelId, { name: editFormData.name, version: editFormData.version, modelType: editFormData.modelType, stage: editFormData.stage });
+    updateRegistryModel(modelId, { name: editFormData.name, version: editFormData.version, modelType: editFormData.modelType });
     setEditingModel(null);
     showNotification('âœ“ Model updated', 'success');
   };
@@ -367,7 +309,7 @@ export default function ModelRegistry() {
   };
   const handleCancelEdit = () => {
     setEditingModel(null);
-    setEditFormData({ name: '', version: '', modelType: 'classification' as any, stage: 'dev' });
+    setEditFormData({ name: '', version: '', modelType: 'classification' as any });
   };
 
   // â”€â”€ Inventory handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -643,6 +585,13 @@ export default function ModelRegistry() {
             {/* â”€â”€ ALL MODELS VIEW â”€â”€ */}
             {leftView === 'all' && (
               <>
+                <input
+                  type="text"
+                  value={allSearch}
+                  onChange={e => setAllSearch(e.target.value)}
+                  placeholder="Search models…"
+                  className={`w-full px-3 py-1.5 rounded-lg border text-sm mb-2 ${isDark ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'}`}
+                />
                 {groupedModels.length === 0 ? (
                   <div className={`p-4 rounded-lg border-2 border-dashed text-center mt-2 ${isDark ? 'border-slate-600 bg-slate-900/30' : 'border-slate-300 bg-slate-50'}`}>
                     <Package size={28} className={`mx-auto mb-2 ${isDark ? 'text-slate-400' : 'text-slate-400'}`} />
@@ -651,9 +600,13 @@ export default function ModelRegistry() {
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    {groupedModels.map(model => {
+                    {groupedModels.filter(m => {
+                      if (!allSearch.trim()) return true;
+                      const q = allSearch.toLowerCase();
+                      const rm = registryModels.find(r => r.id === m.id);
+                      return m.name.toLowerCase().includes(q) || (rm?.model_id ?? '').toLowerCase().includes(q);
+                    }).map(model => {
                       const regModel = registryModels.find(r => r.id === model.id);
-                      const invName = regModel?.inventoryId ? modelInventories.find(i => i.id === regModel.inventoryId)?.name : null;
                       return (
                         <button
                           key={model.id}
@@ -664,11 +617,7 @@ export default function ModelRegistry() {
                               : isDark ? 'text-slate-300 hover:bg-slate-700/30 border-slate-700' : 'text-slate-700 hover:bg-slate-50 border-slate-200'
                           }`}
                         >
-                          <p className="text-sm font-medium truncate">{model.name}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>{model.versions.length}v Â· {model.modelType}</p>
-                            {invName && <span className={`text-xs px-1.5 py-0.5 rounded-full ${isDark ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>{invName}</span>}
-                          </div>
+                          <p className="text-sm font-medium truncate">{regModel?.model_id || '—'} — {model.name}</p>
                         </button>
                       );
                     })}
@@ -747,20 +696,36 @@ export default function ModelRegistry() {
                 {/* OVERVIEW TAB */}
                 {activeDetailTab === 'overview' && (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className={`p-3 rounded-lg ${isDark ? 'bg-slate-700/40' : 'bg-slate-50'}`}>
-                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Model Type</p>
-                        <p className={`text-base font-semibold mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedModel.modelType}</p>
-                      </div>
-                      <div className={`p-3 rounded-lg ${isDark ? 'bg-slate-700/40' : 'bg-slate-50'}`}>
-                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Versions</p>
-                        <p className={`text-base font-semibold mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedModel.versions.length}</p>
-                      </div>
-                      <div className={`p-3 rounded-lg ${isDark ? 'bg-slate-700/40' : 'bg-slate-50'}`}>
-                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Lineage Steps</p>
-                        <p className={`text-base font-semibold mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{selectedModel.lineage.length}</p>
-                      </div>
-                    </div>
+                    {(() => {
+                      const regModel = registryModels.find(r => r.id === selectedModel.id);
+                      const meta = regModel?.metadata ?? regModel?.bulkMetadata;
+                      const pairs: [string, string | undefined][] = [
+                        ['Model Type', selectedModel.modelType],
+                        ['Versions', String(selectedModel.versions.length)],
+                        ['Domain', meta?.domain],
+                        ['Product', meta?.product],
+                        ['Population Type', meta?.populationType],
+                        ['Geography', meta?.geography],
+                        ['Usage', meta?.usage],
+                        ['Segment Variable', meta?.segmentVariable ?? (meta as any)?.segment],
+                        ['Developer', meta?.developer],
+                        ['Risk Tier / MRR', meta?.riskTier],
+                        ['Model Status', meta?.modelStatus],
+                      ];
+                      const visible = pairs.filter(([, v]) => !!v);
+                      return (
+                        <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2.5">
+                            {visible.map(([label, value]) => (
+                              <div key={label}>
+                                <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{label}</p>
+                                <p className={`text-sm font-medium mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>{value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <h3 className={`text-sm font-semibold pt-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Versions</h3>
                     <div className="space-y-3">
                       {selectedModel.versions.length > 0 ? selectedModel.versions.map(version => (
@@ -779,31 +744,21 @@ export default function ModelRegistry() {
                                     <input type="text" value={editFormData.version} onChange={e => setEditFormData({...editFormData, version: e.target.value})} className={`w-full px-3 py-1.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`} />
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div>
-                                    <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Type</label>
-                                    <select value={editFormData.modelType} onChange={e => setEditFormData({...editFormData, modelType: e.target.value as any})} className={`w-full px-3 py-1.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}>
-                                      <option value="scorecard">Scorecard</option>
-                                      <option value="classification">Classification</option>
-                                      <option value="regression">Regression</option>
-                                      <option value="neural_network">Neural Network</option>
-                                      <option value="decision_tree">Decision Tree</option>
-                                      <option value="ensemble">Ensemble</option>
-                                      <option value="time_series">Time Series</option>
-                                      <option value="clustering">Clustering</option>
-                                      <option value="nlp">NLP</option>
-                                      <option value="other">Other</option>
-                                      <option value="custom">Custom</option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Stage</label>
-                                    <select value={editFormData.stage} onChange={e => setEditFormData({...editFormData, stage: e.target.value as any})} className={`w-full px-3 py-1.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}>
-                                      <option value="dev">Development</option>
-                                      <option value="staging">Staging</option>
-                                      <option value="production">Production</option>
-                                    </select>
-                                  </div>
+                                <div>
+                                  <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model Type</label>
+                                  <select value={editFormData.modelType} onChange={e => setEditFormData({...editFormData, modelType: e.target.value as any})} className={`w-full px-3 py-1.5 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`}>
+                                    <option value="scorecard">Scorecard</option>
+                                    <option value="classification">Classification</option>
+                                    <option value="regression">Regression</option>
+                                    <option value="neural_network">Neural Network</option>
+                                    <option value="decision_tree">Decision Tree</option>
+                                    <option value="ensemble">Ensemble</option>
+                                    <option value="time_series">Time Series</option>
+                                    <option value="clustering">Clustering</option>
+                                    <option value="nlp">NLP</option>
+                                    <option value="other">Other</option>
+                                    <option value="custom">Custom</option>
+                                  </select>
                                 </div>
                                 <div className="flex justify-end gap-2 pt-2">
                                   <button onClick={handleCancelEdit} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-900'}`}>Cancel</button>
@@ -833,8 +788,7 @@ export default function ModelRegistry() {
                 {activeDetailTab === 'artifacts' && (
                   <div className="space-y-4">
                     <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Upload <code className={`px-1 rounded text-xs ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>model.pkl</code> and{' '}
-                      <code className={`px-1 rounded text-xs ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>metrics.json</code> for each version.
+                      Upload <code className={`px-1 rounded text-xs ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>model.pkl</code> for each version.
                     </p>
                     {selectedModel.versions.map(version => {
                       const regModel = registryModels.find(r => r.id === version.id);
@@ -845,8 +799,7 @@ export default function ModelRegistry() {
                             {selectedModel.name} — {version.version}
                             {regModel.model_id && <span className={`ml-2 text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>({regModel.model_id})</span>}
                           </p>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <div>
+                          <div>
                               <p className={`text-xs font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model File (.pkl / .onnx / .pmml)</p>
                               {regModel.modelPklFile ? (
                                 <div className={`flex items-center gap-2 p-2.5 rounded border ${isDark ? 'bg-green-900/20 border-green-600/30' : 'bg-green-50 border-green-200'}`}>
@@ -872,39 +825,11 @@ export default function ModelRegistry() {
                                   <input type="file" accept=".pkl,.pickle,.onnx,.pmml,.h5,.pt,.pth" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Model file uploaded`, 'success'); }} />
                                 </label>
                               )}
-                            </div>
-                            <div>
-                              <p className={`text-xs font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Metrics File (metrics.json)</p>
-                              {regModel.metricsJsonFile ? (
-                                <div className={`flex items-center gap-2 p-2.5 rounded border ${isDark ? 'bg-green-900/20 border-green-600/30' : 'bg-green-50 border-green-200'}`}>
-                                  <FileJson size={14} className="text-green-500 flex-shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    <p className={`text-xs font-medium truncate ${isDark ? 'text-green-300' : 'text-green-700'}`}>{regModel.metricsJsonFile.name}</p>
-                                    <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-600'}`}>{(regModel.metricsJsonFile.size / 1024).toFixed(1)} KB</p>
-                                  </div>
-                                  {regModel.metricsJsonFile.dataUrl && (
-                                    <a href={regModel.metricsJsonFile.dataUrl} download={regModel.metricsJsonFile.name} className={`inline-flex items-center gap-1 cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-blue-600 text-blue-300 hover:bg-blue-900/30' : 'border-blue-400 text-blue-700 hover:bg-blue-100'}`}>
-                                      <Download size={12} />Download
-                                    </a>
-                                  )}
-                                  <label className={`cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-green-600 text-green-300 hover:bg-green-900/30' : 'border-green-400 text-green-700 hover:bg-green-100'}`}>
-                                    Replace
-                                    <input type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { metricsJsonFile: { name: f.name, path: `/metrics/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Metrics file updated`, 'success'); }} />
-                                  </label>
-                                </div>
-                              ) : (
-                                <label className={`cursor-pointer flex items-center gap-2 p-2.5 rounded border-2 border-dashed transition ${isDark ? 'border-slate-600 hover:border-green-500 hover:bg-green-500/10' : 'border-slate-300 hover:border-green-400 hover:bg-green-50'}`}>
-                                  <Upload size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
-                                  <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload metrics.json</span>
-                                  <input type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { metricsJsonFile: { name: f.name, path: `/metrics/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Metrics file uploaded`, 'success'); }} />
-                                </label>
-                              )}
-                            </div>
                           </div>
                         </div>
                       );
                     })}
-                    {selectedModel.versions.some(v => { const rm = registryModels.find(r => r.id === v.id); return rm && (!rm.modelPklFile || !rm.metricsJsonFile); }) && (
+                    {selectedModel.versions.some(v => { const rm = registryModels.find(r => r.id === v.id); return rm && !rm.modelPklFile; }) && (
                       <div className={`flex items-start gap-2 p-3 rounded-lg ${isDark ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-amber-50 border border-amber-200'}`}>
                         <Info size={14} className={`flex-shrink-0 mt-0.5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
                         <p className={`text-xs ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>Upload artifact files to enable scoring and full monitoring capabilities.</p>
@@ -916,26 +841,6 @@ export default function ModelRegistry() {
                 {/* METADATA TAB */}
                 {activeDetailTab === 'metadata' && (
                   <div className="space-y-4">
-                    <div className={`p-4 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                      <h3 className={`text-sm font-semibold mb-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Governance & Lineage</h3>
-                      <div className="space-y-3">
-                        <div>
-                          <p className={`text-xs font-medium mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Version Lineage</p>
-                          <div className="flex items-center gap-1 flex-wrap">
-                            {selectedModel.lineage.map((v, idx) => (
-                              <React.Fragment key={v}>
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-700'}`}>{v}</span>
-                                {idx < selectedModel.lineage.length - 1 && <ChevronRight size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />}
-                              </React.Fragment>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 size={14} className="text-green-500" />
-                          <span className={`text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Active in Repository</span>
-                        </div>
-                      </div>
-                    </div>
                     {selectedModel.versions.map(version => {
                       const regModel = registryModels.find(r => r.id === version.id);
                       const meta = regModel?.metadata ?? regModel?.bulkMetadata;
