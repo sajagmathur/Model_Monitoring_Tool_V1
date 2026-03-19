@@ -12,7 +12,7 @@ import type { ModelInventory } from '../contexts/GlobalContext';
 import { useNotification } from '../hooks/useNotification';
 import { Breadcrumb } from '../components/UIPatterns';
 import { DataIngestionStepComponent, DataIngestionConfig, UploadedDataset } from './DataIngestionStep';
-import { generateDataQualityPDF } from '../utils/pdfGenerator';
+
 import { getStepDescription, createWorkflowLogEntry } from '../utils/workflowLogger';
 import ReportGeneration from './ReportGeneration';
 
@@ -2411,7 +2411,7 @@ export const DataQualityStep: React.FC<{
 }> = ({ workflow, projectId, onComplete, onUpdateWorkflow }) => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { addIngestionJob, registryModels, createDataQualityReport, createGeneratedReport, createReportConfiguration, reportConfigurations, cloneDatasetAsResolved, ingestionJobs, projects, createWorkflowLog } = useGlobal();
+  const { addIngestionJob, registryModels, createDataQualityReport, cloneDatasetAsResolved, ingestionJobs, projects, createWorkflowLog } = useGlobal();
   
   const hasScoreDataset = !!(workflow as any).dataIngestionConfig?.scoreLevelDataset;
   const hasAccountDataset = !!(workflow as any).dataIngestionConfig?.accountLevelDataset;
@@ -2429,7 +2429,6 @@ export const DataQualityStep: React.FC<{
   const [loading, setLoading] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [currentResolvingIndex, setCurrentResolvingIndex] = useState(-1);
-  const [generatingPDF, setGeneratingPDF] = useState(false);
   // Store resolved clones as UploadedDataset objects locally
   const [resolvedDatasetClones, setResolvedDatasetClones] = useState<any[]>(
     workflow.dataQualityAnalysis?.resolvedDatasetClones || []
@@ -2493,15 +2492,7 @@ export const DataQualityStep: React.FC<{
     : allDatasets[0];
 
   // Tab navigation state for detailed dataset analysis view
-  const [activeTab, setActiveTab] = useState<'overview' | 'distributions' | 'volume'>('overview');
-  const tabs = [
-    { id: 'overview', icon: Database, label: 'Overview' },
-    { id: 'distributions', icon: BarChart3, label: 'Distributions' },
-    { id: 'volume', icon: TrendingUp, label: 'Volume & Events' },
-  ];
-  // Derived metrics for the currently selected dataset
-  const metrics = selectedDataset ? metricsMap[selectedDataset.id] : null;
-
+  
   // 18-check DQ analysis
   const runDataChecks = (dataset: any, level: 'score' | 'account'): DQCheck[] => {
     const rows = dataset.rows || 1000;
@@ -2709,117 +2700,6 @@ export const DataQualityStep: React.FC<{
     setCurrentAnalyzingDataset('');
   };
 
-  // Get selected model for report generation
-  const selectedModel = registryModels.find(m => m.id === workflow.selectedModel);
-
-  const handleDownloadReport = async () => {
-    if (Object.keys(metricsMap).length === 0 || !selectedModel) return;
-
-    setGeneratingPDF(true);
-
-    // Separate baseline (original) and resolved datasets
-    const baselineDatasetIds: string[] = [];
-    const resolvedDatasetIds: string[] = [];
-    
-    allDatasets.forEach(dataset => {
-      // Check if this dataset is resolved by its isResolved property
-      if ((dataset as any).isResolved === true) {
-        resolvedDatasetIds.push(dataset.id);
-      } else {
-        baselineDatasetIds.push(dataset.id);
-      }
-    });
-
-    // Get dataset names for configuration and report
-    const datasetNames = allDatasets.map(d => d.name).join('_');
-    const timestamp = new Date().toISOString().split('T')[0];
-    const configName = `Data_Quality_${selectedModel.name}_${timestamp}`.replace(/\s+/g, '_');
-    const reportName = `Data Quality Report - ${selectedModel.name} (${allDatasets.map(d => d.name).join(', ')})`;
-
-    // Prepare PDF data - THIS IS THE SINGLE SOURCE OF TRUTH
-    const pdfData = {
-      reportName: reportName,
-      generatedAt: new Date().toISOString(),
-      datasets: allDatasets.map(dataset => {
-        const metrics = metricsMap[dataset.id];
-        if (!metrics) return null;
-        
-        return {
-          name: dataset.name,
-          totalRecords: metrics.totalRecords,
-          recordsAfterExclusion: metrics.recordsAfterExclusion,
-          exclusionRate: metrics.exclusionRate,
-          qualityScore: metrics.qualityScore,
-          issues: metrics.issues.map((issue: any) => ({
-            variable: issue.variable,
-            type: issue.type,
-            severity: issue.severity,
-            count: issue.count,
-            percent: issue.percent,
-            selectedMethod: issue.selectedMethod,
-          })),
-        };
-      }).filter(Boolean) as any[],
-    };
-
-    // Store as immutable artifact
-    const reportArtifact = {
-      pdfContent: JSON.stringify(pdfData), // Serialize for storage
-      metadata: {
-        generatedAt: pdfData.generatedAt,
-        datasetCount: allDatasets.length,
-        modelId: selectedModel.id,
-        modelName: selectedModel.name,
-        workflow: 'projects',
-      },
-    };
-
-    // Actually generate and download the PDF
-    generateDataQualityPDF(pdfData);
-
-    // Calculate average quality score
-    const avgQualityScore = allDatasets.reduce((sum, dataset) => {
-      const metrics = metricsMap[dataset.id];
-      return sum + (metrics?.qualityScore || 0);
-    }, 0) / allDatasets.length;
-
-    // Create ONE consolidated report with immutable artifact
-    const generatedReport = createGeneratedReport({
-      name: reportName,
-      type: 'data_quality',
-      modelId: selectedModel.id,
-      modelName: `${selectedModel.name} ${selectedModel.version}`,
-      status: 'final',
-      healthScore: avgQualityScore,
-      fileSize: '2.1 MB',
-      tags: ['data-quality', 'automated', 'projects-workflow', resolvedDatasets.length > 0 ? 'resolved' : 'in-progress'],
-      // Store the immutable artifact
-      reportArtifact,
-      baselineDatasetIds,
-      resolvedDatasetIds,
-      immutable: true,
-    });
-
-    setGeneratingPDF(false);
-    
-    // Log data quality report generation
-    const project = projects.find(p => p.id === projectId);
-    if (project) {
-      createWorkflowLog(createWorkflowLogEntry(
-        project.id,
-        project.name,
-        'Data Quality Report Generated',
-        `Generated comprehensive data quality report for ${allDatasets.length} dataset(s): ${allDatasets.map(d => d.name).join(', ')}`
-      ));
-    }
-    
-    alert(`✓ Data Quality Report generated and saved to Reports section!`);
-  };
-
-  const handleExportReport = () => {
-    alert('Downloading comprehensive Data Quality Report...');
-  };
-
   return (
     <div className="space-y-6">
       {/* Header Section */}
@@ -2993,47 +2873,6 @@ export const DataQualityStep: React.FC<{
               </button>
             )}
             
-            {/* Export buttons — shown once analysis is run */}
-            {Object.keys(dqCheckResults).length > 0 && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleExportExcel}
-                  className={`px-3 py-2 rounded-lg flex items-center gap-2 text-sm ${
-                    isDark ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'
-                  }`}
-                >
-                  <Download size={14} />
-                  Excel
-                </button>
-                <button
-                  onClick={handleExportPPT}
-                  className={`px-3 py-2 rounded-lg flex items-center gap-2 text-sm ${
-                    isDark ? 'bg-orange-600 hover:bg-orange-500 text-white' : 'bg-orange-500 hover:bg-orange-600 text-white'
-                  }`}
-                >
-                  <Download size={14} />
-                  PPT (HTML)
-                </button>
-                {allDatasets.every(dataset => {
-                  const m = metricsMap[dataset.id];
-                  return m && m.issues.every((issue: any) => !issue.selectedMethod || issue.resolved);
-                }) && (
-                  <button
-                    onClick={handleDownloadReport}
-                    disabled={generatingPDF}
-                    className={`px-3 py-2 rounded-lg flex items-center gap-2 text-sm ${
-                      isDark ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'
-                    } ${generatingPDF ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {generatingPDF ? (
-                      <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />Generating...</>
-                    ) : (
-                      <><Download size={14} />PDF</>
-                    )}
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -3143,226 +2982,6 @@ export const DataQualityStep: React.FC<{
               })}
             </div>
           </div>
-
-          {/* Tab Navigation - REMOVED - moved below */}
-          <div className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-            <div className="flex gap-1 overflow-x-auto">
-              {tabs.map((tab) => {
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={`px-4 py-3 font-medium text-sm whitespace-nowrap flex items-center gap-2 border-b-2 transition ${
-                      activeTab === tab.id
-                        ? isDark
-                          ? 'border-blue-500 text-blue-400'
-                          : 'border-blue-600 text-blue-600'
-                        : isDark
-                        ? 'border-transparent text-slate-400 hover:text-slate-300'
-                        : 'border-transparent text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Icon size={16} />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Tab Content - Show detailed analysis for selected dataset */}
-          {selectedDataset && metrics && (
-            <>
-              {/* Overview Tab */}
-              {activeTab === 'overview' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <div className="flex items-center gap-3 mb-2">
-                      <Database className={`${isDark ? 'text-blue-400' : 'text-blue-600'}`} size={24} />
-                      <h4 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Total Records
-                      </h4>
-                    </div>
-                    <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      {selectedDataset.rows?.toLocaleString() || 0}
-                    </p>
-                    <p className={`text-sm mt-2 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                      {selectedDataset.columns || 0} variables
-                    </p>
-                  </div>
-
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <div className="flex items-center gap-3 mb-2">
-                      <CheckCircle className={`${isDark ? 'text-green-400' : 'text-green-600'}`} size={24} />
-                      <h4 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        After Exclusion
-                      </h4>
-                    </div>
-                    <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      {((selectedDataset.rows || 0) * 0.98).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                    </p>
-                    <p className={`text-sm mt-2 ${isDark ? 'text-green-400' : 'text-green-600'}`}>
-                      98% retained
-                    </p>
-                  </div>
-
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <div className="flex items-center gap-3 mb-2">
-                      <Shield className={`${isDark ? 'text-purple-400' : 'text-purple-600'}`} size={24} />
-                      <h4 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Quality Score
-                      </h4>
-                    </div>
-                    <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      94.2%
-                    </p>
-                    <p className={`text-sm mt-2 ${isDark ? 'text-green-400' : 'text-green-600'}`}>
-                      Excellent
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Distributions Tab */}
-              {activeTab === 'distributions' && (
-                <div className="space-y-6">
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      Numerical Variable Summary
-                    </h4>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                            <th className={`text-left py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Variable</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Mean</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Std</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Min</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>25%</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>50%</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>75%</th>
-                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Max</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {metrics.statisticalSummary.map((stat: any, idx: number) => (
-                            <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                              <td className={`py-2 px-3 font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                {stat.variable}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.mean.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.std.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.min.toLocaleString()}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.p25.toLocaleString()}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.p50.toLocaleString()}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.p75.toLocaleString()}
-                              </td>
-                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                                {stat.max.toLocaleString()}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                    <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      Categorical Variable Distribution
-                    </h4>
-                    <div className="space-y-4">
-                      {metrics.categoricalDistributions.map((dist: any, idx: number) => (
-                        <div key={idx} className={`p-4 rounded-lg ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-                          <div className="flex justify-between items-start mb-2">
-                            <span className={`font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                              {dist.variable}
-                            </span>
-                            <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                              {dist.categories} categories
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              Top: <strong>{dist.topCategory}</strong>
-                            </span>
-                            <span className={`text-sm ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
-                              {dist.topPercent.toFixed(1)}%
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Volume/Event Rate Tab */}
-              {activeTab === 'volume' && (
-                <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                    Volume & Event Rate by Segment
-                  </h4>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <th className={`text-left py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Segment</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Count</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Event Rate</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Baseline</th>
-                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Delta</th>
-                          <th className={`text-center py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metrics.volumeMetrics.map((vol: any, idx: number) => (
-                          <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                            <td className={`py-3 px-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>{vol.segment}</td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {vol.count.toLocaleString()}
-                            </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'  }`}>
-                              {vol.eventRate.toFixed(1)}%
-                            </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {vol.baselineEventRate.toFixed(1)}%
-                            </td>
-                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {vol.delta > 0 ? '+' : ''}{vol.delta.toFixed(1)}%
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs ${
-                                Math.abs(vol.delta) < 0.5
-                                  ? isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
-                                  : Math.abs(vol.delta) < 1.0
-                                  ? isDark ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
-                                  : isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
-                              }`}>
-                                {Math.abs(vol.delta) < 0.5 ? '● Green' : Math.abs(vol.delta) < 1.0 ? '● Amber' : '● Red'}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
 
           {/* Dataset Analysis Section - NOW BELOW DETAILED ANALYSIS */}
           <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -5478,7 +5097,6 @@ export default function Projects() {
           { id: 2, name: 'Data Quality Reporting', status: 'not-started', locked: true },
           { id: 3, name: 'KPI & Metrics Configuration', status: 'not-started', locked: true },
           { id: 4, name: 'KPI Generation', status: 'not-started', locked: true },
-          { id: 5, name: 'Report Configuration', status: 'not-started', locked: true },
         ],
       },
     };
@@ -5993,16 +5611,24 @@ export default function Projects() {
                       onComplete={(results) => {
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
                           if (idx === 4) return { ...s, status: 'completed' as const };
-                          if (idx === 5) return { ...s, locked: false };
                           return s;
                         });
                         createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'KPI Generation', `Generated ${results.length} KPI metric results`));
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           steps: newSteps,
-                          currentStep: 5,
+                          currentStep: 4,
+                          status: 'completed' as const,
                           kpiResults: results,
                         } as any);
+                        setTimeout(() => {
+                          const completedModelId = selectedProject.workflow.selectedModel || selectedProject.workflow.models?.[0]?.id;
+                          if (completedModelId) {
+                            navigate(`/?modelId=${completedModelId}&source=projects`);
+                          } else {
+                            navigate('/');
+                          }
+                        }, 200);
                       }}
                       onIngestAnotherModel={(_modelId) => {
                         // Reset workflow back to Reference Data Ingestion (step 1)
@@ -6019,36 +5645,6 @@ export default function Projects() {
                           dataQualityAnalysis: undefined,
                           modelMetricsConfig: undefined,
                         } as any);
-                      }}
-                    />
-                  )}
-                  {selectedProject.workflow.currentStep === 5 && (
-                    <ReportConfigurationStep
-                      workflow={selectedProject.workflow}
-                      onComplete={() => {
-                        const configCount = (selectedProject.workflow as any).reportConfigs?.length || 0;
-                        const configNames = (selectedProject.workflow as any).reportConfigs?.map((c: any) => c.name) || [];
-                        const metricsCount = (selectedProject.workflow as any).reportConfigs?.reduce((acc: number, c: any) => acc + (c.metrics?.length || 0), 0) || 0;
-                        const description = getStepDescription.reportConfiguration(configCount, configNames, metricsCount);
-                        const newSteps = selectedProject.workflow.steps.map((s, idx) => {
-                          if (idx === 5) return { ...s, status: 'completed' as const };
-                          return s;
-                        });
-                        createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'Report Configuration', description));
-                        updateProjectWorkflow(selectedProject.id, {
-                          ...selectedProject.workflow,
-                          steps: newSteps,
-                          currentStep: 5,
-                          status: 'completed' as const,
-                        });
-                        setTimeout(() => {
-                          const completedModelId = selectedProject.workflow.selectedModel || selectedProject.workflow.models?.[0]?.id;
-                          if (completedModelId) {
-                            navigate(`/?modelId=${completedModelId}&source=projects`);
-                          } else {
-                            navigate('/');
-                          }
-                        }, 200);
                       }}
                     />
                   )}
