@@ -32,28 +32,38 @@ const VALIDATION_STEPS: WorkflowStep[] = [
 
 const StepIndicator: React.FC<{ steps: WorkflowStep[]; currentStep: number }> = ({ steps, currentStep }) => {
   const { theme } = useTheme();
-  const isDark = theme === 'dark';
   return (
-    <div className="flex items-center gap-1 overflow-x-auto pb-2">
-      {steps.map((step, idx) => (
-        <React.Fragment key={step.id}>
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap ${
-            idx === currentStep
-              ? 'bg-blue-600 text-white'
-              : step.status === 'completed'
-              ? isDark ? 'bg-green-800/30 text-green-400' : 'bg-green-100 text-green-700'
-              : isDark ? 'bg-slate-700/50 text-slate-400' : 'bg-slate-100 text-slate-500'
-          }`}>
-            {step.status === 'completed' && idx !== currentStep && (
-              <CheckCircle2 size={12} />
+    <div className="flex items-center justify-between mb-8 overflow-x-auto pb-2">
+      {steps.map((step, idx) => {
+        const isCompleted = step.status === 'completed';
+        const isCurrent = idx === currentStep;
+        const isLocked = step.locked;
+        return (
+          <React.Fragment key={step.id}>
+            <div className="flex flex-col items-center min-w-max">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition ${
+                isLocked
+                  ? theme === 'dark' ? 'bg-slate-700 text-slate-500' : 'bg-slate-300 text-slate-500'
+                  : isCompleted ? 'bg-green-500 text-white'
+                  : isCurrent ? 'bg-blue-500 text-white'
+                  : theme === 'dark' ? 'bg-slate-700 text-slate-400' : 'bg-slate-300 text-slate-600'
+              }`}>
+                {isCompleted ? <CheckCircle2 size={20} /> : idx + 1}
+              </div>
+              <p className={`text-xs mt-2 text-center max-w-24 ${
+                isLocked
+                  ? theme === 'dark' ? 'text-slate-500' : 'text-slate-400'
+                  : theme === 'dark' ? 'text-slate-400' : 'text-slate-600'
+              }`}>{step.name}</p>
+            </div>
+            {idx < steps.length - 1 && (
+              <div className={`flex-1 h-1 mx-2 mb-6 transition ${
+                isCompleted ? 'bg-green-500' : theme === 'dark' ? 'bg-slate-700' : 'bg-slate-300'
+              }`} />
             )}
-            {step.name}
-          </div>
-          {idx < steps.length - 1 && (
-            <div className={`w-4 h-px flex-shrink-0 ${isDark ? 'bg-slate-600' : 'bg-slate-300'}`} />
-          )}
-        </React.Fragment>
-      ))}
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 };

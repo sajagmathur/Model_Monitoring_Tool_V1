@@ -224,7 +224,7 @@ const BulkModelUploadStep: React.FC<{
 }> = ({ projectId, onBulkAddModels, onModelSelect, onComplete, onBack }) => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { createRegistryModel, updateRegistryModel, modelInventories, createModelInventory } = useGlobal();
+  const { createRegistryModel, updateRegistryModel, modelInventories, createModelInventory, projects: globalProjects } = useGlobal();
   const { showNotification } = useNotification();
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -370,56 +370,29 @@ const BulkModelUploadStep: React.FC<{
     setSelectedModelId(newModels[0]?.id || '');
     setUploadedRowData(rowMap);
 
-    // Init inventory assignment modes — default to 'suggested' for all
-    const modeInit: Record<string, 'suggested' | 'custom'> = {};
-    newModels.forEach(m => { modeInit[m.id] = 'suggested'; });
-    setBulkInvMode(modeInit);
-    setBulkExistingInv({});
-
-    setUploadStage('assigning');
-    showNotification(`✓ ${newModels.length} model(s) loaded — review inventory paths below.`, 'success', 5000);
-  };
-
-  const handleAssignAndContinue = () => {
-    if (!createModelInventory) {
-      showNotification('Error: Context not initialized. Please refresh and try again.', 'error');
-      return;
+    // Auto-assign inventory: ProjectName / ModelID_ModelName (no user prompt)
+    if (createModelInventory) {
+      const gp = globalProjects.find((p: any) => p.id === projectId);
+      const projectName = gp?.name || '';
+      const workingInventories = [...(modelInventories || [])];
+      newModels.forEach(m => {
+        const row = rowMap[m.id] || {};
+        const modelIdStr = (row['Model ID'] || m.id).replace(/[^a-zA-Z0-9_\-]/g, '_');
+        const modelNameStr = m.name.replace(/[^a-zA-Z0-9_\-]/g, '_');
+        const invId = findOrCreateInventoryPath(
+          { domain: projectName, product: `${modelIdStr}_${modelNameStr}`, modelType: '' },
+          workingInventories, createModelInventory
+        );
+        if (invId) updateRegistryModel(m.id, { inventoryId: invId });
+      });
     }
 
-    // Use a mutable working copy of inventories so that nodes created for the first
-    // model are visible when processing the second, third, etc. — prevents duplicates.
-    const workingInventories = [...modelInventories];
-
-    // Assign inventories to each model based on user selections
-    uploadedModels.forEach(m => {
-      const mode = bulkInvMode[m.id] || 'suggested';
-      const row = uploadedRowData[m.id] || {};
-      let invId = '';
-      if (mode === 'suggested') {
-        const segs = {
-          domain: row['Domain'] || '',
-          product: row['Product'] || '',
-          modelType: row['Model Type'] || '',
-        };
-        if (Object.values(segs).some(v => v.trim())) {
-          invId = findOrCreateInventoryPath(segs, workingInventories, createModelInventory);
-        }
-      } else if (mode === 'custom') {
-        invId = bulkExistingInv[m.id] || '';
-      }
-      if (invId) {
-        updateRegistryModel(m.id, { inventoryId: invId });
-      }
-    });
-
-    onBulkAddModels(uploadedModels);
+    onBulkAddModels(newModels);
     setUploadStage('uploaded');
-    showNotification(
-      `✓ ${uploadedModels.length} model(s) imported with inventory assignments!`,
-      'success',
-      8000
-    );
+    showNotification(`✓ ${newModels.length} model(s) imported successfully!`, 'success', 5000);
   };
+
+
 
   const handleContinue = () => {
     const selected = uploadedModels.find(m => m.id === selectedModelId);
@@ -622,95 +595,7 @@ const BulkModelUploadStep: React.FC<{
         </button>
       )}
 
-      {/* Inventory assignment stage */}
-      {uploadStage === 'assigning' && uploadedModels.length > 0 && (
-        <div className="space-y-4">
-          <div className={`flex items-center justify-between p-4 rounded-lg ${isDark ? 'bg-blue-900/20 border border-blue-500/30' : 'bg-blue-50 border border-blue-200'}`}>
-            <div>
-              <p className={`font-semibold text-sm ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>
-                Assign Inventory Folders — {uploadedModels.length} model(s)
-              </p>
-              <p className={`text-xs mt-0.5 ${isDark ? 'text-blue-400' : 'text-blue-700'}`}>
-                Review the suggested folder path for each model. Accept, pick an existing folder, or skip.
-              </p>
-            </div>
-            <button
-              onClick={() => {
-                const all: Record<string, 'suggested' | 'custom'> = {};
-                uploadedModels.forEach(m => { all[m.id] = 'suggested'; });
-                setBulkInvMode(all);
-              }}
-              className={`text-xs px-3 py-1.5 rounded border flex-shrink-0 transition ${isDark ? 'border-blue-500 text-blue-300 hover:bg-blue-900/30' : 'border-blue-400 text-blue-700 hover:bg-blue-100'}`}
-            >
-              ✓ Accept All
-            </button>
-          </div>
 
-          <div className="space-y-3">
-            {uploadedModels.map(m => {
-              const row = uploadedRowData[m.id] || {};
-              const mode = bulkInvMode[m.id] || 'suggested';
-              const pathParts = [row['Domain'], row['Product'], row['Model Type']].filter(Boolean);
-              return (
-                <div key={m.id} className={`p-4 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <p className={`text-sm font-medium truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{m.name}</p>
-                    {/* Mode toggle */}
-                    <div className={`flex text-xs rounded-lg overflow-hidden border flex-shrink-0 ${isDark ? 'border-slate-600' : 'border-slate-300'}`}>
-                      {(['suggested', 'custom'] as const).map(v => (
-                        <button
-                          key={v}
-                          onClick={() => setBulkInvMode(prev => ({ ...prev, [m.id]: v }))}
-                          className={`px-2.5 py-1 transition ${mode === v
-                            ? isDark ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
-                            : isDark ? 'bg-slate-700 text-slate-400 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-50'
-                          }`}
-                        >
-                          {v === 'suggested' ? '📂 Suggested' : '✏️ Custom'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {mode === 'suggested' && (
-                    pathParts.length > 0 ? (
-                      <div className={`flex flex-wrap items-center gap-1.5 p-2.5 rounded ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-                        {pathParts.map((seg, i) => (
-                          <React.Fragment key={i}>
-                            {i > 0 && <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>›</span>}
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${isDark ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>{seg}</span>
-                          </React.Fragment>
-                        ))}
-                        <span className={`ml-auto text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Missing folders will be created automatically</span>
-                      </div>
-                    ) : (
-                      <p className={`text-xs italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>No domain/product/type data in this row.</p>
-                    )
-                  )}
-
-                  {mode === 'custom' && (
-                    <input
-                      type="text"
-                      placeholder="Enter custom folder path (e.g. Banking / Credit Cards)"
-                      value={bulkExistingInv[m.id] || ''}
-                      onChange={e => setBulkExistingInv(prev => ({ ...prev, [m.id]: e.target.value }))}
-                      className={`w-full px-2 py-1.5 rounded border text-xs ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <button
-            onClick={handleAssignAndContinue}
-            className="w-full py-3 rounded-lg flex items-center justify-center gap-2 font-medium bg-blue-600 hover:bg-blue-700 text-white transition"
-          >
-            <CheckCircle2 size={18} />
-            Confirm Assignments & Continue
-          </button>
-        </div>
-      )}
 
       {/* Post-upload: success + model selector */}
       {uploadStage === 'uploaded' && uploadedModels.length > 0 && (
@@ -1060,8 +945,8 @@ export const ModelMetricsStep: React.FC<{
   const hasAccountDataset = !!(workflow as any).dataIngestionConfig?.accountLevelDataset;
 
   // Allowlist by data type
-  const SCORE_ONLY_IDS = ['ks', 'change_in_ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape'];
-  const ACCOUNT_ALLOWED_IDS = ['ks', 'change_in_ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape', 'type1_error', 'type2_error', 'accuracy', 'precision', 'recall', 'f1_score', 'r2', 'adjusted_r2', 'rmse', 'hrl'];
+  const SCORE_ONLY_IDS = ['ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape'];
+  const ACCOUNT_ALLOWED_IDS = ['ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape', 'type1_error', 'type2_error', 'accuracy', 'precision', 'recall', 'f1_score', 'hrl', 'univariate', 'csi_features', 'iv', 'feature_importance', 'shap', 'wald_chi_sq', 'p_values', 'estimate', 'var_level_rob', 'outlier_detection', 'missing_value'];
   const allowedIds: string[] = hasScoreDataset && !hasAccountDataset ? SCORE_ONLY_IDS
     : hasAccountDataset ? ACCOUNT_ALLOWED_IDS
     : KPI_METRICS.map(k => k.id);
@@ -1273,7 +1158,7 @@ const ModelRepositoryStep: React.FC<{
 }> = ({ workflow, onComplete, onModelSelect, onAddModel, onBulkAddModels, projectId }) => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { modelInventories = [], createModelInventory, registryModels } = useGlobal();
+  const { modelInventories = [], createModelInventory, registryModels, projects: globalProjects } = useGlobal();
 
   // 'null' = show choice screen, 'single' = manual upload, 'bulk' = BulkModelUploadStep, 'existing' = pick from registry
   const [uploadMode, setUploadMode] = useState<'single' | 'bulk' | 'existing' | null>(null);
@@ -1293,7 +1178,7 @@ const ModelRepositoryStep: React.FC<{
     modelId: '', modelName: '', modelVersion: 'v1',
     geography: '', domain: '', product: '', modelType: '', populationType: '', usage: '',
     riskTierMRR: '', modelStatus: '', developer: '', segmentVariable: '',
-    fullPerf: '', fullPerfBadDef: '',
+    fullPerf: 'Yes', fullPerfBadDef: '',
     ew1: '', ew1BadDef: '',
     ew2: '', ew2BadDef: '',
     approvalDate: '', firstUseDate: '', owner: '',
@@ -1483,6 +1368,18 @@ const ModelRepositoryStep: React.FC<{
         return;
       }
 
+      // Auto-assign inventory path: ProjectName / ModelID_ModelName
+      let autoInvId = assignInvId;
+      if (!autoInvId && createModelInventory && metadata.modelId && metadata.modelName) {
+        const gp = globalProjects.find((p: any) => p.id === projectId);
+        const projectName = gp?.name || '';
+        const mIdStr = metadata.modelId.replace(/[^a-zA-Z0-9_\-]/g, '_');
+        const mNameStr = metadata.modelName.replace(/[^a-zA-Z0-9_\-]/g, '_');
+        autoInvId = findOrCreateInventoryPath(
+          { domain: projectName, product: `${mIdStr}_${mNameStr}`, modelType: '' },
+          modelInventories, createModelInventory
+        );
+      }
       const metadataWithMetrics = {
         ...metadata,
         metrics: Object.keys(metrics).length > 0 ? metrics : undefined,
@@ -1493,7 +1390,7 @@ const ModelRepositoryStep: React.FC<{
           type: uploadedFile.type,
         } : undefined,
         modelFileFormat,
-        inventoryId: assignInvId || undefined,
+        inventoryId: autoInvId || undefined,
       };
       onAddModel(metadataWithMetrics);
     }
@@ -1503,7 +1400,7 @@ const ModelRepositoryStep: React.FC<{
       modelId: '', modelName: '', modelVersion: 'v1',
       geography: '', domain: '', product: '', modelType: '', populationType: '', usage: '',
       riskTierMRR: '', modelStatus: '', developer: '', segmentVariable: '',
-      fullPerf: '', fullPerfBadDef: '',
+      fullPerf: 'Yes', fullPerfBadDef: '',
       ew1: '', ew1BadDef: '',
       ew2: '', ew2BadDef: '',
       approvalDate: '', firstUseDate: '', owner: '',
@@ -2283,13 +2180,10 @@ const ModelRepositoryStep: React.FC<{
                       {/* Full Performance */}
                       <div>
                         <p className={`text-xs font-semibold pb-1 border-b ${theme === 'dark' ? 'text-slate-300 border-slate-600' : 'text-slate-700 border-slate-200'}`}>Full Performance</p>
-                        <select value={metadata.fullPerf}
-                          onChange={(e) => setMetadata({ ...metadata, fullPerf: e.target.value })}
-                          className={`mt-2 w-full px-2 py-1.5 rounded border text-xs ${theme === 'dark' ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}>
-                          <option value="">-- Select --</option>
-                          <option value="Yes">Yes</option>
-                          <option value="No">No</option>
-                        </select>
+                        <div className={`mt-2 flex items-center gap-2 px-2 py-1.5 rounded border text-xs font-medium ${theme === 'dark' ? 'bg-slate-700/50 border-slate-600 text-green-400' : 'bg-green-50 border-green-200 text-green-700'}`}>
+                          <span>Yes</span>
+                          <span className={`ml-auto text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>(locked)</span>
+                        </div>
                         <div className="mt-2">
                           <label className="block text-xs font-medium mb-1">Bad Definition</label>
                           <input type="text" value={metadata.fullPerfBadDef}
@@ -2363,76 +2257,7 @@ const ModelRepositoryStep: React.FC<{
                 </div>
               </div>
 
-              {/* Step 4: Assign to Inventory */}
-              <div className={`p-4 rounded-lg border mb-6 ${theme === 'dark' ? 'bg-slate-900/30 border-slate-600' : 'bg-slate-50 border-slate-300'}`}>
-                <div className="mb-3">
-                  <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                    Step 4: Inventory Folder
-                    <span className={`text-xs font-normal ml-1 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>(Optional)</span>
-                  </p>
-                </div>
 
-                {(() => {
-                  const filledSegs = [
-                    { label: 'Domain',  value: metadata.domain },
-                    { label: 'Product', value: metadata.product },
-                    { label: 'Type',    value: metadata.modelType },
-                  ].filter(s => s.value.trim());
-
-                  if (filledSegs.length === 0) {
-                    return (
-                      <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
-                        Fill in Domain, Product, and Model Type in the <strong>Identity</strong> tab above to generate a suggested folder path.
-                      </p>
-                    );
-                  }
-
-                  return (
-                    <>
-                      {/* Live path breadcrumb */}
-                      <div className={`flex flex-wrap items-center gap-1.5 p-3 rounded-lg mb-3 ${theme === 'dark' ? 'bg-slate-800 border border-slate-600' : 'bg-white border border-slate-200'}`}>
-                        {filledSegs.map((seg, i) => (
-                          <React.Fragment key={`seg-${i}`}>
-                            {i > 0 && <span className={`text-sm ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>›</span>}
-                            <span className={`text-xs px-2 py-1 rounded font-medium ${theme === 'dark' ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700'}`}>
-                              {seg.value}
-                            </span>
-                          </React.Fragment>
-                        ))}
-                      </div>
-                      <p className={`text-xs mb-2 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {assignInvId
-                          ? '✓ Path created — missing folders were auto-created.'
-                          : 'Built from Identity tab fields. Click below to create this folder structure.'}
-                      </p>
-                      <button
-                        onClick={() => {
-                          if (!createModelInventory) {
-                            alert('Unable to create inventory - context not ready. Please refresh and try again.');
-                            return;
-                          }
-                          const id = findOrCreateInventoryPath(
-                            { domain: metadata.domain, product: metadata.product, modelType: metadata.modelType },
-                            modelInventories, createModelInventory
-                          );
-                          if (id) {
-                            setAssignInvId(id);
-                          }
-                        }}
-                        className={`text-xs px-3 py-1.5 rounded flex items-center gap-1.5 font-medium transition ${
-                          assignInvId
-                            ? theme === 'dark' ? 'bg-green-800/40 border border-green-600 text-green-300 hover:bg-green-800/60' : 'bg-green-50 border border-green-400 text-green-700 hover:bg-green-100'
-                            : theme === 'dark' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-blue-500 text-white hover:bg-blue-600'
-                        }`}
-                      >
-                        {assignInvId
-                          ? <><RefreshCw size={11} /> Re-create Path</>
-                          : <><FolderPlus size={11} /> Create & Assign This Path</>}
-                      </button>
-                    </>
-                  );
-                })()}
-              </div>
 
               <div className="flex gap-2">
                 <button
@@ -2666,6 +2491,16 @@ export const DataQualityStep: React.FC<{
   const selectedDataset = selectedDatasetId 
     ? allDatasets.find(d => d.id === selectedDatasetId)
     : allDatasets[0];
+
+  // Tab navigation state for detailed dataset analysis view
+  const [activeTab, setActiveTab] = useState<'overview' | 'distributions' | 'volume'>('overview');
+  const tabs = [
+    { id: 'overview', icon: Database, label: 'Overview' },
+    { id: 'distributions', icon: BarChart3, label: 'Distributions' },
+    { id: 'volume', icon: TrendingUp, label: 'Volume & Events' },
+  ];
+  // Derived metrics for the currently selected dataset
+  const metrics = selectedDataset ? metricsMap[selectedDataset.id] : null;
 
   // 18-check DQ analysis
   const runDataChecks = (dataset: any, level: 'score' | 'account'): DQCheck[] => {
@@ -3308,6 +3143,226 @@ export const DataQualityStep: React.FC<{
               })}
             </div>
           </div>
+
+          {/* Tab Navigation - REMOVED - moved below */}
+          <div className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+            <div className="flex gap-1 overflow-x-auto">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`px-4 py-3 font-medium text-sm whitespace-nowrap flex items-center gap-2 border-b-2 transition ${
+                      activeTab === tab.id
+                        ? isDark
+                          ? 'border-blue-500 text-blue-400'
+                          : 'border-blue-600 text-blue-600'
+                        : isDark
+                        ? 'border-transparent text-slate-400 hover:text-slate-300'
+                        : 'border-transparent text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Icon size={16} />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Tab Content - Show detailed analysis for selected dataset */}
+          {selectedDataset && metrics && (
+            <>
+              {/* Overview Tab */}
+              {activeTab === 'overview' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div className="flex items-center gap-3 mb-2">
+                      <Database className={`${isDark ? 'text-blue-400' : 'text-blue-600'}`} size={24} />
+                      <h4 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Total Records
+                      </h4>
+                    </div>
+                    <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      {selectedDataset.rows?.toLocaleString() || 0}
+                    </p>
+                    <p className={`text-sm mt-2 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                      {selectedDataset.columns || 0} variables
+                    </p>
+                  </div>
+
+                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div className="flex items-center gap-3 mb-2">
+                      <CheckCircle className={`${isDark ? 'text-green-400' : 'text-green-600'}`} size={24} />
+                      <h4 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        After Exclusion
+                      </h4>
+                    </div>
+                    <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      {((selectedDataset.rows || 0) * 0.98).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </p>
+                    <p className={`text-sm mt-2 ${isDark ? 'text-green-400' : 'text-green-600'}`}>
+                      98% retained
+                    </p>
+                  </div>
+
+                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div className="flex items-center gap-3 mb-2">
+                      <Shield className={`${isDark ? 'text-purple-400' : 'text-purple-600'}`} size={24} />
+                      <h4 className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Quality Score
+                      </h4>
+                    </div>
+                    <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      94.2%
+                    </p>
+                    <p className={`text-sm mt-2 ${isDark ? 'text-green-400' : 'text-green-600'}`}>
+                      Excellent
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Distributions Tab */}
+              {activeTab === 'distributions' && (
+                <div className="space-y-6">
+                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      Numerical Variable Summary
+                    </h4>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                            <th className={`text-left py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Variable</th>
+                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Mean</th>
+                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Std</th>
+                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Min</th>
+                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>25%</th>
+                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>50%</th>
+                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>75%</th>
+                            <th className={`text-right py-2 px-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Max</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {metrics.statisticalSummary.map((stat: any, idx: number) => (
+                            <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                              <td className={`py-2 px-3 font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                                {stat.variable}
+                              </td>
+                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {stat.mean.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                              </td>
+                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {stat.std.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                              </td>
+                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {stat.min.toLocaleString()}
+                              </td>
+                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {stat.p25.toLocaleString()}
+                              </td>
+                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {stat.p50.toLocaleString()}
+                              </td>
+                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {stat.p75.toLocaleString()}
+                              </td>
+                              <td className={`py-2 px-3 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                                {stat.max.toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      Categorical Variable Distribution
+                    </h4>
+                    <div className="space-y-4">
+                      {metrics.categoricalDistributions.map((dist: any, idx: number) => (
+                        <div key={idx} className={`p-4 rounded-lg ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+                          <div className="flex justify-between items-start mb-2">
+                            <span className={`font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                              {dist.variable}
+                            </span>
+                            <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                              {dist.categories} categories
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                              Top: <strong>{dist.topCategory}</strong>
+                            </span>
+                            <span className={`text-sm ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                              {dist.topPercent.toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Volume/Event Rate Tab */}
+              {activeTab === 'volume' && (
+                <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <h4 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    Volume & Event Rate by Segment
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                          <th className={`text-left py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Segment</th>
+                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Count</th>
+                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Event Rate</th>
+                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Baseline</th>
+                          <th className={`text-right py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Delta</th>
+                          <th className={`text-center py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {metrics.volumeMetrics.map((vol: any, idx: number) => (
+                          <tr key={idx} className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                            <td className={`py-3 px-4 ${isDark ? 'text-white' : 'text-slate-900'}`}>{vol.segment}</td>
+                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                              {vol.count.toLocaleString()}
+                            </td>
+                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'  }`}>
+                              {vol.eventRate.toFixed(1)}%
+                            </td>
+                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                              {vol.baselineEventRate.toFixed(1)}%
+                            </td>
+                            <td className={`py-3 px-4 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                              {vol.delta > 0 ? '+' : ''}{vol.delta.toFixed(1)}%
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs ${
+                                Math.abs(vol.delta) < 0.5
+                                  ? isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
+                                  : Math.abs(vol.delta) < 1.0
+                                  ? isDark ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
+                                  : isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
+                              }`}>
+                                {Math.abs(vol.delta) < 0.5 ? '● Green' : Math.abs(vol.delta) < 1.0 ? '● Amber' : '● Red'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
 
           {/* Dataset Analysis Section - NOW BELOW DETAILED ANALYSIS */}
           <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
@@ -4929,30 +4984,39 @@ export const KpiGenerationStep: React.FC<{
   // PDF / PPT / Excel are heavyweight; use printable HTML for PDF, CSV for Excel, placeholder for PPT
   const downloadPDF = () => {
     if (!results) return;
-    const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>KPI Report - ${project.name}</title>
-<style>body{font-family:Arial,sans-serif;padding:32px;color:#111}
-h1{font-size:18px;margin-bottom:4px}p.sub{font-size:12px;color:#666;margin-bottom:20px}
-table{width:100%;border-collapse:collapse;font-size:12px}
-th{background:#3b5bfa;color:#fff;padding:8px 10px;text-align:left}
-td{padding:7px 10px;border-bottom:1px solid #e5e7eb}
-tr:nth-child(even)td{background:#f9fafb}
-.pass{color:#16a34a;font-weight:600}.warn{color:#d97706;font-weight:600}.fail{color:#dc2626;font-weight:600}
-.primary-badge{background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:999px;font-size:10px}
-</style></head><body>
-<h1>KPI Monitoring Report</h1>
-<p class="sub">Project: ${project.name} &nbsp;|&nbsp; Generated: ${new Date().toLocaleString()}</p>
-<table><thead><tr><th>Metric</th><th>Section</th><th>Value</th><th>Primary KPI</th><th>Inner</th><th>Outer</th><th>Status</th></tr></thead>
-<tbody>${results.map(r => `<tr>
-  <td>${r.label}</td>
-  <td style="text-transform:capitalize">${r.section}</td>
-  <td>${r.value}${r.unit}</td>
-  <td>${r.isPrimary ? '<span class="primary-badge">Primary</span>' : '—'}</td>
-  <td>${r.innerThreshold || '—'}</td>
-  <td>${r.outerThreshold || '—'}</td>
-  <td class="${r.status}">${r.status.toUpperCase()}</td>
-</tr>`).join('')}
-</tbody></table></body></html>`;
+    // CSS extracted to a plain string to avoid TypeScript TSX parser confusion with curly braces in template literals
+    const css = 'body{font-family:Arial,sans-serif;padding:32px;color:#111}' +
+      'h1{font-size:18px;margin-bottom:4px}' +
+      'p.sub{font-size:12px;color:#666;margin-bottom:20px}' +
+      'table{width:100%;border-collapse:collapse;font-size:12px}' +
+      'th{background:#3b5bfa;color:#fff;padding:8px 10px;text-align:left}' +
+      'td{padding:7px 10px;border-bottom:1px solid #e5e7eb}' +
+      'tr:nth-child(even) td{background:#f9fafb}' +
+      '.pass{color:#16a34a;font-weight:600}' +
+      '.warn{color:#d97706;font-weight:600}' +
+      '.fail{color:#dc2626;font-weight:600}' +
+      '.primary-badge{background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:999px;font-size:10px}';
+    const rowsHtml = (results || []).map(r =>
+      '<tr>' +
+      `<td>${r.label}</td>` +
+      `<td style="text-transform:capitalize">${r.section}</td>` +
+      `<td>${r.value}${r.unit}</td>` +
+      `<td>${r.isPrimary ? '<span class="primary-badge">Primary</span>' : '\u2014'}</td>` +
+      `<td>${r.innerThreshold || '\u2014'}</td>` +
+      `<td>${r.outerThreshold || '\u2014'}</td>` +
+      `<td class="${r.status}">${r.status.toUpperCase()}</td>` +
+      '</tr>'
+    ).join('');
+    const html = '<!DOCTYPE html>' +
+      '<html><head><meta charset="utf-8">' +
+      `<title>KPI Report - ${project.name}</title>` +
+      `<style>${css}</style>` +
+      '</head><body>' +
+      '<h1>KPI Monitoring Report</h1>' +
+      `<p class="sub">Project: ${project.name} &nbsp;|&nbsp; Generated: ${new Date().toLocaleString()}</p>` +
+      '<table><thead><tr><th>Metric</th><th>Section</th><th>Value</th><th>Primary KPI</th><th>Inner</th><th>Outer</th><th>Status</th></tr></thead>' +
+      `<tbody>${rowsHtml}</tbody></table>` +
+      '</body></html>';
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 500); }
   };
@@ -5415,7 +5479,6 @@ export default function Projects() {
           { id: 3, name: 'KPI & Metrics Configuration', status: 'not-started', locked: true },
           { id: 4, name: 'KPI Generation', status: 'not-started', locked: true },
           { id: 5, name: 'Report Configuration', status: 'not-started', locked: true },
-          { id: 6, name: 'Schedule Reports', status: 'not-started', locked: true },
         ],
       },
     };
@@ -5969,45 +6032,23 @@ export default function Projects() {
                         const description = getStepDescription.reportConfiguration(configCount, configNames, metricsCount);
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
                           if (idx === 5) return { ...s, status: 'completed' as const };
-                          if (idx === 6) return { ...s, locked: false };
                           return s;
                         });
                         createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'Report Configuration', description));
-                        updateProjectWorkflow(selectedProject.id, { ...selectedProject.workflow, steps: newSteps, currentStep: 6 });
-                      }}
-                    />
-                  )}
-                  {selectedProject.workflow.currentStep === 6 && (
-                    <ScheduleReportsStep
-                      workflow={selectedProject.workflow}
-                      project={selectedProject}
-                      onComplete={() => {
-                        const jobCount = (selectedProject.workflow as any).scheduledJobs?.length || 0;
-                        const reportTypes = (selectedProject.workflow as any).reportConfigs?.map((c: any) => c.name) || [];
-                        const scheduleFrequency = (selectedProject.workflow as any).scheduledJobs?.[0]?.frequency || 'Not specified';
-                        const description = getStepDescription.scheduleReports(jobCount, reportTypes, scheduleFrequency);
-                        const newSteps = selectedProject.workflow.steps.map((s, idx) => {
-                          if (idx === 6) return { ...s, status: 'completed' as const };
-                          return s;
-                        });
-                        const isLastStep = true;
-                        createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'Schedule Reports', description));
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           steps: newSteps,
-                          currentStep: selectedProject.workflow.currentStep,
-                          status: isLastStep ? ('completed' as const) : selectedProject.workflow.status,
+                          currentStep: 5,
+                          status: 'completed' as const,
                         });
-                        if (isLastStep) {
-                          setTimeout(() => {
-                            const completedModelId = selectedProject.workflow.selectedModel || selectedProject.workflow.models?.[0]?.id;
-                            if (completedModelId) {
-                              navigate(`/?modelId=${completedModelId}&source=projects`);
-                            } else {
-                              navigate('/');
-                            }
-                          }, 200);
-                        }
+                        setTimeout(() => {
+                          const completedModelId = selectedProject.workflow.selectedModel || selectedProject.workflow.models?.[0]?.id;
+                          if (completedModelId) {
+                            navigate(`/?modelId=${completedModelId}&source=projects`);
+                          } else {
+                            navigate('/');
+                          }
+                        }, 200);
                       }}
                     />
                   )}
