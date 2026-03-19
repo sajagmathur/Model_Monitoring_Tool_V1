@@ -18,6 +18,12 @@ import {
   Share2,
   FileBarChart,
   AlertCircle,
+  Folder,
+  FolderOpen,
+  ChevronDown,
+  ChevronRight,
+  List,
+  Layers,
 } from 'lucide-react';
 import { generateSimpleReportPDF, generateMonitoringReportPDF, generateDataQualityPDF } from '../utils/pdfGenerator';
 
@@ -25,7 +31,7 @@ const Reports: React.FC = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const isDark = theme === 'dark';
-  const { generatedReports, dataQualityReports, deleteGeneratedReport, deleteDataQualityReport } = useGlobal();
+  const { generatedReports, dataQualityReports, deleteGeneratedReport, deleteDataQualityReport, projects, registryModels } = useGlobal();
 
   // Combine all reports from different sources
   const allReports = [
@@ -50,6 +56,9 @@ const Reports: React.FC = () => {
   const [selectedType, setSelectedType] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'date' | 'name' | 'health'>('date');
+  const [viewMode, setViewMode] = useState<'list' | 'folder'>('list');
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setFilteredReports(allReports);
@@ -254,6 +263,31 @@ const Reports: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* View mode toggle */}
+          <div className={`flex rounded-lg border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-300'}`}>
+            <button
+              onClick={() => setViewMode('list')}
+              title="List View"
+              className={`px-3 py-2 ${
+                viewMode === 'list'
+                  ? isDark ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                  : isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <List size={15} />
+            </button>
+            <button
+              onClick={() => setViewMode('folder')}
+              title="Folder View"
+              className={`px-3 py-2 ${
+                viewMode === 'folder'
+                  ? isDark ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                  : isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Layers size={15} />
+            </button>
+          </div>
           <button
             onClick={() => navigate('/report-generation')}
             className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
@@ -379,7 +413,7 @@ const Reports: React.FC = () => {
         </div>
       </div>
 
-      {/* Reports Grid */}
+      {/* Reports View */}
       {allReports.length === 0 ? (
         <div className={`py-16 text-center rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <FileText className={`mx-auto mb-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} size={64} />
@@ -396,7 +430,137 @@ const Reports: React.FC = () => {
             Generate Your First Report
           </button>
         </div>
+      ) : viewMode === 'folder' ? (
+        /* ── Folder View ── */
+        <div className="space-y-3">
+          {(() => {
+            // Build Project > Model > Report hierarchy
+            const projectsWithReports = projects.filter(proj => {
+              const projModelIds = registryModels.filter(m => m.projectId === proj.id).map(m => m.id);
+              return filteredReports.some(r => projModelIds.includes(r.modelId));
+            });
+            const unlinkedReports = filteredReports.filter(r => {
+              const model = registryModels.find(m => m.id === r.modelId);
+              return !model;
+            });
+            return (
+              <>
+                {projectsWithReports.map(proj => {
+                  const projModels = registryModels.filter(m => m.projectId === proj.id);
+                  const projExpanded = expandedProjects.has(proj.id);
+                  const projReports = filteredReports.filter(r => projModels.some(m => m.id === r.modelId));
+                  return (
+                    <div key={proj.id} className={`rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                      <button
+                        onClick={() => setExpandedProjects(prev => {
+                          const next = new Set(prev);
+                          next.has(proj.id) ? next.delete(proj.id) : next.add(proj.id);
+                          return next;
+                        })}
+                        className={`w-full flex items-center gap-3 px-4 py-3 text-left ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50'} rounded-lg`}
+                      >
+                        {projExpanded ? <ChevronDown size={16} className={isDark ? 'text-slate-400' : 'text-slate-500'} /> : <ChevronRight size={16} className={isDark ? 'text-slate-400' : 'text-slate-500'} />}
+                        {projExpanded ? <FolderOpen size={18} className="text-yellow-500" /> : <Folder size={18} className="text-yellow-500" />}
+                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{proj.name}</span>
+                        <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                          {projReports.length} report{projReports.length !== 1 ? 's' : ''}
+                        </span>
+                      </button>
+                      {projExpanded && (
+                        <div className="px-6 pb-3 space-y-2">
+                          {projModels.filter(m => filteredReports.some(r => r.modelId === m.id)).map(model => {
+                            const modelKey = `${proj.id}::${model.id}`;
+                            const modelExpanded = expandedModels.has(modelKey);
+                            const modelReports = filteredReports.filter(r => r.modelId === model.id);
+                            return (
+                              <div key={model.id} className={`rounded-lg border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                                <button
+                                  onClick={() => setExpandedModels(prev => {
+                                    const next = new Set(prev);
+                                    next.has(modelKey) ? next.delete(modelKey) : next.add(modelKey);
+                                    return next;
+                                  })}
+                                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-left ${isDark ? 'hover:bg-slate-600/40' : 'hover:bg-slate-100'} rounded-lg`}
+                                >
+                                  {modelExpanded ? <ChevronDown size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} /> : <ChevronRight size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />}
+                                  {modelExpanded ? <FolderOpen size={16} className="text-blue-400" /> : <Folder size={16} className="text-blue-400" />}
+                                  <span className={`text-sm font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                                    {model.name} v{model.version}
+                                  </span>
+                                  <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-600 text-slate-400' : 'bg-white text-slate-600 border border-slate-200'}`}>
+                                    {modelReports.length} report{modelReports.length !== 1 ? 's' : ''}
+                                  </span>
+                                </button>
+                                {modelExpanded && (
+                                  <div className="px-4 pb-3 space-y-2">
+                                    {modelReports.map(report => (
+                                      <div key={report.id} className={`flex items-center gap-3 p-3 rounded-lg border ${isDark ? 'bg-slate-800/60 border-slate-600/50' : 'bg-white border-slate-200'}`}>
+                                        <div className={`p-1.5 rounded ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                                          {getTypeIcon(report.type)}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{report.name}</span>
+                                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs border ${getTypeColor(report.type)}`}>{report.type}</span>
+                                            <span className={`px-1.5 py-0.5 rounded text-xs ${getStatusColor(report.status)}`}>{report.status}</span>
+                                          </div>
+                                          <div className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            {new Date(report.generatedAt).toLocaleDateString()} · by {report.generatedBy}
+                                            {report.healthScore && report.healthScore > 0 && ` · Health: ${report.healthScore}`}
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-1 ml-auto">
+                                          <button onClick={() => handleView(report)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-blue-400' : 'hover:bg-slate-100 text-blue-600'}`} title="View"><Eye size={14} /></button>
+                                          <button onClick={() => handleDownload(report)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-green-400' : 'hover:bg-slate-100 text-green-600'}`} title="Download"><Download size={14} /></button>
+                                          <button onClick={() => handleShare(report)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-purple-400' : 'hover:bg-slate-100 text-purple-600'}`} title="Share"><Share2 size={14} /></button>
+                                          <button onClick={() => handleDelete(report.id, report.type)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-red-400' : 'hover:bg-slate-100 text-red-600'}`} title="Delete"><Trash2 size={14} /></button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {unlinkedReports.length > 0 && (
+                  <div className={`rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <Folder size={18} className={isDark ? 'text-slate-500' : 'text-slate-400'} />
+                      <span className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Unlinked Reports</span>
+                      <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>{unlinkedReports.length}</span>
+                    </div>
+                    <div className="px-6 pb-3 space-y-2">
+                      {unlinkedReports.map(report => (
+                        <div key={report.id} className={`flex items-center gap-3 p-3 rounded-lg border ${isDark ? 'bg-slate-700/40 border-slate-600/50' : 'bg-slate-50 border-slate-200'}`}>
+                          <span className={`font-medium text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{report.name}</span>
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs border ${getTypeColor(report.type)}`}>{report.type}</span>
+                          <div className="flex items-center gap-1 ml-auto">
+                            <button onClick={() => handleView(report)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-blue-400' : 'hover:bg-slate-100 text-blue-600'}`}><Eye size={14} /></button>
+                            <button onClick={() => handleDownload(report)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-green-400' : 'hover:bg-slate-100 text-green-600'}`}><Download size={14} /></button>
+                            <button onClick={() => handleDelete(report.id, report.type)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-red-400' : 'hover:bg-slate-100 text-red-600'}`}><Trash2 size={14} /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {projectsWithReports.length === 0 && unlinkedReports.length === 0 && (
+                  <div className="py-12 text-center">
+                    <Filter className={`mx-auto mb-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} size={48} />
+                    <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>No reports match your filters</p>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
       ) : (
+        /* ── List View (cards) ── */
         <div className="grid grid-cols-1 gap-4">
           {filteredReports.map((report) => (
             <div

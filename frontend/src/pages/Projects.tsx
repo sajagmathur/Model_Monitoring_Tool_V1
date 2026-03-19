@@ -428,7 +428,8 @@ const BulkModelUploadStep: React.FC<{
       return;
     }
     onModelSelect(selected);
-    onComplete();
+    // Note: onModelSelect already sets currentStep:1 — do NOT also call onComplete()
+    // as that would overwrite selectedModel with stale workflow state.
   };
 
   const inputClass = `w-full px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`;
@@ -748,7 +749,7 @@ const BulkModelUploadStep: React.FC<{
             >
               <option value="">-- Select a model --</option>
               {uploadedModels.map(m => (
-                <option key={m.id} value={m.id}>{m.name} (v{m.version})</option>
+                <option key={m.id} value={m.id}>{m.name} ({m.version})</option>
               ))}
             </select>
             <p className={`text-xs mt-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -1025,15 +1026,27 @@ const ModelMetricsStep: React.FC<{
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  const [metrics, setMetrics] = useState<Array<{ id: string; enabled: boolean; innerThreshold: string; outerThreshold: string }>>(
+  // Determine dataset type from the data ingestion step
+  const hasScoreDataset = !!(workflow as any).dataIngestionConfig?.scoreLevelDataset;
+  const hasAccountDataset = !!(workflow as any).dataIngestionConfig?.accountLevelDataset;
+  // If only score → show standard; if only account → show feature; if both or neither → show all
+  const showStandard = hasScoreDataset || (!hasScoreDataset && !hasAccountDataset);
+  const showFeature = hasAccountDataset || (!hasScoreDataset && !hasAccountDataset);
+
+  const [metrics, setMetrics] = useState<Array<{ id: string; enabled: boolean; isPrimary: boolean; innerThreshold: string; outerThreshold: string }>>(
     KPI_METRICS.map(kpi => {
-      const existing = workflow.modelMetricsConfig?.selectedMetrics?.find(m => m.id === kpi.id);
-      return existing ?? { id: kpi.id, enabled: kpi.defaultEnabled, innerThreshold: kpi.defaultInner, outerThreshold: kpi.defaultOuter };
+      const existing = (workflow.modelMetricsConfig?.selectedMetrics as any)?.find((m: any) => m.id === kpi.id);
+      return existing
+        ? { ...existing, isPrimary: existing.isPrimary ?? false }
+        : { id: kpi.id, enabled: kpi.defaultEnabled, isPrimary: false, innerThreshold: kpi.defaultInner, outerThreshold: kpi.defaultOuter };
     })
   );
 
   const toggleMetric = (id: string) =>
-    setMetrics(prev => prev.map(m => m.id === id ? { ...m, enabled: !m.enabled } : m));
+    setMetrics(prev => prev.map(m => m.id === id ? { ...m, enabled: !m.enabled, isPrimary: !m.enabled ? m.isPrimary : false } : m));
+
+  const togglePrimary = (id: string) =>
+    setMetrics(prev => prev.map(m => m.id === id ? { ...m, isPrimary: !m.isPrimary } : m));
 
   const updateThreshold = (id: string, field: 'innerThreshold' | 'outerThreshold', value: string) =>
     setMetrics(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
@@ -1041,10 +1054,11 @@ const ModelMetricsStep: React.FC<{
   const toggleSection = (section: 'standard' | 'feature', enabled: boolean) =>
     setMetrics(prev => prev.map(m => {
       const kpi = KPI_METRICS.find(k => k.id === m.id);
-      return kpi?.section === section ? { ...m, enabled } : m;
+      return kpi?.section === section ? { ...m, enabled, isPrimary: enabled ? m.isPrimary : false } : m;
     }));
 
   const selectedCount = metrics.filter(m => m.enabled).length;
+  const primaryCount = metrics.filter(m => m.isPrimary).length;
   const standardMetrics = KPI_METRICS.filter(k => k.section === 'standard');
   const featureMetrics = KPI_METRICS.filter(k => k.section === 'feature');
 
@@ -1054,44 +1068,64 @@ const ModelMetricsStep: React.FC<{
       <div
         key={kpi.id}
         className={`rounded-lg border transition-all ${
-          m.enabled
+          m.isPrimary
+            ? isDark ? 'border-amber-500/60 bg-amber-900/10' : 'border-amber-300 bg-amber-50'
+            : m.enabled
             ? isDark ? 'border-blue-600/60 bg-blue-900/20' : 'border-blue-200 bg-blue-50'
             : isDark ? 'border-gray-700 bg-gray-900/30' : 'border-gray-200 bg-gray-50'
         }`}
       >
         <div className="flex items-start gap-3 p-3">
+          {/* Enable checkbox */}
           <input
             type="checkbox"
             checked={m.enabled}
             onChange={() => toggleMetric(kpi.id)}
             className="mt-0.5 rounded accent-blue-600"
+            title="Enable this metric"
           />
           <div className="flex-1 min-w-0">
             <p className={`text-sm font-semibold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>{kpi.label}</p>
             <p className={`text-xs mt-0.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{kpi.description}</p>
           </div>
+          {/* Primary KPI toggle + thresholds — only shown when enabled */}
           {m.enabled && (
-            <div className="flex gap-2 shrink-0">
-              <div>
-                <p className={`text-xs mb-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Inner</p>
+            <div className="flex items-start gap-3 shrink-0">
+              {/* Primary checkbox */}
+              <label className={`flex items-center gap-1.5 cursor-pointer select-none ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
                 <input
-                  type="text"
-                  value={m.innerThreshold}
-                  onChange={e => updateThreshold(kpi.id, 'innerThreshold', e.target.value)}
-                  placeholder={kpi.defaultInner || '—'}
-                  className={`w-20 px-2 py-1 rounded border text-xs text-center ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300'}`}
+                  type="checkbox"
+                  checked={m.isPrimary}
+                  onChange={() => togglePrimary(kpi.id)}
+                  className="rounded accent-amber-500"
                 />
-              </div>
-              <div>
-                <p className={`text-xs mb-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Outer</p>
-                <input
-                  type="text"
-                  value={m.outerThreshold}
-                  onChange={e => updateThreshold(kpi.id, 'outerThreshold', e.target.value)}
-                  placeholder={kpi.defaultOuter || '—'}
-                  className={`w-20 px-2 py-1 rounded border text-xs text-center ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300'}`}
-                />
-              </div>
+                <span className="text-xs font-semibold whitespace-nowrap">Primary KPI</span>
+              </label>
+              {/* Thresholds — only visible when isPrimary */}
+              {m.isPrimary && (
+                <div className="flex gap-2">
+                  <div>
+                    <p className={`text-xs mb-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Inner</p>
+                    <input
+                      type="text"
+                      value={m.innerThreshold}
+                      onChange={e => updateThreshold(kpi.id, 'innerThreshold', e.target.value)}
+                      placeholder={kpi.defaultInner || '—'}
+                      className={`w-20 px-2 py-1 rounded border text-xs text-center ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300'}`}
+                    />
+                  </div>
+                  <div>
+                    <p className={`text-xs mb-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Outer</p>
+                    <input
+                      type="text"
+                      value={m.outerThreshold}
+                      onChange={e => updateThreshold(kpi.id, 'outerThreshold', e.target.value)}
+                      placeholder={kpi.defaultOuter || '—'}
+                      className={`w-20 px-2 py-1 rounded border text-xs text-center ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300'}`}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1136,47 +1170,73 @@ const ModelMetricsStep: React.FC<{
           KPI & Metrics Configuration
         </p>
         <p className={`text-xs mt-1 ${isDark ? 'text-blue-400/70' : 'text-blue-600'}`}>
-          All classification and stability metrics are selected by default. Inner and outer breach thresholds are pre-filled per monitoring standards — you can override them.
+          Enable the metrics you need. Mark a metric as <strong>Primary KPI</strong> to unlock inner and outer breach threshold configuration. Metrics shown are based on the dataset type uploaded in the previous step.
         </p>
+        {(hasScoreDataset || hasAccountDataset) && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {hasScoreDataset && (
+              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-100 text-blue-700'}`}>
+                Score Level — Standard Metrics
+              </span>
+            )}
+            {hasAccountDataset && (
+              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${isDark ? 'bg-purple-900/40 text-purple-300' : 'bg-purple-100 text-purple-700'}`}>
+                Account Level — Feature Metrics
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Legend */}
+      <div className={`flex gap-6 text-xs px-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded border-2 border-blue-400 inline-block" /> Enabled</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded border-2 border-amber-400 inline-block bg-amber-100 dark:bg-amber-900/30" /> Primary KPI (thresholds visible)</span>
       </div>
 
       {/* Section 1: Standard Metrics (Score Level) */}
-      <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
-        <SectionHeader
-          title="Standard Metrics — Score Level"
-          subtitle={`${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'standard' && m.enabled).length} of ${standardMetrics.length} selected`}
-          section="standard"
-          color={isDark ? 'text-blue-300' : 'text-blue-700'}
-        />
-        <div className="text-xs mb-3 flex items-center gap-6">
-          <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>
-            Threshold columns appear when a metric is enabled. Leave blank to use default.
-          </span>
-          <span className={`ml-auto font-medium ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Inner | Outer</span>
+      {showStandard && (
+        <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+          <SectionHeader
+            title="Standard Metrics — Score Level"
+            subtitle={`${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'standard' && m.enabled).length} of ${standardMetrics.length} selected · ${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'standard' && m.isPrimary).length} primary`}
+            section="standard"
+            color={isDark ? 'text-blue-300' : 'text-blue-700'}
+          />
+          <div className="text-xs mb-3 flex items-center gap-6">
+            <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>
+              Check "Primary KPI" on an enabled metric to set inner/outer thresholds.
+            </span>
+          </div>
+          <div className="space-y-2">
+            {standardMetrics.map(renderMetricRow)}
+          </div>
         </div>
-        <div className="space-y-2">
-          {standardMetrics.map(renderMetricRow)}
-        </div>
-      </div>
+      )}
 
       {/* Section 2: Feature Based Metrics (Account Level) */}
-      <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
-        <SectionHeader
-          title="Feature Based Metrics — Account Level"
-          subtitle={`${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'feature' && m.enabled).length} of ${featureMetrics.length} selected`}
-          section="feature"
-          color={isDark ? 'text-purple-300' : 'text-purple-700'}
-        />
-        <div className="space-y-2">
-          {featureMetrics.map(renderMetricRow)}
+      {showFeature && (
+        <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+          <SectionHeader
+            title="Feature Based Metrics — Account Level"
+            subtitle={`${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'feature' && m.enabled).length} of ${featureMetrics.length} selected · ${metrics.filter(m => KPI_METRICS.find(k => k.id === m.id)?.section === 'feature' && m.isPrimary).length} primary`}
+            section="feature"
+            color={isDark ? 'text-purple-300' : 'text-purple-700'}
+          />
+          <div className="space-y-2">
+            {featureMetrics.map(renderMetricRow)}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Continue */}
       <div className="flex items-center justify-between">
-        <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-          {selectedCount} metric{selectedCount !== 1 ? 's' : ''} selected
-        </span>
+        <div className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+          <span>{selectedCount} metric{selectedCount !== 1 ? 's' : ''} enabled</span>
+          {primaryCount > 0 && (
+            <span className={`ml-3 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>· {primaryCount} primary (with thresholds)</span>
+          )}
+        </div>
         <button
           onClick={() => onComplete({ granularity: 'score', selectedMetrics: metrics })}
           disabled={selectedCount === 0}
@@ -1456,8 +1516,7 @@ const ModelRepositoryStep: React.FC<{
     setModelFileFormat('PMML');
     setAppendToExisting(false);
     setAppendToModelId('');
-    // Move to next step (Data Ingestion)
-    onComplete();
+    // Step advancement is handled inside onAddModel callback to avoid stale-closure issues
   };
 
   return (
@@ -1568,7 +1627,6 @@ const ModelRepositoryStep: React.FC<{
             metrics: chosen.metrics ?? {},
           };
           onModelSelect(mv);
-          onComplete();
         };
 
         return (
@@ -2480,6 +2538,23 @@ const StepIndicator: React.FC<{ steps: WorkflowStep[]; currentStep: number }> = 
 };
 
 // Data Quality Metrics Interface
+interface DQCheck {
+  id: string;
+  group: string;
+  name: string;
+  value: string;
+  threshold: string;
+  status: 'pass' | 'warn' | 'fail';
+  detail?: string;
+}
+
+interface DQCheckResult {
+  level: 'score' | 'account';
+  datasetName: string;
+  checks: DQCheck[];
+  overallScore: number;
+}
+
 interface DataQualityMetrics {
   statisticalSummary: Array<{
     variable: string;
@@ -2518,6 +2593,8 @@ const DataQualityStep: React.FC<{
   
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'distributions' | 'volume'>('overview');
+  const [dqLevelTab, setDqLevelTab] = useState<'score' | 'account'>('score');
+  const [dqCheckResults, setDqCheckResults] = useState<Record<string, DQCheckResult>>({});
   
   // Initialize state from persisted workflow data or use defaults
   const [metricsMap, setMetricsMap] = useState<Record<string, any>>(
@@ -2543,6 +2620,20 @@ const DataQualityStep: React.FC<{
   
   // Combine workflow datasets WITH resolved clones from local state
   const allDatasets = [...workflowDatasets, ...resolvedDatasetClones];
+
+  // Map dataset id → level ('score' | 'account')
+  const datasetLevelMap: Record<string, 'score' | 'account'> = {};
+  if (workflow.dataIngestionConfig?.trackDatasets) {
+    const td = workflow.dataIngestionConfig.trackDatasets;
+    (td['score'] || []).forEach((ds: any) => { datasetLevelMap[ds.id] = 'score'; });
+    (td['account'] || []).forEach((ds: any) => { datasetLevelMap[ds.id] = 'account'; });
+  }
+  // Resolved clones inherit parent's level
+  resolvedDatasetClones.forEach((clone: any) => {
+    if (!datasetLevelMap[clone.id] && clone.parentDatasetId) {
+      datasetLevelMap[clone.id] = datasetLevelMap[clone.parentDatasetId] || 'score';
+    }
+  });
 
   // Persist analysis data to workflow whenever it changes (but avoid infinite loops)
   useEffect(() => {
@@ -2576,18 +2667,95 @@ const DataQualityStep: React.FC<{
     ? allDatasets.find(d => d.id === selectedDatasetId)
     : allDatasets[0];
 
-  // Update comprehensive metrics when a dataset is resolved
-  useEffect(() => {
-    if (resolvedDatasets.length > 0 && selectedDataset) {
-      // Check if the selected dataset was just resolved
-      const wasResolved = resolvedDatasets.find(rd => rd.id === selectedDataset.id);
-      if (wasResolved && !metrics) {
-        // Force generation of comprehensive metrics for resolved dataset
-        const newMetrics = getComprehensiveMetrics(selectedDataset);
-        // Metrics will be generated via the function call below
-      }
-    }
-  }, [resolvedDatasets, selectedDataset]);
+  // 18-check DQ analysis
+  const runDataChecks = (dataset: any, level: 'score' | 'account'): DQCheck[] => {
+    const rows = dataset.rows || 1000;
+    const cols = (dataset.columnsList?.length || dataset.columns || 10);
+    const seed = rows % 97; // deterministic variation per dataset
+    const missingRate = parseFloat((1.5 + (seed % 30) / 10).toFixed(1));
+    const dupRate = parseFloat((0.2 + (seed % 8) / 10).toFixed(1));
+    const meanShift = parseFloat((0.5 + (seed % 28) / 10).toFixed(1));
+    const stdShift = parseFloat((0.3 + (seed % 14) / 10).toFixed(1));
+    const outlierRate = parseFloat((0.8 + (seed % 14) / 10).toFixed(1));
+    const zeroRate = parseFloat((3.1 + (seed % 18) / 10).toFixed(1));
+    const newCatRate = parseFloat((1.2 + (seed % 24) / 10).toFixed(1));
+    const domCat = 35 + (seed % 38);
+    const rareCat = parseFloat((0.8 + (seed % 18) / 10).toFixed(1));
+    const missingDate = parseFloat(((seed % 8 === 0 ? 0.0 : (seed % 3) / 10)).toFixed(1));
+    const acctOverlap = parseFloat((8 + seed % 14).toFixed(1));
+    const acctRatio = parseFloat((1.1 + (seed % 9) / 10).toFixed(1));
+    return [
+      // Group 1: Dataset Basics
+      { id: 'missing_rate', group: 'Dataset Basics', name: 'Missing Value Rate', value: `${missingRate}%`, threshold: '< 5%', status: missingRate < 5 ? 'pass' : missingRate < 10 ? 'warn' : 'fail', detail: `Missing values across ~${Math.floor(cols * 0.3)} columns` },
+      { id: 'duplicate_rate', group: 'Dataset Basics', name: 'Duplicate Records', value: `${dupRate}%`, threshold: '< 1%', status: dupRate < 1 ? 'pass' : dupRate < 2 ? 'warn' : 'fail', detail: `${Math.floor(rows * dupRate / 100)} duplicate rows` },
+      { id: 'row_count', group: 'Dataset Basics', name: 'Row Count Validation', value: rows.toLocaleString(), threshold: '≥ 1,000', status: rows >= 1000 ? 'pass' : rows >= 500 ? 'warn' : 'fail', detail: 'Minimum rows for reliable analysis' },
+      { id: 'col_count', group: 'Dataset Basics', name: 'Column Count Validation', value: `${cols} cols`, threshold: '≥ 5', status: cols >= 5 ? 'pass' : 'fail', detail: 'Expected feature columns present' },
+      { id: 'target_dist', group: 'Dataset Basics', name: level === 'score' ? 'Event Rate / Class Balance' : 'Target Distribution', value: `${(2.8 + (seed % 18) / 10).toFixed(1)}% event rate`, threshold: '1% – 20%', status: 'pass', detail: 'Event rate within expected bounds' },
+      // Group 2: Numerical Variables
+      { id: 'mean_shift', group: 'Numerical Variables', name: 'Mean Shift', value: `+${meanShift}%`, threshold: '< 10%', status: meanShift < 10 ? 'pass' : meanShift < 20 ? 'warn' : 'fail', detail: 'Avg shift in numerical feature means vs baseline' },
+      { id: 'std_shift', group: 'Numerical Variables', name: 'Std Dev Shift', value: `+${stdShift}%`, threshold: '< 15%', status: stdShift < 15 ? 'pass' : stdShift < 25 ? 'warn' : 'fail', detail: 'Avg shift in numerical feature std deviations' },
+      { id: 'outlier_rate', group: 'Numerical Variables', name: 'Outlier Rate', value: `${outlierRate}%`, threshold: '< 3%', status: outlierRate < 3 ? 'pass' : outlierRate < 6 ? 'warn' : 'fail', detail: 'Records > 3σ from mean' },
+      { id: 'zero_rate', group: 'Numerical Variables', name: 'Zero Value Rate', value: `${zeroRate}%`, threshold: '< 15%', status: zeroRate < 15 ? 'pass' : zeroRate < 25 ? 'warn' : 'fail', detail: '% zeros in numerical columns' },
+      { id: 'negative_rate', group: 'Numerical Variables', name: 'Negative Value Rate', value: '0.0%', threshold: '= 0%', status: 'pass', detail: 'No unexpected negative values' },
+      // Group 3: Categorical Variables
+      { id: 'new_category', group: 'Categorical Variables', name: 'New Category Rate', value: `${newCatRate}%`, threshold: '< 5%', status: newCatRate < 5 ? 'pass' : newCatRate < 10 ? 'warn' : 'fail', detail: 'Categories not seen during model training' },
+      { id: 'dominant_cat', group: 'Categorical Variables', name: 'Dominant Category Concentration', value: `${domCat}%`, threshold: '< 80%', status: domCat < 80 ? 'pass' : 'fail', detail: 'Highest-frequency category share' },
+      { id: 'rare_cat', group: 'Categorical Variables', name: 'Rare Category Rate', value: `${rareCat}%`, threshold: '< 5%', status: rareCat < 5 ? 'pass' : 'warn', detail: 'Categories appearing in < 1% of records' },
+      // Group 4: Date/Time Variables
+      { id: 'date_range', group: 'Date / Time Variables', name: 'Date Range Validity', value: 'Within window', threshold: 'Within model window', status: 'pass', detail: 'All dates within expected observation window' },
+      { id: 'future_date', group: 'Date / Time Variables', name: 'Future Date Rate', value: '0.0%', threshold: '= 0%', status: 'pass', detail: 'No observation dates beyond today' },
+      { id: 'missing_date', group: 'Date / Time Variables', name: 'Missing Date Rate', value: `${missingDate}%`, threshold: '< 1%', status: missingDate < 1 ? 'pass' : 'warn', detail: '% records with null date columns' },
+      // Group 5: Account-Level Checks
+      { id: 'acct_overlap', group: 'Account-Level Checks', name: 'Account Overlap Rate', value: level === 'account' ? `${acctOverlap}%` : 'N/A', threshold: '< 20%', status: level === 'account' ? (acctOverlap < 20 ? 'pass' : 'warn') : 'pass', detail: 'Accounts in both score & account datasets' },
+      { id: 'acct_ratio', group: 'Account-Level Checks', name: 'Account-to-Score Ratio', value: level === 'account' ? `1 : ${acctRatio}` : 'N/A', threshold: '≥ 1:1, ≤ 1:5', status: level === 'account' ? (acctRatio >= 1 && acctRatio <= 5 ? 'pass' : 'warn') : 'pass', detail: 'Ratio of account records to score records' },
+    ];
+  };
+
+  const calcDQScore = (checks: DQCheck[]): number => {
+    const scored = checks.filter(c => c.value !== 'N/A');
+    const passes = scored.filter(c => c.status === 'pass').length;
+    const warns = scored.filter(c => c.status === 'warn').length;
+    return Math.round((passes + warns * 0.5) / scored.length * 100);
+  };
+
+  const handleExportExcel = () => {
+    if (Object.keys(dqCheckResults).length === 0) return;
+    const rows = ['Dataset,Level,Check Group,Check Name,Value,Threshold,Status'];
+    Object.values(dqCheckResults).forEach(result => {
+      result.checks.forEach(check => {
+        rows.push(`"${result.datasetName}","${result.level}","${check.group}","${check.name}","${check.value}","${check.threshold}","${check.status}"`);
+      });
+    });
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `DQ_Report_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
+  const handleExportPPT = () => {
+    if (Object.keys(dqCheckResults).length === 0) return;
+    let html = `<!DOCTYPE html><html><head><title>DQ Report</title><style>body{font-family:Arial,sans-serif;background:#1e293b;color:#e2e8f0;margin:0}.slide{width:900px;min-height:500px;margin:24px auto;padding:40px;background:#0f172a;border-radius:12px;page-break-after:always}h1{color:#60a5fa;font-size:2rem}h2{color:#34d399;font-size:1.4rem;margin-bottom:1rem}table{width:100%;border-collapse:collapse}th{background:#1e40af;padding:8px 14px;text-align:left;font-size:.85rem}td{padding:6px 14px;border-bottom:1px solid #334155;font-size:.85rem}.pass{color:#34d399}.warn{color:#fbbf24}.fail{color:#f87171}</style></head><body>`;
+    html += `<div class="slide"><h1>Data Quality Check Report</h1><p style="color:#94a3b8">Generated: ${new Date().toLocaleString()}</p><p style="color:#94a3b8">Datasets analysed: ${Object.keys(dqCheckResults).length}</p><ul>`;
+    Object.values(dqCheckResults).forEach(r => { html += `<li style="margin:.4rem 0">${r.datasetName} (${r.level}) — Overall Score: <strong style="color:#34d399">${r.overallScore}%</strong></li>`; });
+    html += `</ul></div>`;
+    Object.values(dqCheckResults).forEach(result => {
+      const groups = [...new Set(result.checks.map(c => c.group))];
+      groups.forEach(group => {
+        html += `<div class="slide"><h2>${result.datasetName} — ${group}</h2><table><tr><th>Check</th><th>Value</th><th>Threshold</th><th>Status</th></tr>`;
+        result.checks.filter(c => c.group === group).forEach(c => {
+          html += `<tr><td>${c.name}</td><td>${c.value}</td><td>${c.threshold}</td><td class="${c.status}">${c.status.toUpperCase()}</td></tr>`;
+        });
+        html += `</table></div>`;
+      });
+    });
+    html += `</body></html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `DQ_Report_${new Date().toISOString().split('T')[0]}.html`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
 
   // Generate comprehensive metrics using REAL dataset columns
   const getComprehensiveMetrics = (dataset: any): DataQualityMetrics => {
@@ -2665,14 +2833,14 @@ const DataQualityStep: React.FC<{
 
     setLoading(true);
     setMetricsMap({});
+    setDqCheckResults({});
 
     for (const dataset of allDatasets) {
       setCurrentAnalyzingDataset(dataset.id);
 
-      // Get REAL columns from uploaded dataset (UploadedDataset.columnsList)
       const columns = (dataset as any).columnsList && Array.isArray((dataset as any).columnsList) && (dataset as any).columnsList.length > 0
         ? (dataset as any).columnsList
-        : ['Variable_1', 'Variable_2', 'Variable_3', 'Variable_4']; // Fallback only if no columns
+        : ['Variable_1', 'Variable_2', 'Variable_3', 'Variable_4'];
       
       const mockIssues = columns.slice(0, Math.min(4, columns.length)).map((col: string, idx: number) => {
         const issueTypes = ['inconsistency', 'duplication', 'format_error'];
@@ -2681,16 +2849,22 @@ const DataQualityStep: React.FC<{
         const severity = severities[idx % 3];
         const percent = 2 + (idx * 1.5);
         const count = Math.floor((dataset.rows || 1000) * (percent / 100));
-
         return {
           variable: col,
           type: issueType as 'inconsistency' | 'duplication' | 'format_error',
           severity: severity as 'high' | 'medium' | 'low',
-          count,
-          percent,
-          resolved: false,
+          count, percent, resolved: false,
         };
       });
+
+      // Run 18-check DQ analysis
+      const level = datasetLevelMap[dataset.id] || 'score';
+      const checks = runDataChecks(dataset, level);
+      const overallScore = calcDQScore(checks);
+      setDqCheckResults(prev => ({
+        ...prev,
+        [dataset.id]: { level, datasetName: dataset.name, checks, overallScore },
+      }));
 
       setMetricsMap(prev => ({
         ...prev,
@@ -2698,7 +2872,7 @@ const DataQualityStep: React.FC<{
           totalRecords: dataset.rows || 1000,
           recordsAfterExclusion: Math.floor((dataset.rows || 1000) * 0.98),
           exclusionRate: 2.0,
-          qualityScore: 85 - (mockIssues.length * 5),
+          qualityScore: overallScore,
           issues: mockIssues,
         },
       }));
@@ -2787,7 +2961,7 @@ const DataQualityStep: React.FC<{
       name: reportName,
       type: 'data_quality',
       modelId: selectedModel.id,
-      modelName: `${selectedModel.name} v${selectedModel.version}`,
+      modelName: `${selectedModel.name} ${selectedModel.version}`,
       status: 'final',
       healthScore: avgQualityScore,
       fileSize: '2.1 MB',
@@ -2992,30 +3166,46 @@ const DataQualityStep: React.FC<{
               </button>
             )}
             
-            {/* Show download button only if all issues are resolved */}
-            {allDatasets.every(dataset => {
-              const metrics = metricsMap[dataset.id];
-              return metrics && metrics.issues.every((issue: any) => !issue.selectedMethod || issue.resolved);
-            }) && (
-              <button
-                onClick={handleDownloadReport}
-                disabled={generatingPDF}
-                className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
-                  isDark ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'
-                } ${generatingPDF ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                {generatingPDF ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Download size={16} />
-                    Download Report (PDF)
-                  </>
+            {/* Export buttons — shown once analysis is run */}
+            {Object.keys(dqCheckResults).length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleExportExcel}
+                  className={`px-3 py-2 rounded-lg flex items-center gap-2 text-sm ${
+                    isDark ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                  }`}
+                >
+                  <Download size={14} />
+                  Excel
+                </button>
+                <button
+                  onClick={handleExportPPT}
+                  className={`px-3 py-2 rounded-lg flex items-center gap-2 text-sm ${
+                    isDark ? 'bg-orange-600 hover:bg-orange-500 text-white' : 'bg-orange-500 hover:bg-orange-600 text-white'
+                  }`}
+                >
+                  <Download size={14} />
+                  PPT (HTML)
+                </button>
+                {allDatasets.every(dataset => {
+                  const m = metricsMap[dataset.id];
+                  return m && m.issues.every((issue: any) => !issue.selectedMethod || issue.resolved);
+                }) && (
+                  <button
+                    onClick={handleDownloadReport}
+                    disabled={generatingPDF}
+                    className={`px-3 py-2 rounded-lg flex items-center gap-2 text-sm ${
+                      isDark ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-purple-500 hover:bg-purple-600 text-white'
+                    } ${generatingPDF ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    {generatingPDF ? (
+                      <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />Generating...</>
+                    ) : (
+                      <><Download size={14} />PDF</>
+                    )}
+                  </button>
                 )}
-              </button>
+              </div>
             )}
           </div>
         )}
@@ -3393,6 +3583,94 @@ const DataQualityStep: React.FC<{
             </div>
           </div>
 
+          {/* Comprehensive 18-Check DQ Results */}
+          {Object.keys(dqCheckResults).length > 0 && (
+            <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  Comprehensive Data Quality Checks (18 Checks)
+                </h3>
+                <div className={`flex border rounded-lg overflow-hidden ${ isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                  {(['score', 'account'] as const).map(lvl => (
+                    <button
+                      key={lvl}
+                      onClick={() => setDqLevelTab(lvl)}
+                      className={`px-4 py-1.5 text-sm font-medium capitalize transition ${
+                        dqLevelTab === lvl
+                          ? isDark ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'
+                          : isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {lvl === 'score' ? 'Score Level' : 'Account Level'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {Object.entries(dqCheckResults)
+                .filter(([, result]) => result.level === dqLevelTab)
+                .map(([datasetId, result]) => {
+                  const groups = [...new Set(result.checks.map(c => c.group))];
+                  const passCount = result.checks.filter(c => c.status === 'pass' && c.value !== 'N/A').length;
+                  const warnCount = result.checks.filter(c => c.status === 'warn').length;
+                  const failCount = result.checks.filter(c => c.status === 'fail').length;
+                  return (
+                    <div key={datasetId} className="mb-6">
+                      <div className="flex items-center gap-3 mb-3">
+                        <h4 className={`font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>{result.datasetName}</h4>
+                        <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${ isDark ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700'}`}>{result.level}</span>
+                        <span className="text-xs text-green-500 font-semibold">✓ {passCount} pass</span>
+                        {warnCount > 0 && <span className="text-xs text-yellow-500 font-semibold">⚠ {warnCount} warn</span>}
+                        {failCount > 0 && <span className="text-xs text-red-500 font-semibold">✗ {failCount} fail</span>}
+                        <span className={`ml-auto text-sm font-semibold ${ result.overallScore >= 80 ? 'text-green-500' : result.overallScore >= 60 ? 'text-yellow-500' : 'text-red-500'}`}>
+                          DQ Score: {result.overallScore}%
+                        </span>
+                      </div>
+                      {groups.map(group => (
+                        <div key={group} className={`mb-3 rounded-lg border overflow-hidden ${ isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                          <div className={`px-4 py-2 text-xs font-semibold uppercase tracking-wide ${ isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                            {group}
+                          </div>
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className={`border-b ${ isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                                {['Check', 'Value', 'Threshold', 'Status', 'Detail'].map(h => (
+                                  <th key={h} className={`text-left py-2 px-3 text-xs font-medium ${ isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {result.checks.filter(c => c.group === group).map(check => (
+                                <tr key={check.id} className={`border-b last:border-0 ${ isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+                                  <td className={`py-2 px-3 font-medium ${ isDark ? 'text-white' : 'text-slate-800'}`}>{check.name}</td>
+                                  <td className={`py-2 px-3 ${ isDark ? 'text-slate-300' : 'text-slate-700'}`}>{check.value}</td>
+                                  <td className={`py-2 px-3 ${ isDark ? 'text-slate-400' : 'text-slate-500'}`}>{check.threshold}</td>
+                                  <td className="py-2 px-3">
+                                    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${
+                                      check.status === 'pass' ? isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
+                                      : check.status === 'warn' ? isDark ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
+                                      : isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
+                                    }`}>
+                                      {check.status === 'pass' ? '✓' : check.status === 'warn' ? '⚠' : '✗'} {check.status}
+                                    </span>
+                                  </td>
+                                  <td className={`py-2 px-3 text-xs ${ isDark ? 'text-slate-400' : 'text-slate-500'}`}>{check.detail || '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              {Object.values(dqCheckResults).filter(r => r.level === dqLevelTab).length === 0 && (
+                <p className={`text-sm text-center py-6 ${ isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  No {dqLevelTab}-level datasets found. Upload a {dqLevelTab}-level dataset in the Data Ingestion step.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Analysis Results */}
           {Object.keys(metricsMap).length > 0 && (
             <>
@@ -3657,7 +3935,7 @@ const ReportConfigurationStep: React.FC<{ onComplete: () => void; workflow: Work
       return;
     }
 
-    const modelName = workflowModel ? `${workflowModel.name} v${workflowModel.version}` : '';
+    const modelName = workflowModel ? `${workflowModel.name} ${workflowModel.version}` : '';
     const baselineDataset = modelDatasets.find(d => d.id === formData.baselineDatasetId);
     const referenceDataset = modelDatasets.find(d => d.id === formData.referenceDatasetId);
 
@@ -4727,6 +5005,359 @@ const ScheduleReportsStep: React.FC<{ onComplete: () => void; workflow: Workflow
   );
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// KpiGenerationStep — Step 4: Calculate KPIs + Download Report
+// ─────────────────────────────────────────────────────────────────────────────
+interface KpiResult {
+  id: string;
+  label: string;
+  section: 'standard' | 'feature';
+  value: number;
+  innerThreshold: string;
+  outerThreshold: string;
+  isPrimary: boolean;
+  status: 'pass' | 'warn' | 'fail';
+  unit: string;
+}
+
+const KpiGenerationStep: React.FC<{
+  workflow: Workflow;
+  project: Project;
+  onComplete: (results: KpiResult[]) => void;
+}> = ({ workflow, project, onComplete }) => {
+  const { theme } = useTheme();
+  const { createIngestionJob } = useGlobal();
+  const isDark = theme === 'dark';
+
+  const [results, setResults] = useState<KpiResult[] | null>(null);
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [calcProgress, setCalcProgress] = useState(0);
+  const [reportSaved, setReportSaved] = useState(false);
+
+  const enabledMetrics = (workflow.modelMetricsConfig?.selectedMetrics ?? []).filter(m => m.enabled);
+
+  // Dummy value generators per metric type
+  const generateDummyValue = (id: string): { value: number; unit: string } => {
+    const RANGES: Record<string, { min: number; max: number; unit: string }> = {
+      ks:         { min: 0.28, max: 0.62, unit: '' },
+      auc:        { min: 0.70, max: 0.88, unit: '' },
+      gini:       { min: 0.40, max: 0.76, unit: '' },
+      psi:        { min: 2.1, max: 18.5, unit: '' },
+      jsd:        { min: 0.02, max: 0.18, unit: '' },
+      rob:        { min: 0.04, max: 0.22, unit: '%' },
+      mape:       { min: 4.2, max: 21.5, unit: '%' },
+      type1_error:{ min: 0.08, max: 0.24, unit: '%' },
+      type2_error:{ min: 0.05, max: 0.19, unit: '%' },
+      csi:        { min: 0.01, max: 0.14, unit: '' },
+      iv:         { min: 0.25, max: 1.20, unit: '' },
+      woe_shift:  { min: 0.01, max: 0.08, unit: '' },
+      missing_rate:{ min: 0.001, max: 0.045, unit: '%' },
+      rank_order: { min: 0.78, max: 0.95, unit: '' },
+      override_rate:{ min: 0.01, max: 0.12, unit: '%' },
+    };
+    const range = RANGES[id] ?? { min: 0, max: 1, unit: '' };
+    const value = parseFloat((range.min + Math.random() * (range.max - range.min)).toFixed(4));
+    return { value, unit: range.unit };
+  };
+
+  const computeStatus = (m: { innerThreshold: string; outerThreshold: string; isPrimary: boolean }, value: number): 'pass' | 'warn' | 'fail' => {
+    if (!m.isPrimary) return 'pass'; // non-primary always pass (no thresholds)
+    const outer = m.outerThreshold ? parseFloat(m.outerThreshold.replace('%', '')) : null;
+    const inner = m.innerThreshold ? parseFloat(m.innerThreshold.replace('%', '')) : null;
+    // PSI-style: higher = worse
+    if (outer !== null && value > outer) return 'fail';
+    if (inner !== null && value > inner) return 'warn';
+    return 'pass';
+  };
+
+  const runCalculation = () => {
+    setIsCalculating(true);
+    setCalcProgress(0);
+    setReportSaved(false);
+    const total = enabledMetrics.length;
+    let done = 0;
+    const computed: KpiResult[] = [];
+
+    const processNext = () => {
+      if (done >= total) {
+        setResults(computed);
+        setIsCalculating(false);
+        setCalcProgress(100);
+        // Auto-save report
+        createIngestionJob({
+          name: `KPI Report — ${project.name} (${new Date().toLocaleDateString()})`,
+          projectId: project.id,
+          modelId: workflow.selectedModel,
+          dataSource: 'desktop',
+          source: 'csv',
+          datasetType: 'report' as any,
+          status: 'completed',
+          outputPath: `/reports/${project.id}/kpi-${Date.now()}`,
+          outputShape: { rows: computed.length, columns: 6 },
+          outputColumns: ['Metric', 'Value', 'Inner', 'Outer', 'Primary', 'Status'],
+          level: 'score',
+          uploadedFile: {
+            name: `kpi-report-${project.id}.json`,
+            path: `/reports/${project.id}/kpi-report.json`,
+            size: 0,
+            type: 'json',
+          },
+        });
+        setReportSaved(true);
+        return;
+      }
+      const m = enabledMetrics[done];
+      const kpiDef = KPI_METRICS.find(k => k.id === m.id);
+      const { value, unit } = generateDummyValue(m.id);
+      const mWithPrimary = m as any;
+      computed.push({
+        id: m.id,
+        label: kpiDef?.label ?? m.id,
+        section: kpiDef?.section ?? 'standard',
+        value,
+        innerThreshold: m.innerThreshold,
+        outerThreshold: m.outerThreshold,
+        isPrimary: mWithPrimary.isPrimary ?? false,
+        status: computeStatus(mWithPrimary, value),
+        unit,
+      });
+      done++;
+      setCalcProgress(Math.round((done / total) * 100));
+      setTimeout(processNext, 120 + Math.random() * 80);
+    };
+    setTimeout(processNext, 200);
+  };
+
+  // CSV download helper
+  const downloadCSV = () => {
+    if (!results) return;
+    const header = ['Metric', 'Section', 'Value', 'Unit', 'Primary KPI', 'Inner Threshold', 'Outer Threshold', 'Status'];
+    const rows = results.map(r => [
+      r.label,
+      r.section,
+      r.value.toString(),
+      r.unit,
+      r.isPrimary ? 'Yes' : 'No',
+      r.innerThreshold || '—',
+      r.outerThreshold || '—',
+      r.status,
+    ]);
+    const csv = [header, ...rows].map(row => row.map(v => `"${v}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `KPI_Report_${project.name.replace(/\s+/g, '_')}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // PDF / PPT / Excel are heavyweight; use printable HTML for PDF, CSV for Excel, placeholder for PPT
+  const downloadPDF = () => {
+    if (!results) return;
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>KPI Report — ${project.name}</title>
+<style>body{font-family:Arial,sans-serif;padding:32px;color:#111}
+h1{font-size:18px;margin-bottom:4px}p.sub{font-size:12px;color:#666;margin-bottom:20px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#3b5bfa;color:#fff;padding:8px 10px;text-align:left}
+td{padding:7px 10px;border-bottom:1px solid #e5e7eb}
+tr:nth-child(even)td{background:#f9fafb}
+.pass{color:#16a34a;font-weight:600}.warn{color:#d97706;font-weight:600}.fail{color:#dc2626;font-weight:600}
+.primary-badge{background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:999px;font-size:10px}
+</style></head><body>
+<h1>KPI Monitoring Report</h1>
+<p class="sub">Project: ${project.name} &nbsp;|&nbsp; Generated: ${new Date().toLocaleString()}</p>
+<table><thead><tr><th>Metric</th><th>Section</th><th>Value</th><th>Primary KPI</th><th>Inner</th><th>Outer</th><th>Status</th></tr></thead>
+<tbody>${results.map(r => `<tr>
+  <td>${r.label}</td>
+  <td style="text-transform:capitalize">${r.section}</td>
+  <td>${r.value}${r.unit}</td>
+  <td>${r.isPrimary ? '<span class="primary-badge">Primary</span>' : '—'}</td>
+  <td>${r.innerThreshold || '—'}</td>
+  <td>${r.outerThreshold || '—'}</td>
+  <td class="${r.status}">${r.status.toUpperCase()}</td>
+</tr>`).join('')}
+</tbody></table></body></html>`;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 500); }
+  };
+
+  const downloadExcel = () => downloadCSV(); // Excel ≈ CSV for now; xlsx library not bundled
+
+  const downloadPPT = () => alert('PPT export coming soon. Please use PDF or CSV for now.');
+
+  const statusBadge = (status: 'pass' | 'warn' | 'fail') => {
+    const cfg = {
+      pass: { bg: isDark ? 'bg-green-900/30 text-green-300' : 'bg-green-100 text-green-700', label: 'PASS' },
+      warn: { bg: isDark ? 'bg-amber-900/30 text-amber-300' : 'bg-amber-100 text-amber-700', label: 'WARN' },
+      fail: { bg: isDark ? 'bg-red-900/30 text-red-300' : 'bg-red-100 text-red-700', label: 'FAIL' },
+    }[status];
+    return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${cfg.bg}`}>{cfg.label}</span>;
+  };
+
+  const passCount = results?.filter(r => r.status === 'pass').length ?? 0;
+  const warnCount = results?.filter(r => r.status === 'warn').length ?? 0;
+  const failCount = results?.filter(r => r.status === 'fail').length ?? 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className={`p-4 rounded-xl border ${isDark ? 'bg-green-900/20 border-green-700/40' : 'bg-green-50 border-green-200'}`}>
+        <p className={`text-sm font-semibold ${isDark ? 'text-green-300' : 'text-green-700'}`}>KPI Generation</p>
+        <p className={`text-xs mt-1 ${isDark ? 'text-green-400/70' : 'text-green-600'}`}>
+          Calculate all enabled KPIs against the reference dataset. Results are automatically saved to the Reports section.
+        </p>
+      </div>
+
+      {/* Enabled metrics summary */}
+      {!results && (
+        <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+          <p className={`text-sm font-semibold mb-3 ${isDark ? 'text-gray-100' : 'text-gray-800'}`}>
+            Metrics to Calculate ({enabledMetrics.length})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {enabledMetrics.map(m => {
+              const kpiDef = KPI_METRICS.find(k => k.id === m.id);
+              const mAny = m as any;
+              return (
+                <span key={m.id} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                  mAny.isPrimary
+                    ? isDark ? 'bg-amber-900/30 border border-amber-600/40 text-amber-300' : 'bg-amber-100 border border-amber-300 text-amber-700'
+                    : isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-700'
+                }`}>
+                  {kpiDef?.label ?? m.id}
+                  {mAny.isPrimary && <span className={`text-[10px] font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>★</span>}
+                </span>
+              );
+            })}
+          </div>
+          {enabledMetrics.length === 0 && (
+            <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>No metrics enabled. Go back to KPI Configuration.</p>
+          )}
+        </div>
+      )}
+
+      {/* Calculate button */}
+      {!results && !isCalculating && (
+        <button
+          onClick={runCalculation}
+          disabled={enabledMetrics.length === 0}
+          className={`w-full py-3 rounded-xl text-sm font-bold transition-all ${
+            enabledMetrics.length > 0
+              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md'
+              : isDark ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+          }`}
+        >
+          ▶ Generate KPIs
+        </button>
+      )}
+
+      {/* Progress bar */}
+      {isCalculating && (
+        <div className={`p-5 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+          <p className={`text-sm font-semibold mb-3 ${isDark ? 'text-gray-100' : 'text-gray-800'}`}>
+            Calculating metrics… {calcProgress}%
+          </p>
+          <div className={`w-full rounded-full h-3 ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}>
+            <div
+              className="h-3 rounded-full bg-blue-600 transition-all duration-300"
+              style={{ width: `${calcProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Results table */}
+      {results && (
+        <>
+          {/* Summary tiles */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'Pass', count: passCount, color: isDark ? 'bg-green-900/30 border-green-700/40 text-green-300' : 'bg-green-50 border-green-200 text-green-700' },
+              { label: 'Warn', count: warnCount, color: isDark ? 'bg-amber-900/30 border-amber-700/40 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-700' },
+              { label: 'Fail', count: failCount, color: isDark ? 'bg-red-900/30 border-red-700/40 text-red-300' : 'bg-red-50 border-red-200 text-red-700' },
+            ].map(({ label, count, color }) => (
+              <div key={label} className={`rounded-xl border p-4 text-center ${color}`}>
+                <p className="text-2xl font-bold">{count}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Report saved badge */}
+          {reportSaved && (
+            <div className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium ${isDark ? 'bg-green-900/20 border-green-700/40 text-green-300' : 'bg-green-50 border-green-200 text-green-700'}`}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Report auto-saved to Reports section successfully.
+            </div>
+          )}
+
+          {/* Download buttons */}
+          <div className={`p-4 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+            <p className={`text-xs font-semibold mb-3 uppercase tracking-wide ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Download Report</p>
+            <div className="flex flex-wrap gap-3">
+              {[
+                { label: '📄 PDF', onClick: downloadPDF, cls: 'bg-red-600 hover:bg-red-700' },
+                { label: '📊 PPT', onClick: downloadPPT, cls: 'bg-orange-600 hover:bg-orange-700' },
+                { label: '📋 Excel / CSV', onClick: downloadExcel, cls: 'bg-green-700 hover:bg-green-800' },
+              ].map(({ label, onClick, cls }) => (
+                <button
+                  key={label}
+                  onClick={onClick}
+                  className={`px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition-colors ${cls}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Results table */}
+          <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-gray-700' : 'border-gray-200 shadow-sm'}`}>
+            <div className={`px-4 py-3 ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>
+              <p className={`text-sm font-semibold ${isDark ? 'text-gray-100' : 'text-gray-800'}`}>KPI Results ({results.length})</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className={isDark ? 'bg-gray-700/50' : 'bg-gray-100'}>
+                    {['Metric', 'Section', 'Value', 'Primary', 'Inner', 'Outer', 'Status'].map(h => (
+                      <th key={h} className={`px-4 py-2.5 text-left font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.map((r, i) => (
+                    <tr key={r.id} className={`border-t ${isDark ? 'border-gray-700/50' : 'border-gray-100'} ${i % 2 === 0 ? (isDark ? 'bg-gray-800' : 'bg-white') : (isDark ? 'bg-gray-800/50' : 'bg-gray-50/50')}`}>
+                      <td className={`px-4 py-2.5 font-medium ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>{r.label}</td>
+                      <td className={`px-4 py-2.5 capitalize ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{r.section}</td>
+                      <td className={`px-4 py-2.5 font-mono ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>{r.value}{r.unit}</td>
+                      <td className="px-4 py-2.5">
+                        {r.isPrimary ? <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isDark ? 'bg-amber-900/30 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>★ Primary</span> : <span className={isDark ? 'text-gray-600' : 'text-gray-400'}>—</span>}
+                      </td>
+                      <td className={`px-4 py-2.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{r.innerThreshold || '—'}</td>
+                      <td className={`px-4 py-2.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{r.outerThreshold || '—'}</td>
+                      <td className="px-4 py-2.5">{statusBadge(r.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Continue button */}
+          <div className="flex justify-end pt-2">
+            <button
+              onClick={() => onComplete(results)}
+              className="px-6 py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all"
+            >
+              Continue to Report Configuration →
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 // Simple wrapper for ReportsStep now uses ReportGeneration component
 const ReportsStep: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
   return (
@@ -4959,11 +5590,11 @@ export default function Projects() {
         models: [],
         steps: [
           { id: 0, name: 'Model Import', status: 'not-started' },
-          { id: 1, name: 'KPI & Metrics Configuration', status: 'not-started', locked: true },
-          { id: 2, name: 'Reference Data Ingestion', status: 'not-started', locked: true },
-          { id: 3, name: 'Data Quality Reporting', status: 'not-started', locked: true },
-          { id: 4, name: 'Report Configuration', status: 'not-started', locked: true },
-          { id: 5, name: 'Report Generation', status: 'not-started', locked: true },
+          { id: 1, name: 'Reference Data Ingestion', status: 'not-started', locked: true },
+          { id: 2, name: 'Data Quality Reporting', status: 'not-started', locked: true },
+          { id: 3, name: 'KPI & Metrics Configuration', status: 'not-started', locked: true },
+          { id: 4, name: 'KPI Generation', status: 'not-started', locked: true },
+          { id: 5, name: 'Report Configuration', status: 'not-started', locked: true },
           { id: 6, name: 'Schedule Reports', status: 'not-started', locked: true },
         ],
       },
@@ -5251,15 +5882,24 @@ export default function Projects() {
                       }}
                       onModelSelect={(model) => {
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
+                          if (idx === 0) {
+                            return { ...s, status: 'completed' as const };
+                          }
                           if (idx === 1) {
                             return { ...s, locked: false };
                           }
                           return s;
                         });
+                        // Ensure the model is in workflow.models so DataIngestionStep can find its name/version
+                        const existingModels = selectedProject.workflow.models || [];
+                        const alreadyPresent = existingModels.some(m => m.id === model.id);
+                        const updatedModels = alreadyPresent ? existingModels : [...existingModels, model];
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           selectedModel: model.id,
+                          models: updatedModels,
                           steps: newSteps,
+                          currentStep: 1,
                         });
                       }}
                       onAddModel={(metadata) => {
@@ -5290,10 +5930,18 @@ export default function Projects() {
                           description
                         ));
                         
+                        // Advance step in the SAME update to avoid stale-closure race condition
+                        const onAddNewSteps = selectedProject.workflow.steps.map((s: any, idx: number) => {
+                          if (idx === 0) return { ...s, status: 'completed' as const };
+                          if (idx === 1) return { ...s, locked: false };
+                          return s;
+                        });
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           models: [...(selectedProject.workflow.models || []), newModel],
                           selectedModel: newModel.id,
+                          steps: onAddNewSteps,
+                          currentStep: 1,
                         });
                         
                         // Auto-assign inventory from metadata if user skipped Step 5
@@ -5363,43 +6011,23 @@ export default function Projects() {
                     />
                   )}
                   {selectedProject.workflow.currentStep === 1 && (
-                    <ModelMetricsStep
-                      workflow={selectedProject.workflow}
-                      onComplete={(config) => {
-                        const newSteps = selectedProject.workflow.steps.map((s, idx) => {
-                          if (idx === 1) return { ...s, status: 'completed' as const };
-                          if (idx === 2) return { ...s, locked: false };
-                          return s;
-                        });
-                        updateProjectWorkflow(selectedProject.id, {
-                          ...selectedProject.workflow,
-                          steps: newSteps,
-                          currentStep: 2,
-                          modelMetricsConfig: config,
-                        });
-                      }}
-                    />
-                  )}
-                  {selectedProject.workflow.currentStep === 2 && (
                     <DataIngestionStepComponent
                       workflow={selectedProject.workflow}
                       onComplete={(config: DataIngestionConfig) => {
-                        // Build dataset names for logging
                         const datasetNames: string[] = [];
                         if (config.scoreLevelDataset) datasetNames.push(`${config.scoreLevelDataset.name} (score)`);
                         if (config.accountLevelDataset) datasetNames.push(`${config.accountLevelDataset.name} (account)`);
                         if (datasetNames.length === 0 && config.referenceDataset) datasetNames.push(config.referenceDataset.name);
                         const description = getStepDescription.dataIngestion(datasetNames.length, datasetNames);
 
-                        // Create ingestion jobs for each uploaded dataset
-                        const datasetsToRegister = [
-                          config.scoreLevelDataset,
-                          config.accountLevelDataset,
-                        ].filter(Boolean) as import('./DataIngestionStep').UploadedDataset[];
+                        type LeveledDataset = { ds: import('./DataIngestionStep').UploadedDataset; level: 'score' | 'account' };
+                        const datasetsToRegister: LeveledDataset[] = [];
+                        if (config.scoreLevelDataset) datasetsToRegister.push({ ds: config.scoreLevelDataset, level: 'score' });
+                        if (config.accountLevelDataset) datasetsToRegister.push({ ds: config.accountLevelDataset, level: 'account' });
                         if (datasetsToRegister.length === 0 && config.referenceDataset) {
-                          datasetsToRegister.push(config.referenceDataset);
+                          datasetsToRegister.push({ ds: config.referenceDataset, level: 'score' });
                         }
-                        datasetsToRegister.forEach(ds => {
+                        datasetsToRegister.forEach(({ ds, level }) => {
                           createIngestionJob({
                             name: ds.name,
                             projectId: selectedProject.id,
@@ -5411,6 +6039,7 @@ export default function Projects() {
                             outputPath: `/datasets/${ds.id}`,
                             outputShape: { rows: ds.rows, columns: ds.columns },
                             outputColumns: ds.columnsList,
+                            level,
                             uploadedFile: {
                               name: ds.name,
                               path: `/datasets/${ds.id}/${ds.name}`,
@@ -5419,39 +6048,23 @@ export default function Projects() {
                             },
                           });
                         });
-
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
-                          if (idx === selectedProject.workflow.currentStep) {
-                            return { ...s, status: 'completed' as const };
-                          }
-                          if (idx === selectedProject.workflow.currentStep + 1) {
-                            return { ...s, locked: false };
-                          }
+                          if (idx === 1) return { ...s, status: 'completed' as const };
+                          if (idx === 2) return { ...s, locked: false };
                           return s;
                         });
-                        const newCurrentStep = Math.min(
-                          selectedProject.workflow.currentStep + 1,
-                          selectedProject.workflow.steps.length - 1
-                        );
-
-                        createWorkflowLog(createWorkflowLogEntry(
-                          selectedProject.id,
-                          selectedProject.name,
-                          'Data Ingestion',
-                          description
-                        ));
-
+                        createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'Data Ingestion', description));
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           steps: newSteps,
-                          currentStep: newCurrentStep,
+                          currentStep: 2,
                           dataIngestionConfig: config,
                           selectedModel: config.modelId,
                         });
                       }}
                     />
                   )}
-                  {selectedProject.workflow.currentStep === 3 && (
+                  {selectedProject.workflow.currentStep === 2 && (
                     <DataQualityStep
                       workflow={selectedProject.workflow}
                       projectId={selectedProject.id}
@@ -5459,113 +6072,72 @@ export default function Projects() {
                         updateProjectWorkflow(selectedProject.id, updatedWorkflow);
                       }}
                       onComplete={() => {
-                        // Get data quality analysis information for logging
                         const analysisCount = (selectedProject.workflow as any).dataQualityConfig?.analyses?.length || 0;
                         const resolvedCount = (selectedProject.workflow as any).dataQualityConfig?.analyses?.filter((a: any) => a.resolved).length || 0;
                         const description = getStepDescription.dataQuality(analysisCount, resolvedCount);
-                        
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
-                          if (idx === selectedProject.workflow.currentStep) {
-                            return { ...s, status: 'completed' as const };
-                          }
-                          if (idx === selectedProject.workflow.currentStep + 1) {
-                            return { ...s, locked: false };
-                          }
+                          if (idx === 2) return { ...s, status: 'completed' as const };
+                          if (idx === 3) return { ...s, locked: false };
                           return s;
                         });
-                        const newCurrentStep = Math.min(
-                          selectedProject.workflow.currentStep + 1,
-                          selectedProject.workflow.steps.length - 1
-                        );
-                        
-                        createWorkflowLog(createWorkflowLogEntry(
-                          selectedProject.id,
-                          selectedProject.name,
-                          'Data Quality',
-                          description
-                        ));
-                        
+                        createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'Data Quality', description));
+                        updateProjectWorkflow(selectedProject.id, { ...selectedProject.workflow, steps: newSteps, currentStep: 3 });
+                      }}
+                    />
+                  )}
+                  {selectedProject.workflow.currentStep === 3 && (
+                    <ModelMetricsStep
+                      workflow={selectedProject.workflow}
+                      onComplete={(config) => {
+                        const newSteps = selectedProject.workflow.steps.map((s, idx) => {
+                          if (idx === 3) return { ...s, status: 'completed' as const };
+                          if (idx === 4) return { ...s, locked: false };
+                          return s;
+                        });
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           steps: newSteps,
-                          currentStep: newCurrentStep,
+                          currentStep: 4,
+                          modelMetricsConfig: config,
                         });
                       }}
                     />
                   )}
                   {selectedProject.workflow.currentStep === 4 && (
-                    <ReportConfigurationStep
+                    <KpiGenerationStep
                       workflow={selectedProject.workflow}
-                      onComplete={() => {
-                        // Get report configuration information for logging
-                        const configCount = (selectedProject.workflow as any).reportConfigs?.length || 0;
-                        const configNames = (selectedProject.workflow as any).reportConfigs?.map((c: any) => c.name) || [];
-                        const metricsCount = (selectedProject.workflow as any).reportConfigs?.reduce((acc: number, c: any) => acc + (c.metrics?.length || 0), 0) || 0;
-                        const description = getStepDescription.reportConfiguration(configCount, configNames, metricsCount);
-                        
+                      project={selectedProject}
+                      onComplete={(results) => {
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
-                          if (idx === selectedProject.workflow.currentStep) {
-                            return { ...s, status: 'completed' as const };
-                          }
-                          if (idx === selectedProject.workflow.currentStep + 1) {
-                            return { ...s, locked: false };
-                          }
+                          if (idx === 4) return { ...s, status: 'completed' as const };
+                          if (idx === 5) return { ...s, locked: false };
                           return s;
                         });
-                        const newCurrentStep = Math.min(
-                          selectedProject.workflow.currentStep + 1,
-                          selectedProject.workflow.steps.length - 1
-                        );
-                        
-                        createWorkflowLog(createWorkflowLogEntry(
-                          selectedProject.id,
-                          selectedProject.name,
-                          'Report Configuration',
-                          description
-                        ));
-                        
+                        createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'KPI Generation', `Generated ${results.length} KPI metric results`));
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           steps: newSteps,
-                          currentStep: newCurrentStep,
-                        });
+                          currentStep: 5,
+                          kpiResults: results,
+                        } as any);
                       }}
                     />
                   )}
                   {selectedProject.workflow.currentStep === 5 && (
-                    <ReportsStep
+                    <ReportConfigurationStep
+                      workflow={selectedProject.workflow}
                       onComplete={() => {
-                        // Get report generation information for logging
                         const configCount = (selectedProject.workflow as any).reportConfigs?.length || 0;
-                        const reportsReady = (selectedProject.workflow as any).generatedReports?.length || 0;
-                        const description = getStepDescription.reportGeneration(configCount, reportsReady);
-                        
+                        const configNames = (selectedProject.workflow as any).reportConfigs?.map((c: any) => c.name) || [];
+                        const metricsCount = (selectedProject.workflow as any).reportConfigs?.reduce((acc: number, c: any) => acc + (c.metrics?.length || 0), 0) || 0;
+                        const description = getStepDescription.reportConfiguration(configCount, configNames, metricsCount);
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
-                          if (idx === selectedProject.workflow.currentStep) {
-                            return { ...s, status: 'completed' as const };
-                          }
-                          if (idx === selectedProject.workflow.currentStep + 1) {
-                            return { ...s, locked: false };
-                          }
+                          if (idx === 5) return { ...s, status: 'completed' as const };
+                          if (idx === 6) return { ...s, locked: false };
                           return s;
                         });
-                        const newCurrentStep = Math.min(
-                          selectedProject.workflow.currentStep + 1,
-                          selectedProject.workflow.steps.length - 1
-                        );
-                        
-                        createWorkflowLog(createWorkflowLogEntry(
-                          selectedProject.id,
-                          selectedProject.name,
-                          'Report Generation',
-                          description
-                        ));
-                        
-                        updateProjectWorkflow(selectedProject.id, {
-                          ...selectedProject.workflow,
-                          steps: newSteps,
-                          currentStep: newCurrentStep,
-                        });
+                        createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'Report Configuration', description));
+                        updateProjectWorkflow(selectedProject.id, { ...selectedProject.workflow, steps: newSteps, currentStep: 6 });
                       }}
                     />
                   )}
@@ -5574,51 +6146,31 @@ export default function Projects() {
                       workflow={selectedProject.workflow}
                       project={selectedProject}
                       onComplete={() => {
-                        // Get scheduling information for logging
                         const jobCount = (selectedProject.workflow as any).scheduledJobs?.length || 0;
                         const reportTypes = (selectedProject.workflow as any).reportConfigs?.map((c: any) => c.name) || [];
                         const scheduleFrequency = (selectedProject.workflow as any).scheduledJobs?.[0]?.frequency || 'Not specified';
                         const description = getStepDescription.scheduleReports(jobCount, reportTypes, scheduleFrequency);
-                        
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
-                          if (idx === selectedProject.workflow.currentStep) {
-                            return { ...s, status: 'completed' as const };
-                          }
+                          if (idx === 6) return { ...s, status: 'completed' as const };
                           return s;
                         });
-                        const isLastStep = selectedProject.workflow.currentStep === 6; // Schedule Reports is final step
-                        
-                        createWorkflowLog(createWorkflowLogEntry(
-                          selectedProject.id,
-                          selectedProject.name,
-                          'Schedule Reports',
-                          description
-                        ));
-                        
+                        const isLastStep = true;
+                        createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'Schedule Reports', description));
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           steps: newSteps,
-                          currentStep: selectedProject.workflow.currentStep, // Stay on final step
+                          currentStep: selectedProject.workflow.currentStep,
                           status: isLastStep ? ('completed' as const) : selectedProject.workflow.status,
                         });
-                        
-                        // Navigate to dashboard after completing workflow
                         if (isLastStep) {
                           setTimeout(() => {
-                            // Extract model ID to pass to dashboard
-                            const completedModelId = selectedProject.workflow.selectedModel 
-                              || selectedProject.workflow.models?.[0]?.id;
-                            
+                            const completedModelId = selectedProject.workflow.selectedModel || selectedProject.workflow.models?.[0]?.id;
                             if (completedModelId) {
-                              // Navigate with model ID as URL parameter
                               navigate(`/?modelId=${completedModelId}&source=projects`);
-                              console.log('✓ Navigating to dashboard with model:', completedModelId);
                             } else {
-                              // Navigate without parameters if no model found
                               navigate('/');
-                              console.log('⚠️ No model found in workflow, navigating to dashboard');
                             }
-                          }, 200); // Brief delay to show completion message
+                          }, 200);
                         }
                       }}
                     />
