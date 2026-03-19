@@ -75,6 +75,8 @@ export interface IngestionJob {
   resolutionTimestamp?: string; // When resolution occurred
   resolutionSummary?: string; // Summary of treatments applied
   resolvedIssuesCount?: number; // Number of issues resolved
+  // Dataset granularity level
+  level?: 'score' | 'account';
 }
 
 export interface PreparationJob {
@@ -412,6 +414,7 @@ interface GlobalContextType {
   addIngestionJob: (job: Omit<IngestionJob, 'id' | 'createdAt'>) => IngestionJob; // Alias for createIngestionJob
   updateIngestionJob: (id: string, updates: Partial<IngestionJob>) => void;
   deleteIngestionJob: (id: string) => void;
+  clearIngestionJobs: (projectId?: string) => void;
   getIngestionJob: (id: string) => IngestionJob | undefined;
   
   // Dataset Cloning and Lineage
@@ -1222,6 +1225,15 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }));
   };
 
+  const clearIngestionJobs = (projectId?: string) => {
+    setState(prev => ({
+      ...prev,
+      ingestionJobs: projectId
+        ? prev.ingestionJobs.filter(j => j.projectId !== projectId)
+        : [],
+    }));
+  };
+
   const getIngestionJob = (id: string) => (state.ingestionJobs || []).find(j => j.id === id);
 
   // Dataset Cloning and Lineage Functions
@@ -1860,6 +1872,7 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     addIngestionJob: createIngestionJob,
     updateIngestionJob,
     deleteIngestionJob,
+    clearIngestionJobs,
     getIngestionJob,
     cloneDatasetAsResolved,
     getResolvedDatasetsForParent,

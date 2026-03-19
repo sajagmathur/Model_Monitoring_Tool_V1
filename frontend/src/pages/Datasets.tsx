@@ -14,6 +14,7 @@ import {
   BarChart3,
   Tag,
   ChevronDown,
+  ChevronRight,
   RefreshCw,
   Upload,
   Server,
@@ -21,6 +22,10 @@ import {
   Plus,
   AlertCircle,
   X,
+  Folder,
+  FolderOpen,
+  List,
+  Layers,
 } from 'lucide-react';
 
 interface Dataset {
@@ -28,6 +33,9 @@ interface Dataset {
   name: string;
   modelId: string;
   modelName: string;
+  projectId: string;
+  projectName: string;
+  level?: 'score' | 'account';
   track: 'Development' | 'OOT' | 'Monitoring' | 'Recent';
   rowCount: number;
   columnCount: number;
@@ -44,7 +52,7 @@ const Datasets: React.FC = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const isDark = theme === 'dark';
-  const { ingestionJobs, registryModels, projects, createIngestionJob, getIngestionJob, createWorkflowLog } = useGlobal();
+  const { ingestionJobs, registryModels, projects, createIngestionJob, getIngestionJob, createWorkflowLog, deleteIngestionJob, clearIngestionJobs } = useGlobal();
 
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [filteredDatasets, setFilteredDatasets] = useState<Dataset[]>([]);
@@ -60,6 +68,10 @@ const Datasets: React.FC = () => {
   const [datasetType, setDatasetType] = useState<'baseline' | 'reference' | 'monitoring' | 'development'>('development');
   const [refreshLocation, setRefreshLocation] = useState<string>('');
   const [showResolvedOnly, setShowResolvedOnly] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'list' | 'folder'>('list');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set());
   
   // Ingest Data modal state
   const [showIngestModal, setShowIngestModal] = useState(false);
@@ -87,6 +99,9 @@ const Datasets: React.FC = () => {
           name: job.uploadedFile?.name || job.name,
           modelId: model?.id || 'unknown',
           modelName: model ? `${model.name} v${model.version}` : 'Unknown Model',
+          projectId: job.projectId || '',
+          projectName: projects.find(p => p.id === job.projectId)?.name || 'Unknown Project',
+          level: (job as any).level as 'score' | 'account' | undefined,
           track: 'Development', // Default track, can be enhanced
           rowCount: job.outputShape?.rows || 0,
           columnCount: job.outputShape?.columns || 0,
@@ -197,7 +212,7 @@ const Datasets: React.FC = () => {
 
   const handleDelete = (id: string) => {
     if (confirm('Are you sure you want to delete this dataset?')) {
-      setDatasets(datasets.filter(d => d.id !== id));
+      deleteIngestionJob(id);
     }
   };
 
@@ -294,6 +309,42 @@ const Datasets: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* View mode toggle */}
+          <div className={`flex rounded-lg border overflow-hidden ${isDark ? 'border-slate-600' : 'border-slate-300'}`}>
+            <button
+              onClick={() => setViewMode('list')}
+              title="List View"
+              className={`px-3 py-2 flex items-center gap-1 text-sm ${
+                viewMode === 'list'
+                  ? isDark ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                  : isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <List size={15} />
+            </button>
+            <button
+              onClick={() => setViewMode('folder')}
+              title="Folder View"
+              className={`px-3 py-2 flex items-center gap-1 text-sm ${
+                viewMode === 'folder'
+                  ? isDark ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white'
+                  : isDark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Layers size={15} />
+            </button>
+          </div>
+          {datasets.length > 0 && (
+            <button
+              onClick={() => setShowClearConfirm(true)}
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm ${
+                isDark ? 'bg-red-900/40 hover:bg-red-900/60 text-red-400 border border-red-800/50' : 'bg-red-50 hover:bg-red-100 text-red-600 border border-red-200'
+              }`}
+            >
+              <Trash2 size={15} />
+              Clear All
+            </button>
+          )}
           <button
             onClick={() => setShowUploadModal(true)}
             disabled={registryModels.length === 0}
@@ -449,12 +500,123 @@ const Datasets: React.FC = () => {
         </div>
       </div>
 
-      {/* Datasets Table */}
+      {/* Datasets View */}
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500" />
         </div>
+      ) : viewMode === 'folder' ? (
+        /* ── Folder View ── */
+        <div className="space-y-3">
+          {projects.filter(proj => filteredDatasets.some(d => d.projectId === proj.id)).length === 0 ? (
+            <div className="py-12 text-center">
+              <Database className={`mx-auto mb-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} size={48} />
+              <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                {datasets.length === 0 ? 'No datasets yet.' : 'No datasets match your filters'}
+              </p>
+            </div>
+          ) : (
+            projects
+              .filter(proj => filteredDatasets.some(d => d.projectId === proj.id))
+              .map(proj => {
+                const projExpanded = expandedProjects.has(proj.id);
+                const projDatasets = filteredDatasets.filter(d => d.projectId === proj.id);
+                const modelIds = Array.from(new Set(projDatasets.map(d => d.modelId)));
+                return (
+                  <div key={proj.id} className={`rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    {/* Project row */}
+                    <button
+                      onClick={() => setExpandedProjects(prev => {
+                        const next = new Set(prev);
+                        next.has(proj.id) ? next.delete(proj.id) : next.add(proj.id);
+                        return next;
+                      })}
+                      className={`w-full flex items-center gap-3 px-4 py-3 text-left ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-50'} rounded-lg`}
+                    >
+                      {projExpanded ? <ChevronDown size={16} className={isDark ? 'text-slate-400' : 'text-slate-500'} /> : <ChevronRight size={16} className={isDark ? 'text-slate-400' : 'text-slate-500'} />}
+                      {projExpanded ? <FolderOpen size={18} className="text-yellow-500" /> : <Folder size={18} className="text-yellow-500" />}
+                      <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{proj.name}</span>
+                      <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                        {projDatasets.length} dataset{projDatasets.length !== 1 ? 's' : ''}
+                      </span>
+                    </button>
+                    {projExpanded && (
+                      <div className="px-6 pb-3 space-y-2">
+                        {modelIds.map(modelId => {
+                          const model = registryModels.find(m => m.id === modelId);
+                          const modelKey = `${proj.id}::${modelId}`;
+                          const modelExpanded = expandedModels.has(modelKey);
+                          const modelDatasets = projDatasets.filter(d => d.modelId === modelId);
+                          return (
+                            <div key={modelId} className={`rounded-lg border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                              {/* Model row */}
+                              <button
+                                onClick={() => setExpandedModels(prev => {
+                                  const next = new Set(prev);
+                                  next.has(modelKey) ? next.delete(modelKey) : next.add(modelKey);
+                                  return next;
+                                })}
+                                className={`w-full flex items-center gap-3 px-4 py-2.5 text-left ${isDark ? 'hover:bg-slate-600/40' : 'hover:bg-slate-100'} rounded-lg`}
+                              >
+                                {modelExpanded ? <ChevronDown size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} /> : <ChevronRight size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />}
+                                {modelExpanded ? <FolderOpen size={16} className="text-blue-400" /> : <Folder size={16} className="text-blue-400" />}
+                                <span className={`text-sm font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                                  {model ? `${model.name} v${model.version}` : 'Unknown Model'}
+                                </span>
+                                <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-600 text-slate-400' : 'bg-white text-slate-600 border border-slate-200'}`}>
+                                  {modelDatasets.length} dataset{modelDatasets.length !== 1 ? 's' : ''}
+                                </span>
+                              </button>
+                              {modelExpanded && (
+                                <div className="px-4 pb-3 space-y-2">
+                                  {modelDatasets.map(dataset => {
+                                    const job = ingestionJobs.find(j => j.id === dataset.id);
+                                    const isResolved = job?.isResolved || false;
+                                    return (
+                                      <div key={dataset.id} className={`flex items-center gap-3 p-3 rounded-lg border ${isDark ? 'bg-slate-800/60 border-slate-600/50' : 'bg-white border-slate-200'}`}>
+                                        <Database size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className={`font-medium text-sm truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{dataset.name}</span>
+                                            {dataset.level && (
+                                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border ${
+                                                dataset.level === 'score'
+                                                  ? isDark ? 'bg-blue-500/20 text-blue-300 border-blue-500/50' : 'bg-blue-100 text-blue-700 border-blue-300'
+                                                  : isDark ? 'bg-purple-500/20 text-purple-300 border-purple-500/50' : 'bg-purple-100 text-purple-700 border-purple-300'
+                                              }`}>
+                                                {dataset.level === 'score' ? 'Score' : 'Account'}
+                                              </span>
+                                            )}
+                                            {isResolved && (
+                                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border ${isDark ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-green-100 text-green-700 border-green-300'}`}>✓ Resolved</span>
+                                            )}
+                                          </div>
+                                          <div className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            {dataset.rowCount.toLocaleString()} rows · {dataset.columnCount} cols · {dataset.fileSize} · {new Date(dataset.uploadedAt).toLocaleDateString()}
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-1 ml-auto">
+                                          <button onClick={() => handleView(dataset)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-blue-400' : 'hover:bg-slate-100 text-blue-600'}`} title="View"><Eye size={14} /></button>
+                                          <button onClick={() => handleDownload(dataset)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-green-400' : 'hover:bg-slate-100 text-green-600'}`} title="Download"><Download size={14} /></button>
+                                          <button onClick={() => handleDelete(dataset.id)} className={`p-1.5 rounded ${isDark ? 'hover:bg-slate-700 text-red-400' : 'hover:bg-slate-100 text-red-600'}`} title="Delete"><Trash2 size={14} /></button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+          )}
+        </div>
       ) : (
+        /* ── List View (table) ── */
         <div className={`rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} overflow-hidden`}>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -464,7 +626,10 @@ const Datasets: React.FC = () => {
                     Dataset Name
                   </th>
                   <th className={`text-left py-3 px-4 font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                    Model
+                    Project / Model
+                  </th>
+                  <th className={`text-center py-3 px-4 font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                    Level
                   </th>
                   <th className={`text-center py-3 px-4 font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                     Source
@@ -536,7 +701,21 @@ const Datasets: React.FC = () => {
                         </div>
                       </td>
                       <td className={`py-3 px-4 text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                        {dataset.modelName}
+                        <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{dataset.projectName}</div>
+                        <div className="font-medium">{dataset.modelName}</div>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {dataset.level ? (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${
+                            dataset.level === 'score'
+                              ? isDark ? 'bg-blue-500/20 text-blue-300 border-blue-500/50' : 'bg-blue-100 text-blue-700 border-blue-300'
+                              : isDark ? 'bg-purple-500/20 text-purple-300 border-purple-500/50' : 'bg-purple-100 text-purple-700 border-purple-300'
+                          }`}>
+                            {dataset.level === 'score' ? 'Score' : 'Account'}
+                          </span>
+                        ) : (
+                          <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>—</span>
+                        )}
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex items-center justify-center gap-1">
@@ -622,6 +801,35 @@ const Datasets: React.FC = () => {
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Clear All Confirm Modal */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className={`w-full max-w-sm mx-4 rounded-lg ${isDark ? 'bg-slate-800' : 'bg-white'} shadow-xl p-6`}>
+            <h3 className={`text-lg font-bold mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>Clear All Datasets?</h3>
+            <p className={`text-sm mb-6 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              This will permanently remove all {datasets.length} dataset{datasets.length !== 1 ? 's' : ''} from the registry. This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className={`flex-1 px-4 py-2 rounded-lg border ${isDark ? 'border-slate-600 hover:bg-slate-700 text-white' : 'border-slate-300 hover:bg-slate-50 text-slate-700'}`}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  clearIngestionJobs();
+                  setShowClearConfirm(false);
+                }}
+                className="flex-1 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium"
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

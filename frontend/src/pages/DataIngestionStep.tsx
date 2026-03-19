@@ -36,6 +36,16 @@ export interface DataSummary {
   overallBadRate: number;
 }
 
+export interface EnhancedDataSummary {
+  totalRows: number;
+  badCount: number;
+  badRate: number;
+  segments: Record<string, { volume: number; badCount: number }>;
+  numericalCols: Array<{ name: string; mean: number; std: number; min: number; max: number; nullRate: number }>;
+  categoricalCols: Array<{ name: string; uniqueCount: number; topValue: string; topPercent: number; nullRate: number }>;
+  dateCols: Array<{ name: string; minDate: string; maxDate: string; nullRate: number }>;
+}
+
 export interface DataIngestionConfig {
   modelId?: string;
   granularity: 'score' | 'account';
@@ -97,26 +107,45 @@ function generateVintagesByYear(): Record<number, string[]> {
 
 const VINTAGES_BY_YEAR = generateVintagesByYear();
 
-// Suggest last 12 months as default vintages
-function suggestRecentVintages(): string[] {
-  const now = new Date();
-  const result: string[] = [];
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    result.push(`${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`);
-  }
-  return result;
-}
-
-// CSV parser helper
+// CSV parser helper — handles quoted fields, commas inside quotes, BOM
 function parseCSV(text: string): { headers: string[]; rows: Record<string, any>[] } {
-  const lines = text.split(/\r?\n/).filter(Boolean);
+  // Strip UTF-8 BOM if present
+  const clean = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+
+  // Tokenize: respect double-quoted fields that may contain commas/newlines
+  const tokenizeLine = (line: string): string[] => {
+    const fields: string[] = [];
+    let i = 0;
+    while (i <= line.length) {
+      if (i === line.length) { fields.push(''); break; }
+      if (line[i] === '"') {
+        let val = '';
+        i++; // skip opening quote
+        while (i < line.length) {
+          if (line[i] === '"' && line[i + 1] === '"') { val += '"'; i += 2; }
+          else if (line[i] === '"') { i++; break; }
+          else { val += line[i++]; }
+        }
+        fields.push(val.trim());
+        if (line[i] === ',') i++;
+      } else {
+        const end = line.indexOf(',', i);
+        if (end === -1) { fields.push(line.slice(i).trim()); break; }
+        fields.push(line.slice(i, end).trim());
+        i = end + 1;
+      }
+    }
+    return fields;
+  };
+
+  const lines = clean.split(/\r?\n/).filter(l => l.trim() !== '');
   if (lines.length < 2) return { headers: [], rows: [] };
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+
+  const headers = tokenizeLine(lines[0]).map(h => h.replace(/^"|"$/g, ''));
   const rows = lines.slice(1).map(line => {
-    const vals = line.split(',');
+    const vals = tokenizeLine(line);
     const obj: Record<string, any> = {};
-    headers.forEach((h, i) => { obj[h] = vals[i]?.trim().replace(/^"|"$/g, '') ?? ''; });
+    headers.forEach((h, i) => { obj[h] = vals[i] ?? ''; });
     return obj;
   });
   return { headers, rows };
@@ -143,15 +172,154 @@ function computeDataSummary(
   return { totalVolume, segments, overallBadCount, overallBadRate: totalVolume > 0 ? overallBadCount / totalVolume : 0 };
 }
 
+// Helper: compute enhanced data summary (numerical, categorical, date column breakdown)
+function computeEnhancedSummary(rows: Record<string, any>[], targetCol: string, segmentCol: string): EnhancedDataSummary {
+  if (!rows || rows.length === 0) {
+    return { totalRows: 0, badCount: 0, badRate: 0, segments: {}, numericalCols: [], categoricalCols: [], dateCols: [] };
+  }
+
+  // Safely get headers — guard against malformed first row
+  const headers = rows[0] ? Object.keys(rows[0]).filter(h => h !== '') : [];
+  if (headers.length === 0) {
+    return { totalRows: rows.length, badCount: 0, badRate: 0, segments: {}, numericalCols: [], categoricalCols: [], dateCols: [] };
+  }
+
+  // Detect column types by sampling (skip target/segment cols)
+  // Fix: treat empty-string as null — Number('') === 0 which is a false positive for numerical
+  const sampleSize = Math.min(100, rows.length);
+  const sample = rows.slice(0, sampleSize);
+  const isNumericStr = (s: string) => s !== '' && s !== null && !isNaN(Number(s));
+  const isDateStr = (s: string) => /^\d{4}-\d{2}-\d{2}/.test(s) || /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s);
+
+  const colTypes: Record<string, 'numerical' | 'categorical' | 'date'> = {};
+  for (const col of headers) {
+    if (col === targetCol || col === segmentCol) continue;
+    let numCount = 0, dateCount = 0, nonEmpty = 0;
+    for (const row of sample) {
+      const v = row[col];
+      if (v == null || v === '') continue;
+      const str = String(v).trim();
+      nonEmpty++;
+      if (isNumericStr(str)) numCount++;
+      else if (isDateStr(str)) dateCount++;
+    }
+    const total = nonEmpty || 1;
+    if (numCount / total > 0.7) colTypes[col] = 'numerical';
+    else if (dateCount / total > 0.6) colTypes[col] = 'date';
+    else colTypes[col] = 'categorical';
+  }
+
+  // Compute bad count and segments
+  let badCount = 0;
+  const segments: Record<string, { volume: number; badCount: number }> = {};
+  for (const row of rows) {
+    const seg = segmentCol && row[segmentCol] != null && row[segmentCol] !== ''
+      ? String(row[segmentCol])
+      : 'Overall';
+    if (!segments[seg]) segments[seg] = { volume: 0, badCount: 0 };
+    segments[seg].volume++;
+    const tv = row[targetCol];
+    const isBad = targetCol && (tv === 1 || tv === '1' || tv === true ||
+      (typeof tv === 'string' && tv.toLowerCase() === 'bad'));
+    if (isBad) { segments[seg].badCount++; badCount++; }
+  }
+
+  // Numerical columns — use reduce for min/max to avoid stack overflow on large arrays
+  const numericalCols = headers
+    .filter(c => colTypes[c] === 'numerical')
+    .slice(0, 10)
+    .map(name => {
+      let sum = 0, count = 0, nullCount = 0;
+      let minVal = Infinity, maxVal = -Infinity;
+      for (const row of rows) {
+        const v = row[name];
+        if (v == null || v === '') { nullCount++; continue; }
+        const n = Number(v);
+        if (isNaN(n)) { nullCount++; continue; }
+        sum += n; count++;
+        if (n < minVal) minVal = n;
+        if (n > maxVal) maxVal = n;
+      }
+      const mean = count > 0 ? sum / count : 0;
+      let varSum = 0;
+      for (const row of rows) {
+        const v = row[name];
+        if (v == null || v === '') continue;
+        const n = Number(v);
+        if (!isNaN(n)) varSum += (n - mean) ** 2;
+      }
+      const std = count > 0 ? Math.sqrt(varSum / count) : 0;
+      const min = count > 0 ? minVal : 0;
+      const max = count > 0 ? maxVal : 0;
+      const nullRate = rows.length > 0 ? nullCount / rows.length : 0;
+      return { name, mean, std, min, max, nullRate };
+    });
+
+  // Categorical columns
+  const categoricalCols = headers
+    .filter(c => colTypes[c] === 'categorical')
+    .slice(0, 10)
+    .map(name => {
+      const freq: Record<string, number> = {};
+      let nullCount = 0;
+      for (const row of rows) {
+        const v = row[name];
+        if (v == null || v === '') { nullCount++; continue; }
+        const key = String(v);
+        freq[key] = (freq[key] || 0) + 1;
+      }
+      const entries = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+      const topValue = entries[0]?.[0] || '';
+      const topCount = entries[0]?.[1] || 0;
+      const nullRate = rows.length > 0 ? nullCount / rows.length : 0;
+      return {
+        name,
+        uniqueCount: entries.length,
+        topValue,
+        topPercent: rows.length > 0 ? (topCount / rows.length) * 100 : 0,
+        nullRate,
+      };
+    });
+
+  // Date columns
+  const dateCols = headers
+    .filter(c => colTypes[c] === 'date')
+    .slice(0, 10)
+    .map(name => {
+      let minTs = Infinity, maxTs = -Infinity;
+      let minDate = '', maxDate = '';
+      let nullCount = 0;
+      for (const row of rows) {
+        const v = row[name];
+        if (v == null || v === '') { nullCount++; continue; }
+        const d = new Date(String(v));
+        if (isNaN(d.getTime())) continue;
+        const ts = d.getTime();
+        if (ts < minTs) { minTs = ts; minDate = d.toISOString().split('T')[0]; }
+        if (ts > maxTs) { maxTs = ts; maxDate = d.toISOString().split('T')[0]; }
+      }
+      return { name, minDate, maxDate, nullRate: rows.length > 0 ? nullCount / rows.length : 0 };
+    });
+
+  return {
+    totalRows: rows.length,
+    badCount,
+    badRate: rows.length > 0 ? badCount / rows.length : 0,
+    segments,
+    numericalCols,
+    categoricalCols,
+    dateCols,
+  };
+}
+
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // VintageSelector Component
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const VintageSelector: React.FC<{
   selected: string[];
   onChange: (vintages: string[]) => void;
-  onAISuggest: () => void;
   isDark: boolean;
-}> = ({ selected, onChange, onAISuggest, isDark }) => {
+}> = ({ selected, onChange, isDark }) => {
   const [expandedYears, setExpandedYears] = useState<Record<number, boolean>>({});
   const [customVintage, setCustomVintage] = useState('');
 
@@ -189,15 +357,6 @@ const VintageSelector: React.FC<{
         <span className={`text-xs font-medium ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
           {selected.length} vintage{selected.length !== 1 ? 's' : ''} selected
         </span>
-        <button
-          type="button"
-          onClick={onAISuggest}
-          className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors ${
-            isDark ? 'bg-purple-900/40 text-purple-300 hover:bg-purple-900/60' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
-          }`}
-        >
-          <Brain size={12} /> AI Suggest (last 12 months)
-        </button>
       </div>
 
       {/* Year accordion */}
@@ -345,6 +504,7 @@ export const DataIngestionStepComponent: React.FC<{
   // â”€â”€ Dataset state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [scoreLevelDataset, setScoreLevelDataset] = useState<UploadedDataset | null>(null);
   const [scoreParsedRows, setScoreParsedRows] = useState<Record<string, any>[]>([]);
+  const [accountParsedRows, setAccountParsedRows] = useState<Record<string, any>[]>([]);
   const [accountLevelDataset, setAccountLevelDataset] = useState<UploadedDataset | null>(null);
 
   // â”€â”€ Score level config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -374,13 +534,20 @@ export const DataIngestionStepComponent: React.FC<{
 
   // â”€â”€ UI state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [configSaved, setConfigSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [dataSummary, setDataSummary] = useState<DataSummary | null>(null);
+  const [scoreEnhancedSummary, setScoreEnhancedSummary] = useState<EnhancedDataSummary | null>(null);
+  const [accountEnhancedSummary, setAccountEnhancedSummary] = useState<EnhancedDataSummary | null>(null);
+  const [summaryTab, setSummaryTab] = useState<'score' | 'account'>('score');
   const [aiSuggestions, setAiSuggestions] = useState<Record<string, string | string[] | null>>({});
+  const [customPerfValue, setCustomPerfValue] = useState('');
+  const [customPerfUnit, setCustomPerfUnit] = useState('Months');
 
   // â”€â”€ Selected model label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const selectedModelObj = workflow.models?.find(m => m.id === workflow.selectedModel);
   const selectedModelLabel = selectedModelObj
-    ? `${selectedModelObj.name}${selectedModelObj.version ? ` (v${selectedModelObj.version})` : ''}`
+    ? `${selectedModelObj.name}${selectedModelObj.version ? ` (${selectedModelObj.version})` : ''}`
     : workflow.selectedModel
     ? `Model ${workflow.selectedModel.slice(-6)}`
     : 'No model selected';
@@ -419,6 +586,8 @@ export const DataIngestionStepComponent: React.FC<{
         features: suggestFeatures(headers),
       }));
       setConfigSaved(false);
+      setSaveError(null);
+      setSaveSuccess(false);
     };
     reader.readAsText(file);
   };
@@ -438,6 +607,7 @@ export const DataIngestionStepComponent: React.FC<{
         sampleData: rows.slice(0, 5),
       };
       setAccountLevelDataset(ds);
+      setAccountParsedRows(rows);
       setAccountConfig(prev => ({
         ...prev,
         uniqueKey: findColumn(headers, KEY_HEURISTICS),
@@ -447,6 +617,8 @@ export const DataIngestionStepComponent: React.FC<{
         features: suggestFeatures(headers),
       }));
       setConfigSaved(false);
+      setSaveError(null);
+      setSaveSuccess(false);
     };
     reader.readAsText(file);
   };
@@ -482,15 +654,46 @@ export const DataIngestionStepComponent: React.FC<{
 
   // â”€â”€ Save config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleSaveConfig = () => {
-    if (scoreLevelDataset) {
-      const summary = computeDataSummary(
-        scoreParsedRows,
-        scoreConfig.targetVariable ?? '',
-        scoreConfig.segment ?? ''
-      );
-      setDataSummary(summary);
+    setSaveError(null);
+    setSaveSuccess(false);
+
+    // Validation: require at least one uploaded dataset
+    if (!scoreLevelDataset && !accountLevelDataset) {
+      setSaveError('Please upload at least one dataset (Score Level or Account Level) before saving the configuration.');
+      return;
     }
-    setConfigSaved(true);
+    if (scoreLevelDataset && !scoreConfig.targetVariable) {
+      setSaveError('Score Level dataset uploaded but no Target Variable selected. Please select a Target Variable in Step 3.');
+      return;
+    }
+    if (accountLevelDataset && !accountConfig.targetVariableAccount) {
+      setSaveError('Account Level dataset uploaded but no Target Variable selected. Please select a Target Variable in the Account Level Configuration.');
+      return;
+    }
+
+    try {
+      if (scoreLevelDataset) {
+        if (scoreParsedRows.length === 0) {
+          setSaveError('Score Level CSV appears to be empty or could not be parsed. Please verify the file format (UTF-8 CSV with headers).');
+          return;
+        }
+        const summary = computeDataSummary(
+          scoreParsedRows,
+          scoreConfig.targetVariable ?? '',
+          scoreConfig.segment ?? ''
+        );
+        setDataSummary(summary);
+        setScoreEnhancedSummary(computeEnhancedSummary(scoreParsedRows, scoreConfig.targetVariable ?? '', scoreConfig.segment ?? ''));
+      }
+      if (accountLevelDataset && accountParsedRows.length > 0) {
+        setAccountEnhancedSummary(computeEnhancedSummary(accountParsedRows, accountConfig.targetVariableAccount ?? '', accountConfig.segmentAccount ?? ''));
+      }
+      setConfigSaved(true);
+      setSaveSuccess(true);
+    } catch (err) {
+      console.error('Error computing data summary:', err);
+      setSaveError('An unexpected error occurred while computing the summary. Please verify your CSV files are valid and try again.');
+    }
   };
 
   // â”€â”€ Continue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -618,6 +821,16 @@ export const DataIngestionStepComponent: React.FC<{
                 {scoreLevelDataset.rows.toLocaleString()} rows &middot; {scoreLevelDataset.columns} columns
               </p>
             )}
+            <button
+              type="button"
+              onClick={() => alert('Database connection coming soon. Supported: Snowflake, BigQuery, PostgreSQL, S3.')}
+              className={`mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                isDark ? 'border-blue-700/50 text-blue-400 hover:bg-blue-900/20' : 'border-blue-300 text-blue-600 hover:bg-blue-100'
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              Connect to Dataset / Database
+            </button>
           </div>
           {/* Account Level */}
           <div className={`p-4 rounded-lg border ${isDark ? 'bg-gray-900/40 border-purple-700/30' : 'bg-purple-50 border-purple-200'}`}>
@@ -637,14 +850,100 @@ export const DataIngestionStepComponent: React.FC<{
                 {accountLevelDataset.rows.toLocaleString()} rows &middot; {accountLevelDataset.columns} columns
               </p>
             )}
+            <button
+              type="button"
+              onClick={() => alert('Database connection coming soon. Supported: Snowflake, BigQuery, PostgreSQL, S3.')}
+              className={`mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                isDark ? 'border-purple-700/50 text-purple-400 hover:bg-purple-900/20' : 'border-purple-300 text-purple-600 hover:bg-purple-100'
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              Connect to Dataset / Database
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Step 2: Observation Vintages (shared between both datasets) */}
+      {/* Raw Data Preview */}
       {(scoreLevelDataset || accountLevelDataset) && (
         <div className={card}>
-          <p className={secTitle}>Step 2 &mdash; Observation Vintages</p>
+          <p className={secTitle}>Raw Data Preview</p>
+          <p className={`text-xs mb-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+            First 5 rows of the uploaded dataset(s). Verify your data before configuring.
+          </p>
+          <div className="space-y-5">
+            {scoreLevelDataset && scoreLevelDataset.sampleData && scoreLevelDataset.sampleData.length > 0 && (
+              <div>
+                <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                  Score Level &mdash; {scoreLevelDataset.name}
+                </p>
+                <div className="overflow-x-auto">
+                  <table className={`w-full text-xs border-collapse ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <thead>
+                      <tr>
+                        {scoreLevelDataset.columnsList.map(col => (
+                          <th key={col} className={`text-left px-2 py-1.5 border whitespace-nowrap font-semibold ${isDark ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-gray-100 border-gray-200 text-gray-700'}`}>
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scoreLevelDataset.sampleData.map((row, ri) => (
+                        <tr key={ri} className={isDark ? 'border-b border-gray-700/40' : 'border-b border-gray-100'}>
+                          {scoreLevelDataset.columnsList.map(col => (
+                            <td key={col} className={`px-2 py-1 border whitespace-nowrap ${isDark ? 'border-gray-700/30' : 'border-gray-100'}`}>
+                              {String(row[col] ?? '')}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Showing 5 of {scoreLevelDataset.rows.toLocaleString()} rows</p>
+              </div>
+            )}
+            {accountLevelDataset && accountLevelDataset.sampleData && accountLevelDataset.sampleData.length > 0 && (
+              <div>
+                <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${isDark ? 'text-purple-400' : 'text-purple-600'}`}>
+                  Account Level &mdash; {accountLevelDataset.name}
+                </p>
+                <div className="overflow-x-auto">
+                  <table className={`w-full text-xs border-collapse ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <thead>
+                      <tr>
+                        {accountLevelDataset.columnsList.map(col => (
+                          <th key={col} className={`text-left px-2 py-1.5 border whitespace-nowrap font-semibold ${isDark ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-gray-100 border-gray-200 text-gray-700'}`}>
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {accountLevelDataset.sampleData.map((row, ri) => (
+                        <tr key={ri} className={isDark ? 'border-b border-gray-700/40' : 'border-b border-gray-100'}>
+                          {accountLevelDataset.columnsList.map(col => (
+                            <td key={col} className={`px-2 py-1 border whitespace-nowrap ${isDark ? 'border-gray-700/30' : 'border-gray-100'}`}>
+                              {String(row[col] ?? '')}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Showing 5 of {accountLevelDataset.rows.toLocaleString()} rows</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Step 2: Reference Vintage (shared between both datasets) */}
+      {(scoreLevelDataset || accountLevelDataset) && (
+        <div className={card}>
+          <p className={secTitle}>Step 2 &mdash; Reference Vintage</p>
           <p className={`text-xs mb-3 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
             Select which monthly cohorts to include in the monitoring run. Applies to both Score and Account datasets.
           </p>
@@ -654,25 +953,73 @@ export const DataIngestionStepComponent: React.FC<{
               updateScore({ observationVintages: vintages });
               updateAccount({ observationVintages: vintages });
             }}
-            onAISuggest={() => {
-              const suggested = suggestRecentVintages();
-              updateScore({ observationVintages: suggested });
-              updateAccount({ observationVintages: suggested });
-            }}
             isDark={isDark}
           />
 
           {/* Performance Window */}
           <div className="mt-4">
             <label className={lbl}>Performance Window</label>
-            <select
-              className={sel}
-              value={scoreConfig.performanceWindow ?? ''}
-              onChange={e => { updateScore({ performanceWindow: e.target.value }); updateAccount({ performanceWindow: e.target.value }); }}
-            >
-              <option value="">Select performance window</option>
-              {PERF_WINDOWS.map(w => <option key={w} value={w}>{w}</option>)}
-            </select>
+            {scoreConfig.performanceWindow === '__custom__' ? (
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="e.g. 6"
+                  value={customPerfValue}
+                  onChange={e => setCustomPerfValue(e.target.value)}
+                  className={`w-24 rounded-md px-3 py-2 text-sm border ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                />
+                <select
+                  value={customPerfUnit}
+                  onChange={e => setCustomPerfUnit(e.target.value)}
+                  className={sel}
+                >
+                  {['Minutes', 'Hours', 'Days', 'Weeks', 'Months', 'Quarters', 'Years'].map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (customPerfValue) {
+                      const pw = `${customPerfValue} ${customPerfUnit}`;
+                      updateScore({ performanceWindow: pw });
+                      updateAccount({ performanceWindow: pw });
+                    }
+                  }}
+                  className="px-3 py-2 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700"
+                >Set</button>
+                <button
+                  type="button"
+                  onClick={() => { updateScore({ performanceWindow: '' }); updateAccount({ performanceWindow: '' }); }}
+                  className={`px-3 py-2 rounded-md text-xs font-semibold ${isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                >Cancel</button>
+              </div>
+            ) : (
+              <select
+                className={sel}
+                value={scoreConfig.performanceWindow ?? ''}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v === '__custom__') {
+                    updateScore({ performanceWindow: '__custom__' });
+                    updateAccount({ performanceWindow: '__custom__' });
+                  } else {
+                    updateScore({ performanceWindow: v });
+                    updateAccount({ performanceWindow: v });
+                  }
+                }}
+              >
+                <option value="">Select performance window</option>
+                {PERF_WINDOWS.map(w => <option key={w} value={w}>{w}</option>)}
+                <option value="__custom__">Other (custom)...</option>
+              </select>
+            )}
+            {scoreConfig.performanceWindow && scoreConfig.performanceWindow !== '__custom__' && (
+              <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                Selected: <strong>{scoreConfig.performanceWindow}</strong>
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -850,57 +1197,203 @@ export const DataIngestionStepComponent: React.FC<{
       )}
 
       {/* Save Config button */}
-      {(scoreLevelDataset || accountLevelDataset) && (
+      <div>
         <button
           type="button"
           onClick={handleSaveConfig}
-          className="w-full py-2.5 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition-colors"
+          className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+            scoreLevelDataset || accountLevelDataset
+              ? 'bg-green-600 hover:bg-green-700 text-white cursor-pointer'
+              : isDark
+              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+              : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+          }`}
         >
           Save Configuration &amp; Compute Summary
         </button>
-      )}
+        {saveError && (
+          <div className={`mt-2 flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs font-medium border ${
+            isDark
+              ? 'bg-red-900/30 border-red-700/50 text-red-300'
+              : 'bg-red-50 border-red-300 text-red-700'
+          }`}>
+            <svg className="flex-shrink-0 mt-0.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span>{saveError}</span>
+          </div>
+        )}
+        {saveSuccess && !saveError && (
+          <div className={`mt-2 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border ${
+            isDark
+              ? 'bg-green-900/30 border-green-700/50 text-green-300'
+              : 'bg-green-50 border-green-300 text-green-700'
+          }`}>
+            <svg className="flex-shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span>Configuration saved! Data summary computed successfully.</span>
+          </div>
+        )}
+      </div>
 
       {/* Data Summary */}
-      {configSaved && dataSummary && (
+      {configSaved && (scoreEnhancedSummary || accountEnhancedSummary) && (
         <div className={card}>
-          <p className={secTitle}>Data Summary</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            {[
-              { label: 'Total Volume', value: dataSummary.totalVolume.toLocaleString() },
-              { label: 'Segments', value: Object.keys(dataSummary.segments).length },
-              { label: 'Overall Bad Count', value: dataSummary.overallBadCount.toLocaleString() },
-              { label: 'Overall Bad Rate', value: `${(dataSummary.overallBadRate * 100).toFixed(2)}%` },
-            ].map(({ label: l, value }) => (
-              <div key={l} className={`rounded-lg p-4 text-center ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-                <p className={`text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{l}</p>
-                <p className={`text-lg font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>{value}</p>
+          <div className="flex items-center justify-between mb-4">
+            <p className={secTitle}>Data Summary</p>
+            {scoreEnhancedSummary && accountEnhancedSummary && (
+              <div className={`flex border rounded-lg overflow-hidden ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>
+                {(['score', 'account'] as const).map(lvl => (
+                  <button
+                    key={lvl}
+                    onClick={() => setSummaryTab(lvl)}
+                    className={`px-4 py-1.5 text-xs font-semibold capitalize transition ${
+                      summaryTab === lvl
+                        ? 'bg-blue-600 text-white'
+                        : isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    {lvl === 'score' ? 'Score Level' : 'Account Level'}
+                  </button>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-          {Object.keys(dataSummary.segments).length > 1 && (
-            <div className="overflow-x-auto">
-              <table className={`w-full text-xs ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                <thead>
-                  <tr className={isDark ? 'border-b border-gray-700' : 'border-b border-gray-200'}>
-                    <th className="text-left py-2 pr-4">Segment</th>
-                    <th className="text-right py-2 pr-4">Volume</th>
-                    <th className="text-right py-2 pr-4">Bad Count</th>
-                    <th className="text-right py-2">Bad Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(dataSummary.segments).map(([seg, info]) => (
-                    <tr key={seg} className={isDark ? 'border-b border-gray-700/50' : 'border-b border-gray-100'}>
-                      <td className="py-1.5 pr-4 font-medium">{seg}</td>
-                      <td className="text-right py-1.5 pr-4">{info.volume.toLocaleString()}</td>
-                      <td className="text-right py-1.5 pr-4">{info.badCount.toLocaleString()}</td>
-                      <td className="text-right py-1.5">{info.volume > 0 ? `${(info.badCount / info.volume * 100).toFixed(2)}%` : 'N/A'}</td>
-                    </tr>
+
+          {(() => {
+            const enh = (scoreEnhancedSummary && accountEnhancedSummary)
+              ? (summaryTab === 'score' ? scoreEnhancedSummary : accountEnhancedSummary)
+              : (scoreEnhancedSummary || accountEnhancedSummary);
+            if (!enh) return null;
+            const colCount = enh.numericalCols.length + enh.categoricalCols.length + enh.dateCols.length;
+            return (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+                  {[
+                    { label: 'Total Rows', value: enh.totalRows.toLocaleString() },
+                    { label: 'Columns', value: colCount.toString() },
+                    { label: 'Bad Count', value: enh.badCount.toLocaleString() },
+                    { label: 'Bad Rate', value: `${(enh.badRate * 100).toFixed(2)}%` },
+                  ].map(({ label: l, value }) => (
+                    <div key={l} className={`rounded-lg p-3 text-center ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                      <p className={`text-xs font-medium mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{l}</p>
+                      <p className={`text-base font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>{value}</p>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 mb-5">
+                  {[
+                    { label: 'Numerical', count: enh.numericalCols.length, color: isDark ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700' },
+                    { label: 'Categorical', count: enh.categoricalCols.length, color: isDark ? 'bg-purple-500/20 text-purple-300' : 'bg-purple-100 text-purple-700' },
+                    { label: 'Date', count: enh.dateCols.length, color: isDark ? 'bg-green-500/20 text-green-300' : 'bg-green-100 text-green-700' },
+                  ].map(({ label, count, color }) => (
+                    <div key={label} className={`rounded-lg p-3 text-center ${color}`}>
+                      <p className="text-lg font-bold">{count}</p>
+                      <p className="text-xs font-medium">{label} cols</p>
+                    </div>
+                  ))}
+                </div>
+
+                {enh.numericalCols.length > 0 && (
+                  <div className="mb-4">
+                    <p className={`text-xs font-semibold mb-2 uppercase tracking-wide ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Numerical Variables</p>
+                    <div className="overflow-x-auto">
+                      <table className={`w-full text-xs ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                        <thead>
+                          <tr className={`border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+                            {['Column', 'Mean', 'Std Dev', 'Min', 'Max', 'Null%'].map(h => (
+                              <th key={h} className="text-left py-1.5 pr-4">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {enh.numericalCols.slice(0, 8).map(col => (
+                            <tr key={col.name} className={`border-b ${isDark ? 'border-gray-700/50' : 'border-gray-100'}`}>
+                              <td className="py-1.5 pr-4 font-medium">{col.name}</td>
+                              <td className="py-1.5 pr-4">{col.mean.toFixed(2)}</td>
+                              <td className="py-1.5 pr-4">{col.std.toFixed(2)}</td>
+                              <td className="py-1.5 pr-4">{col.min.toFixed(2)}</td>
+                              <td className="py-1.5 pr-4">{col.max.toFixed(2)}</td>
+                              <td className="py-1.5">{(col.nullRate * 100).toFixed(1)}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {enh.categoricalCols.length > 0 && (
+                  <div className="mb-4">
+                    <p className={`text-xs font-semibold mb-2 uppercase tracking-wide ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Categorical Variables</p>
+                    <div className="overflow-x-auto">
+                      <table className={`w-full text-xs ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                        <thead>
+                          <tr className={`border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+                            {['Column', 'Unique', 'Top Value', 'Top%', 'Null%'].map(h => (
+                              <th key={h} className="text-left py-1.5 pr-4">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {enh.categoricalCols.slice(0, 8).map(col => (
+                            <tr key={col.name} className={`border-b ${isDark ? 'border-gray-700/50' : 'border-gray-100'}`}>
+                              <td className="py-1.5 pr-4 font-medium">{col.name}</td>
+                              <td className="py-1.5 pr-4">{col.uniqueCount}</td>
+                              <td className="py-1.5 pr-4 max-w-24 truncate">{col.topValue}</td>
+                              <td className="py-1.5 pr-4">{col.topPercent.toFixed(1)}%</td>
+                              <td className="py-1.5">{(col.nullRate * 100).toFixed(1)}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {enh.dateCols.length > 0 && (
+                  <div className="mb-4">
+                    <p className={`text-xs font-semibold mb-2 uppercase tracking-wide ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Date Variables</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {enh.dateCols.slice(0, 4).map(col => (
+                        <div key={col.name} className={`rounded-lg p-3 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                          <p className={`text-xs font-medium mb-1 ${isDark ? 'text-gray-300' : 'text-gray-800'}`}>{col.name}</p>
+                          <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{col.minDate} → {col.maxDate}</p>
+                          <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Null: {(col.nullRate * 100).toFixed(1)}%</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {Object.keys(enh.segments).length > 1 && (
+                  <div>
+                    <p className={`text-xs font-semibold mb-2 uppercase tracking-wide ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Segment Breakdown</p>
+                    <div className="overflow-x-auto">
+                      <table className={`w-full text-xs ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                        <thead>
+                          <tr className={isDark ? 'border-b border-gray-700' : 'border-b border-gray-200'}>
+                            <th className="text-left py-1.5 pr-4">Segment</th>
+                            <th className="text-right py-1.5 pr-4">Volume</th>
+                            <th className="text-right py-1.5 pr-4">Bad Count</th>
+                            <th className="text-right py-1.5">Bad Rate</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(enh.segments).map(([seg, info]) => (
+                            <tr key={seg} className={isDark ? 'border-b border-gray-700/50' : 'border-b border-gray-100'}>
+                              <td className="py-1 pr-4 font-medium">{seg}</td>
+                              <td className="text-right py-1 pr-4">{info.volume.toLocaleString()}</td>
+                              <td className="text-right py-1 pr-4">{info.badCount.toLocaleString()}</td>
+                              <td className="text-right py-1">{info.volume > 0 ? `${(info.badCount / info.volume * 100).toFixed(2)}%` : 'N/A'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
 
