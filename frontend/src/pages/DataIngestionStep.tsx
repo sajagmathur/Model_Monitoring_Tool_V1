@@ -339,7 +339,8 @@ export const DataIngestionStepComponent: React.FC<{
   workflow: Workflow;
   onComplete: (config: DataIngestionConfig) => void;
 }> = ({ workflow, onComplete }) => {
-  const { isDark } = useTheme();
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
 
   // â”€â”€ Dataset state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [scoreLevelDataset, setScoreLevelDataset] = useState<UploadedDataset | null>(null);

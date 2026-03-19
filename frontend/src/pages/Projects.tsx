@@ -371,7 +371,7 @@ const BulkModelUploadStep: React.FC<{
     setUploadedRowData(rowMap);
 
     // Init inventory assignment modes — default to 'suggested' for all
-    const modeInit: Record<string, 'suggested' | 'existing' | 'skip'> = {};
+    const modeInit: Record<string, 'suggested' | 'custom'> = {};
     newModels.forEach(m => { modeInit[m.id] = 'suggested'; });
     setBulkInvMode(modeInit);
     setBulkExistingInv({});
@@ -393,7 +393,6 @@ const BulkModelUploadStep: React.FC<{
     // Assign inventories to each model based on user selections
     uploadedModels.forEach(m => {
       const mode = bulkInvMode[m.id] || 'suggested';
-      if (mode === 'skip') return;
       const row = uploadedRowData[m.id] || {};
       let invId = '';
       if (mode === 'suggested') {
@@ -2538,7 +2537,7 @@ const DataQualityStep: React.FC<{
   );
 
   // Extract all datasets from dataIngestionConfig
-  const workflowDatasets = workflow.dataIngestionConfig 
+  const workflowDatasets = workflow.dataIngestionConfig && workflow.dataIngestionConfig.trackDatasets
     ? Object.values(workflow.dataIngestionConfig.trackDatasets).flat()
     : [];
   
@@ -3662,15 +3661,20 @@ const ReportConfigurationStep: React.FC<{ onComplete: () => void; workflow: Work
     const baselineDataset = modelDatasets.find(d => d.id === formData.baselineDatasetId);
     const referenceDataset = modelDatasets.find(d => d.id === formData.referenceDatasetId);
 
+    // Map model type to supported types: classification, regression, timeseries
+    const mapModelType = (type: string | undefined): 'classification' | 'regression' | 'timeseries' => {
+      if (!type) return 'classification';
+      const lower = type.toLowerCase();
+      if (lower === 'regression') return 'regression';
+      if (lower === 'timeseries' || lower === 'time_series') return 'timeseries';
+      return 'classification'; // Default for all other types
+    };
+
     // Create new configuration
     createReportConfiguration({
       ...formData,
       modelName,
-      modelType: (workflowModel?.modelType === 'clustering' || 
-                   workflowModel?.modelType === 'nlp' || 
-                   workflowModel?.modelType === 'custom')
-                   ? 'classification' // Default fallback for unsupported types
-                   : (workflowModel?.modelType || 'classification'),
+      modelType: mapModelType(workflowModel?.modelType),
       baselineDatasetName: baselineDataset?.name || '',
       referenceDatasetName: referenceDataset?.name || '',
     });

@@ -113,16 +113,21 @@ const ReportConfiguration: React.FC = () => {
     const baselineDataset = modelDatasets.find(d => d.id === formData.baselineDatasetId);
     const referenceDataset = modelDatasets.find(d => d.id === formData.referenceDatasetId);
 
+    // Map model type to supported types: classification, regression, timeseries
+    const mapModelType = (type: string | undefined): 'classification' | 'regression' | 'timeseries' => {
+      if (!type) return 'classification';
+      const lower = type.toLowerCase();
+      if (lower === 'regression') return 'regression';
+      if (lower === 'timeseries' || lower === 'time_series') return 'timeseries';
+      return 'classification'; // Default for all other types
+    };
+
     if (editingConfigId) {
       // Update existing configuration
       updateReportConfiguration(editingConfigId, {
         ...formData,
         modelName,
-        modelType: (selectedModel?.modelType === 'clustering' || 
-                     selectedModel?.modelType === 'nlp' || 
-                     selectedModel?.modelType === 'custom') 
-                     ? 'classification' // Default fallback for unsupported types
-                     : selectedModel?.modelType,
+        modelType: mapModelType(selectedModel?.modelType),
         baselineDatasetName: baselineDataset?.name || '',
         referenceDatasetName: referenceDataset?.name || '',
       });
@@ -151,11 +156,7 @@ const ReportConfiguration: React.FC = () => {
       createReportConfiguration({
         ...formData,
         modelName,
-        modelType: (selectedModel?.modelType === 'clustering' || 
-                     selectedModel?.modelType === 'nlp' || 
-                     selectedModel?.modelType === 'custom')
-                     ? 'classification' // Default fallback for unsupported types
-                     : (selectedModel?.modelType || 'classification'),
+        modelType: mapModelType(selectedModel?.modelType),
         baselineDatasetName: baselineDataset?.name || '',
         referenceDatasetName: referenceDataset?.name || '',
       });
