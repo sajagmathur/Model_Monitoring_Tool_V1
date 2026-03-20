@@ -5041,24 +5041,44 @@ export default function Projects() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newProjectForm, setNewProjectForm] = useState({ name: '', description: '' });
 
-  // Sync local projects to GlobalContext on mount (for existing projects)
+  // Sync local projects to GlobalContext on mount AND align local IDs to GlobalContext IDs.
+  // This fixes the core bug: local projects used 'proj-XXXX' ids while GlobalContext uses
+  // 'TIMESTAMP_RANDOM' ids. Registry models keyed by the wrong id never showed in folders.
   useEffect(() => {
-    if (projects.length > 0) {
-      projects.forEach((project) => {
-        // Check if project already exists in GlobalContext by name
-        const exists = globalProjects.some((gp) => gp.name === project.name);
-        if (!exists) {
-          createGlobalProject({
-            name: project.name,
-            description: project.description,
-            environment: 'dev',
-            status: 'active',
-            code: [],
-          });
+    if (projects.length === 0) return;
+    let needsUpdate = false;
+    const synced = projects.map((project) => {
+      const globalMatch = globalProjects.find((gp) => gp.name === project.name);
+      if (globalMatch) {
+        // Align local ID to GlobalContext ID so registry model lookups work
+        if (globalMatch.id !== project.id) {
+          needsUpdate = true;
+          return { ...project, id: globalMatch.id };
         }
-      });
+        return project;
+      } else {
+        // Not in GlobalContext yet — create it and adopt its ID
+        const created = createGlobalProject({
+          name: project.name,
+          description: project.description,
+          environment: 'dev',
+          status: 'active',
+          code: [],
+        });
+        needsUpdate = true;
+        return { ...project, id: created.id };
+      }
+    });
+    if (needsUpdate) {
+      // Find which selected project name we were on, re-select by name after ID update
+      const selectedName = projects.find((p) => p.id === selectedProjectId)?.name;
+      setProjects(synced);
+      if (selectedName) {
+        const reSelected = synced.find((p) => p.name === selectedName);
+        if (reSelected) setSelectedProjectId(reSelected.id);
+      }
     }
-  }, []); // Run only on mount
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save projects to localStorage whenever they change
   useEffect(() => {
@@ -5077,8 +5097,19 @@ export default function Projects() {
       return;
     }
 
+    // Create in GlobalContext FIRST so we get the canonical ID that registry
+    // models will also be stored against. This ensures the folder view in
+    // ModelRegistry can match models to projects by ID.
+    const globalProject = createGlobalProject({
+      name: newProjectForm.name,
+      description: newProjectForm.description,
+      environment: 'dev',
+      status: 'active',
+      code: [],
+    });
+
     const newProject: Project = {
-      id: `proj-${Date.now()}`,
+      id: globalProject.id,  // Use GlobalContext's canonical ID
       name: newProjectForm.name,
       description: newProjectForm.description,
       createdAt: new Date().toISOString().split('T')[0],
@@ -5105,15 +5136,6 @@ export default function Projects() {
     setSelectedProjectId(newProject.id);
     setNewProjectForm({ name: '', description: '' });
     setShowCreateForm(false);
-
-    // Also add project to GlobalContext so it's available in other components (e.g., Import Model dropdown)
-    createGlobalProject({
-      name: newProjectForm.name,
-      description: newProjectForm.description,
-      environment: 'dev',
-      status: 'active',
-      code: [],
-    });
   };
 
   const deleteProject = (projectId: string) => {

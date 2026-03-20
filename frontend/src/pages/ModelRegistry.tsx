@@ -180,9 +180,15 @@ const CategoryNode: React.FC<{
                   ? isDark ? 'bg-blue-600/20 text-blue-300' : 'bg-blue-50 text-blue-700'
                   : isDark ? 'text-slate-400 hover:bg-slate-700/50' : 'text-slate-600 hover:bg-slate-100'
               }`}
+              title={`${m.name} - ${m.versions.length} version(s)`}
             >
               <Package size={10} className="flex-shrink-0" />
-              <span className="truncate">{m.name}</span>
+              <span className="truncate">
+                {(() => {
+                  const reg = registryModels.find(r => r.id === m.id);
+                  return reg?.model_id ? `${reg.model_id}_${m.name}` : m.name;
+                })()}
+              </span>
             </button>
           ))}
           {children.map(child => (
@@ -219,6 +225,9 @@ export default function ModelRegistry() {
   const [allSearch, setAllSearch] = useState('');
   // â”€â”€ Detail tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('overview');
+  const [leftView, setLeftView] = useState<'inventory' | 'all'>('inventory');
+  const [expandedPortfolios, setExpandedPortfolios] = useState<Set<string>>(new Set());
+  const [selectedInventoryId, setSelectedInventoryId] = useState<string | null>(null);
 
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -267,6 +276,12 @@ export default function ModelRegistry() {
   // â”€â”€ Assign inventory modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [assignModelId, setAssignModelId] = useState<string | null>(null);
   const [assignInvId, setAssignInvId] = useState('');
+
+  // -- Bulk import modal -------------------------------------------------
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkProjectId, setBulkProjectId] = useState('');
+  const [bulkStage, setBulkStage] = useState<'dev' | 'staging' | 'production'>('dev');
 
   // Auto-select first project when modal opens
   useEffect(() => {
@@ -329,13 +344,17 @@ export default function ModelRegistry() {
     setAssignModelId(null); setAssignInvId('');
     showNotification('âœ“ Model assigned to inventory', 'success');
   };
-  // Group models by name and organize versions
+  // Group models by (model_id, name) so two models with different model_ids
+  // but the same name are NOT clubbed into one entry.
   const groupedModels = useMemo(() => {
     const groups: Record<string, DisplayModel> = {};
 
     registryModels.forEach((model) => {
-      if (!groups[model.name]) {
-        groups[model.name] = {
+      // Unique key: if model_id exists use it together with name, otherwise
+      // fall back to name-only (preserves same-name/no-id grouping as before).
+      const key = model.model_id ? `${model.model_id}||${model.name}` : model.name;
+      if (!groups[key]) {
+        groups[key] = {
           id: model.id,
           name: model.name,
           description: `${model.modelType} model from project`,
@@ -345,7 +364,7 @@ export default function ModelRegistry() {
         };
       }
 
-      groups[model.name].versions.push({
+      groups[key].versions.push({
         id: model.id,
         version: model.version,
         stage: model.stage,
@@ -357,7 +376,7 @@ export default function ModelRegistry() {
       });
 
       // Build lineage from versions
-      groups[model.name].lineage = groups[model.name].versions.map((v) => v.version);
+      groups[key].lineage = groups[key].versions.map((v) => v.version);
     });
 
     return Object.values(groups);
@@ -368,26 +387,33 @@ export default function ModelRegistry() {
   const categories = useMemo(() => modelInventories.filter(i => !!i.parentId), [modelInventories]);
 
   const modelsInInventory = (invId: string): DisplayModel[] => {
-    const names = new Set<string>();
+    const seen = new Set<string>();
     const result: DisplayModel[] = [];
     registryModels.filter(m => m.inventoryId === invId).forEach(m => {
-      if (!names.has(m.name)) { names.add(m.name); const g = groupedModels.find(g => g.name === m.name); if (g) result.push(g); }
+      // Find the grouped entry that owns this registry model id
+      const g = groupedModels.find(g => g.id === m.id || g.versions.some(v => v.id === m.id));
+      if (g && !seen.has(g.id)) { seen.add(g.id); result.push(g); }
     });
     return result;
   };
 
   const unassignedModels = useMemo(() => {
-    const assignedNames = new Set(registryModels.filter(m => m.inventoryId).map(m => m.name));
-    return groupedModels.filter(m => !assignedNames.has(m.name));
+    const assignedIds = new Set(registryModels.filter(m => m.inventoryId).map(m => m.id));
+    // A group is unassigned when its primary (first) registry model has no inventory
+    return groupedModels.filter(m => !assignedIds.has(m.id));
   }, [groupedModels, registryModels]);
 
-  // Find selected model using stable ID lookup
+  // Find selected model using stable ID lookup.
+  // Also search inside versions so that clicking a specific registry model
+  // in the folder view (which passes rm.id directly) finds the right entry.
   const selectedModel = useMemo(() => {
     if (!selectedModelId || groupedModels.length === 0) {
       return groupedModels.length > 0 ? groupedModels[0] : null;
     }
-    const found = groupedModels.find((m) => m.id === selectedModelId);
-    return found || (groupedModels.length > 0 ? groupedModels[0] : null);
+    const found =
+      groupedModels.find((m) => m.id === selectedModelId) ??
+      groupedModels.find((m) => m.versions.some((v) => v.id === selectedModelId));
+    return found ?? (groupedModels.length > 0 ? groupedModels[0] : null);
   }, [selectedModelId, groupedModels]);
 
   // Auto-select first model only when it becomes available
@@ -398,6 +424,58 @@ export default function ModelRegistry() {
   }, [groupedModels.length, selectedModelId]);
 
   const inputCls = `w-full px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-900'}`;
+
+  const handleBulkImport = () => {
+    if (!bulkFile || !bulkProjectId) {
+      showNotification('Please select a project and upload a CSV file', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) { showNotification('CSV must have a header row and at least one data row', 'error'); return; }
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        for (const ch of line) {
+          if (ch === '"') { inQuotes = !inQuotes; }
+          else if (ch === ',' && !inQuotes) { result.push(current.trim()); current = ''; }
+          else { current += ch; }
+        }
+        result.push(current.trim());
+        return result;
+      };
+      const headers = parseCSVLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim().toLowerCase());
+      const modelIdIdx = headers.findIndex(h => h === 'model id' || h === 'model_id');
+      const modelNameIdx = headers.findIndex(h => h === 'model name' || h === 'model_name');
+      if (modelIdIdx === -1 || modelNameIdx === -1) {
+        showNotification('CSV must have "Model ID" and "Model Name" columns', 'error');
+        return;
+      }
+      let count = 0;
+      lines.slice(1).forEach(line => {
+        const cols = parseCSVLine(line).map(c => c.replace(/^"|"$/g, '').trim());
+        const mid = cols[modelIdIdx];
+        const mname = cols[modelNameIdx];
+        if (mid && mname) {
+          createRegistryModel({ name: mname, model_id: mid, version: 'v1.0', projectId: bulkProjectId, modelType: 'custom', stage: bulkStage, status: 'active', bulkImported: true });
+          count++;
+        }
+      });
+      if (count > 0) {
+        setShowBulkModal(false);
+        setBulkFile(null);
+        setBulkProjectId('');
+        setBulkStage('dev');
+        showNotification(`\u2713 ${count} model(s) imported from CSV`, 'success');
+      } else {
+        showNotification('No valid rows found in CSV', 'error');
+      }
+    };
+    reader.readAsText(bulkFile);
+  };
 
   return (
     <div className="space-y-6">
@@ -419,6 +497,12 @@ export default function ModelRegistry() {
           >
             <Upload size={16} /> Import Model
           </button>
+          <button
+            onClick={() => { setShowBulkModal(true); if (projects.length > 0) setBulkProjectId(projects[0].id); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition font-medium border ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+          >
+            <FileJson size={16} /> Bulk Import
+          </button>
           {registryModels.length > 0 && (
             <button
               onClick={handleClearAll}
@@ -436,10 +520,108 @@ export default function ModelRegistry() {
 
         {/* â”€â”€ LEFT PANEL â”€â”€ */}
         <div className={`lg:col-span-1 rounded-xl border overflow-hidden ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
-          <div className="p-3 space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 17rem)' }}>
+          {/* VIEW SWITCHER TABS */}
+          <div className={`flex border-b ${isDark ? 'border-slate-700 bg-slate-800/30' : 'border-slate-200 bg-slate-50'}`}>
+            <button
+              onClick={() => setLeftView('inventory')}
+              className={`flex-1 px-3 py-2.5 text-xs font-medium transition border-b-2 ${
+                leftView === 'inventory'
+                  ? isDark ? 'border-blue-500 text-blue-400 bg-slate-700/30' : 'border-blue-500 text-blue-600 bg-white'
+                  : isDark ? 'border-transparent text-slate-400 hover:text-slate-300' : 'border-transparent text-slate-600 hover:text-slate-700'
+              }`}
+            >
+              <Folder size={13} className="inline mr-1" /> Folders
+            </button>
+            <button
+              onClick={() => setLeftView('all')}
+              className={`flex-1 px-3 py-2.5 text-xs font-medium transition border-b-2 ${
+                leftView === 'all'
+                  ? isDark ? 'border-blue-500 text-blue-400 bg-slate-700/30' : 'border-blue-500 text-blue-600 bg-white'
+                  : isDark ? 'border-transparent text-slate-400 hover:text-slate-300' : 'border-transparent text-slate-600 hover:text-slate-700'
+              }`}
+            >
+              <List size={13} className="inline mr-1" /> All Models
+            </button>
+          </div>
+
+          <div className="p-3 space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 20rem)' }}>
+
+            {/* FOLDER VIEW */}
+            {leftView === 'inventory' && (
+              <>
+                {projects.length === 0 || groupedModels.length === 0 ? (
+                  <div className={`p-4 rounded-lg border-2 border-dashed text-center ${isDark ? 'border-slate-600 bg-slate-900/30' : 'border-slate-300 bg-slate-50'}`}>
+                    <Folder size={28} className={`mx-auto mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
+                    <p className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                      {projects.length === 0 ? 'No projects yet' : 'No models imported'}
+                    </p>
+                    <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                      {projects.length === 0 ? 'Create a project first' : 'Import models to see folder structure'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {projects.map(project => {
+                      // Directly filter registryModels by projectId — avoids
+                      // the groupedModels id-mismatch issue where the grouped
+                      // entry stores only the *first* model's id for a name.
+                      const projectRegModels = registryModels.filter(m => m.projectId === project.id);
+
+                      if (projectRegModels.length === 0) return null;
+
+                      return (
+                        <div key={project.id}>
+                          <div className={`p-2 rounded-lg flex items-center gap-2 text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                            <FolderOpen size={14} className={isDark ? 'text-blue-400' : 'text-blue-600'} />
+                            {project.name}
+                            <span className={`text-xs ml-auto px-1.5 py-0.5 rounded ${isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                              {projectRegModels.length}
+                            </span>
+                          </div>
+                          <div className="ml-3 space-y-0.5 border-l border-dashed pl-3" style={{ borderColor: isDark ? 'rgb(71, 85, 105)' : 'rgb(203, 213, 225)' }}>
+                            {projectRegModels.map(rm => {
+                              const displayName = rm.model_id ? `${rm.model_id}_${rm.name}` : rm.name;
+                              // Find the exact group that owns this registry model.
+                              // With (model_id, name) grouping each rm now has its own group,
+                              // so these two models won't be clubbed together.
+                              const ownGroup = groupedModels.find(g => g.id === rm.id || g.versions.some(v => v.id === rm.id));
+                              const selectId = ownGroup?.id ?? rm.id;
+                              const isActive =
+                                selectedModelId === selectId ||
+                                (selectedModel != null &&
+                                  selectedModel.versions.some(v => v.id === rm.id));
+                              return (
+                                <button
+                                  key={rm.id}
+                                  onClick={() => { setSelectedModelId(selectId); setActiveDetailTab('overview'); }}
+                                  className={`w-full text-left py-1.5 text-xs rounded transition border ${
+                                    isActive
+                                      ? isDark ? 'bg-blue-600/20 text-blue-400 border-blue-500/50' : 'bg-blue-50 text-blue-600 border-blue-300'
+                                      : isDark ? 'text-slate-300 hover:bg-slate-700/30 border-slate-700' : 'text-slate-700 hover:bg-slate-50 border-slate-200'
+                                  }`}
+                                  title={displayName}
+                                >
+                                  <span className="truncate block px-2">{displayName}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* Fallback when models exist but none are linked to any project */}
+                    {registryModels.length > 0 && projects.every(p => !registryModels.some(m => m.projectId === p.id)) && (
+                      <div className={`p-3 rounded-lg text-center text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        Models are not linked to any project yet. Re-import with a project selected, or check the All Models tab.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
 
             {/* â”€â”€ ALL MODELS VIEW â”€â”€ */}
-            {<>
+            {leftView === 'all' && (<>
                 <input
                   type="text"
                   value={allSearch}
@@ -472,13 +654,19 @@ export default function ModelRegistry() {
                               : isDark ? 'text-slate-300 hover:bg-slate-700/30 border-slate-700' : 'text-slate-700 hover:bg-slate-50 border-slate-200'
                           }`}
                         >
-                        <p className="text-sm font-medium truncate">{projects.find(p => p.id === regModel?.projectId)?.name ? `${projects.find(p => p.id === regModel?.projectId)!.name} – ` : ''}{regModel?.model_id || '—'} – {model.name}</p>
+                        <p className="text-xs font-medium truncate">{(() => {
+                          const proj = projects.find(p => p.id === regModel?.projectId)?.name ?? '';
+                          const mid = regModel?.model_id ? `${regModel.model_id}_${model.name}` : model.name;
+                          return proj ? `${proj} / ${mid}` : mid;
+                        })()}</p>
                         </button>
                       );
                     })}
                   </div>
                 )}
-              </>}
+              </>
+            )}
+
           </div>
         </div>
 
@@ -490,9 +678,25 @@ export default function ModelRegistry() {
               <div className={`p-5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      {selectedModel.name}
-                    </h2>
+                    {(() => {
+                      const regModel = registryModels.find(r => r.id === selectedModel.id);
+                      const projectName = regModel ? (projects.find(p => p.id === regModel.projectId)?.name || '') : '';
+                      const modelIdDisplay = regModel?.model_id ? `${regModel.model_id}_${selectedModel.name}` : selectedModel.name;
+                      const headerText = projectName ? `${projectName} / ${modelIdDisplay}` : modelIdDisplay;
+                      
+                      return (
+                        <>
+                          <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                            {headerText}
+                          </h2>
+                          {regModel && (
+                            <p className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                              ID: {regModel.model_id || 'Not assigned'}
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                     <p className={`mt-0.5 text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                       {selectedModel.description}
                     </p>
@@ -1214,6 +1418,77 @@ export default function ModelRegistry() {
                   className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${(!selectedProjectId || !modelName || !importForm.modelId) ? isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed' : isDark ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
                 >
                   Import Model
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK IMPORT MODAL */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className={`w-full max-w-md rounded-xl shadow-xl ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+            <div className={`flex items-center justify-between p-5 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+              <div>
+                <h2 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Bulk Import Models (CSV)</h2>
+                <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Required columns: <span className="font-mono font-medium">Model ID</span>, <span className="font-mono font-medium">Model Name</span></p>
+              </div>
+              <button onClick={() => { setShowBulkModal(false); setBulkFile(null); setBulkProjectId(''); setBulkStage('dev'); }} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className={`p-3 rounded-lg border text-xs ${isDark ? 'bg-slate-700/40 border-slate-600 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                <p className="font-semibold mb-1">CSV format example:</p>
+                <p className="font-mono">Model ID,Model Name</p>
+                <p className="font-mono">MODEL-001,Credit Scorecard</p>
+                <p className="font-mono">MODEL-002,Fraud Detector</p>
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Target Project <span className="text-red-400">*</span></label>
+                <select value={bulkProjectId} onChange={e => setBulkProjectId(e.target.value)} className={inputCls}>
+                  <option value="">-- Select Project --</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Lifecycle Stage</label>
+                <select value={bulkStage} onChange={e => setBulkStage(e.target.value as any)} className={inputCls}>
+                  <option value="dev">Development</option>
+                  <option value="staging">Staging</option>
+                  <option value="production">Production</option>
+                </select>
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>CSV File <span className="text-red-400">*</span></label>
+                <input
+                  type="file"
+                  accept=".csv,.txt"
+                  onChange={e => setBulkFile(e.target.files?.[0] || null)}
+                  className={inputCls}
+                />
+                {bulkFile && (
+                  <p className={`text-xs mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>
+                    ✓ {bulkFile.name} ({(bulkFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => { setShowBulkModal(false); setBulkFile(null); setBulkProjectId(''); setBulkStage('dev'); }}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBulkImport}
+                  disabled={!bulkFile || !bulkProjectId}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 ${
+                    !bulkFile || !bulkProjectId
+                      ? isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : isDark ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
+                  }`}
+                >
+                  <Upload size={14} /> Import from CSV
                 </button>
               </div>
             </div>

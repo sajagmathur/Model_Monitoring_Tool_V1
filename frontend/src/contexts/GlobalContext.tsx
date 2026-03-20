@@ -991,13 +991,42 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             mergedState.bankingMetrics = bankingMetrics;
           }
           
-          // Data Migration: Synchronize projects and models on initialization
+          // Data Migration: Synchronize projects and models on initialization.
+          // Also heals the historical bug where Projects.tsx stored local 'proj-XXX'
+          // IDs on registry models that don't match any GlobalContext project ID.
           if (mergedState.projects && Array.isArray(mergedState.projects) && 
               mergedState.registryModels && Array.isArray(mergedState.registryModels)) {
             const projectIds = new Set(mergedState.projects.map((p: Project) => p.id));
             const firstProjectId = mergedState.projects.length > 0 ? mergedState.projects[0].id : null;
-            
+
+            // Build a local-id → GlobalContext-id repair map using the
+            // 'mlmonitoring_projects' store (Projects.tsx local state).
+            // If a local project with id 'proj-XXX' has the same name as a
+            // GlobalContext project, we remap registry models to the GC id.
+            const localIdToGlobalId: Record<string, string> = {};
+            try {
+              const localRaw = localStorage.getItem('mlmonitoring_projects');
+              if (localRaw) {
+                const localProjects: Array<{ id: string; name: string }> = JSON.parse(localRaw);
+                localProjects.forEach((lp) => {
+                  if (!projectIds.has(lp.id)) {
+                    // This local id is NOT a GlobalContext id — look up by name
+                    const gcMatch = mergedState.projects.find((gp: Project) => gp.name === lp.name);
+                    if (gcMatch) {
+                      localIdToGlobalId[lp.id] = gcMatch.id;
+                    }
+                  }
+                });
+              }
+            } catch {
+              // Ignore parse failures — migration is best-effort
+            }
+
             const fixedModels = mergedState.registryModels.map((model: any) => {
+              if (localIdToGlobalId[model.projectId]) {
+                // Heal stale proj-XXX → real GlobalContext id
+                return { ...model, projectId: localIdToGlobalId[model.projectId] };
+              }
               if (!model.projectId || !projectIds.has(model.projectId)) {
                 return { ...model, projectId: firstProjectId || model.projectId };
               }
