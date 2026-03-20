@@ -681,10 +681,10 @@ const KPI_METRICS: KpiMetric[] = [
   {
     id: 'change_in_ks',
     label: 'Change in KS%',
-    description: 'Percentage change in KS relative to reference: [(KS_Ref − KS_Val) / KS_Ref] × 100.',
+    description: 'Percentage change in KS calculated with reference vs baseline comparison: [(KS_Ref − KS_Val) / KS_Ref] × 100. Inner breach: 20% change; Outer breach: 25% change.',
     defaultEnabled: true,
-    defaultInner: '',
-    defaultOuter: '',
+    defaultInner: '20%',
+    defaultOuter: '25%',
     section: 'standard',
   },
   {
@@ -692,8 +692,8 @@ const KPI_METRICS: KpiMetric[] = [
     label: 'AUC (Area Under Curve)',
     description: 'Probability that the model ranks a bad higher than a good.',
     defaultEnabled: true,
-    defaultInner: '',
-    defaultOuter: '',
+    defaultInner: '20%',
+    defaultOuter: '25%',
     section: 'standard',
   },
   {
@@ -710,8 +710,8 @@ const KPI_METRICS: KpiMetric[] = [
     label: 'PSI (Population Stability Index)',
     description: 'Detects score distribution drift compared to the reference population.',
     defaultEnabled: true,
-    defaultInner: '6',
-    defaultOuter: '5%',
+    defaultInner: '20%',
+    defaultOuter: '25%',
     section: 'standard',
   },
   {
@@ -725,8 +725,9 @@ const KPI_METRICS: KpiMetric[] = [
   },
   {
     id: 'rob',
-    label: 'ROB (Rate of Bad)',
-    description: 'Tracks the rate of bad outcomes across score bands.',
+    label: 'ROB (Rank Order Break)',
+    description: 'Tracks rank-order break across score bands — verifies that higher-risk bands consistently exhibit higher bad rates.',
+
     defaultEnabled: true,
     defaultInner: '',
     defaultOuter: '',
@@ -735,10 +736,10 @@ const KPI_METRICS: KpiMetric[] = [
   {
     id: 'mape',
     label: 'MAPE (Mean Absolute Percentage Error)',
-    description: 'Measures average absolute percentage error of model predictions.',
+    description: 'Measures average absolute percentage error of model predictions. Also used to assess Rank Order Break (ROB) — higher score bands should maintain lower prediction error.',
     defaultEnabled: true,
-    defaultInner: '',
-    defaultOuter: '',
+    defaultInner: '20%',
+    defaultOuter: '25%',
     section: 'standard',
   },
   {
@@ -906,8 +907,8 @@ const KPI_METRICS: KpiMetric[] = [
   },
   {
     id: 'var_level_rob',
-    label: 'Variable Level ROB',
-    description: 'Rate of Bad broken down by individual feature bins.',
+    label: 'Variable Level ROB (Rank Order Break)',
+    description: 'Rank Order Break broken down by individual feature bins — validates that bad rates increase monotonically with risk score across each feature.',
     defaultEnabled: true,
     defaultInner: '',
     defaultOuter: '',
@@ -945,8 +946,8 @@ export const ModelMetricsStep: React.FC<{
   const hasAccountDataset = !!(workflow as any).dataIngestionConfig?.accountLevelDataset;
 
   // Allowlist by data type
-  const SCORE_ONLY_IDS = ['ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape'];
-  const ACCOUNT_ALLOWED_IDS = ['ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape', 'type1_error', 'type2_error', 'accuracy', 'precision', 'recall', 'f1_score', 'hrl', 'univariate', 'csi_features', 'iv', 'feature_importance', 'shap', 'wald_chi_sq', 'p_values', 'estimate', 'var_level_rob', 'outlier_detection', 'missing_value'];
+  const SCORE_ONLY_IDS = ['ks', 'change_in_ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape'];
+  const ACCOUNT_ALLOWED_IDS = ['ks', 'change_in_ks', 'auc', 'gini', 'psi', 'jsd', 'rob', 'mape', 'type1_error', 'type2_error', 'accuracy', 'precision', 'recall', 'f1_score', 'hrl', 'univariate', 'csi_features', 'iv', 'feature_importance', 'shap', 'wald_chi_sq', 'p_values', 'estimate', 'var_level_rob', 'outlier_detection', 'missing_value'];
   const allowedIds: string[] = hasScoreDataset && !hasAccountDataset ? SCORE_ONLY_IDS
     : hasAccountDataset ? ACCOUNT_ALLOWED_IDS
     : KPI_METRICS.map(k => k.id);
@@ -965,7 +966,17 @@ export const ModelMetricsStep: React.FC<{
     setMetrics(prev => prev.map(m => m.id === id ? { ...m, enabled: !m.enabled, isPrimary: !m.enabled ? m.isPrimary : false } : m));
 
   const togglePrimary = (id: string) =>
-    setMetrics(prev => prev.map(m => m.id === id ? { ...m, isPrimary: !m.isPrimary } : m));
+    setMetrics(prev => prev.map(m => {
+      if (m.id !== id) return m;
+      const newIsPrimary = !m.isPrimary;
+      const kpiDef = KPI_METRICS.find(k => k.id === id);
+      return {
+        ...m,
+        isPrimary: newIsPrimary,
+        innerThreshold: newIsPrimary && !m.innerThreshold && kpiDef?.defaultInner ? kpiDef.defaultInner : m.innerThreshold,
+        outerThreshold: newIsPrimary && !m.outerThreshold && kpiDef?.defaultOuter ? kpiDef.defaultOuter : m.outerThreshold,
+      };
+    }));
 
   const updateThreshold = (id: string, field: 'innerThreshold' | 'outerThreshold', value: string) =>
     setMetrics(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
@@ -2546,10 +2557,10 @@ export const DataQualityStep: React.FC<{
 
   const handleExportExcel = () => {
     if (Object.keys(dqCheckResults).length === 0) return;
-    const rows = ['Dataset,Level,Check Group,Check Name,Value,Threshold,Status'];
+    const rows = ['Dataset,Level,Check Group,Check Name,Value'];
     Object.values(dqCheckResults).forEach(result => {
       result.checks.forEach(check => {
-        rows.push(`"${result.datasetName}","${result.level}","${check.group}","${check.name}","${check.value}","${check.threshold}","${check.status}"`);
+        rows.push(`"${result.datasetName}","${result.level}","${check.group}","${check.name}","${check.value}"`);
       });
     });
     const blob = new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -2568,9 +2579,9 @@ export const DataQualityStep: React.FC<{
     Object.values(dqCheckResults).forEach(result => {
       const groups = [...new Set(result.checks.map(c => c.group))];
       groups.forEach(group => {
-        html += `<div class="slide"><h2>${result.datasetName} &mdash; ${group}</h2><table><tr><th>Check</th><th>Value</th><th>Threshold</th><th>Status</th></tr>`;
+        html += `<div class="slide"><h2>${result.datasetName} &mdash; ${group}</h2><table><tr><th>Check</th><th>Value</th></tr>`;
         result.checks.filter(c => c.group === group).forEach(c => {
-          html += `<tr><td>${c.name}</td><td>${c.value}</td><td>${c.threshold}</td><td class="${c.status}">${c.status.toUpperCase()}</td></tr>`;
+          html += `<tr><td>${c.name}</td><td>${c.value}</td></tr>`;
         });
         html += `</table></div>`;
       });
@@ -3079,7 +3090,7 @@ export const DataQualityStep: React.FC<{
                           <table className="w-full text-sm">
                             <thead>
                               <tr className={`border-b ${ isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                                {['Check', 'Value', 'Threshold', 'Status', 'Detail'].map(h => (
+                                {['Check', 'Value', 'Detail'].map(h => (
                                   <th key={h} className={`text-left py-2 px-3 text-xs font-medium ${ isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                                 ))}
                               </tr>
@@ -3089,16 +3100,6 @@ export const DataQualityStep: React.FC<{
                                 <tr key={check.id} className={`border-b last:border-0 ${ isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                                   <td className={`py-2 px-3 font-medium ${ isDark ? 'text-white' : 'text-slate-800'}`}>{check.name}</td>
                                   <td className={`py-2 px-3 ${ isDark ? 'text-slate-300' : 'text-slate-700'}`}>{check.value}</td>
-                                  <td className={`py-2 px-3 ${ isDark ? 'text-slate-400' : 'text-slate-500'}`}>{check.threshold}</td>
-                                  <td className="py-2 px-3">
-                                    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${
-                                      check.status === 'pass' ? isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
-                                      : check.status === 'warn' ? isDark ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
-                                      : isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
-                                    }`}>
-                                      {check.status === 'pass' ? '✓' : check.status === 'warn' ? '⚠' : '✗'} {check.status}
-                                    </span>
-                                  </td>
                                   <td className={`py-2 px-3 text-xs ${ isDark ? 'text-slate-400' : 'text-slate-500'}`}>{check.detail || '—'}</td>
                                 </tr>
                               ))}
@@ -4728,20 +4729,6 @@ export const KpiGenerationStep: React.FC<{
       {/* Results table */}
       {results && (
         <>
-          {/* Summary tiles */}
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: 'Pass', count: passCount, color: isDark ? 'bg-green-900/30 border-green-700/40 text-green-300' : 'bg-green-50 border-green-200 text-green-700' },
-              { label: 'Warn', count: warnCount, color: isDark ? 'bg-amber-900/30 border-amber-700/40 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-700' },
-              { label: 'Fail', count: failCount, color: isDark ? 'bg-red-900/30 border-red-700/40 text-red-300' : 'bg-red-50 border-red-200 text-red-700' },
-            ].map(({ label, count, color }) => (
-              <div key={label} className={`rounded-xl border p-4 text-center ${color}`}>
-                <p className="text-2xl font-bold">{count}</p>
-                <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
-              </div>
-            ))}
-          </div>
-
           {/* Report saved badge */}
           {reportSaved && (
             <div className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium ${isDark ? 'bg-green-900/20 border-green-700/40 text-green-300' : 'bg-green-50 border-green-200 text-green-700'}`}>

@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { Upload, FileText, X, Brain, Plus } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -320,7 +320,7 @@ function computeEnhancedSummary(rows: Record<string, any>[], targetCol: string, 
 
 // -----------------------------------------------------------------------------
 // VintageSelector Component
-// -----------------------------------------------------------------------------
+// -------------------------------------------------------------------------
 const VintageRangeInput: React.FC<{
   vintageFrom: string;
   vintageTo: string;
@@ -328,72 +328,181 @@ const VintageRangeInput: React.FC<{
   onToChange: (v: string) => void;
   isDark: boolean;
 }> = ({ vintageFrom, vintageTo, onFromChange, onToChange, isDark }) => {
-  const [aiSuggestion, setAiSuggestion] = useState<{ from: string; to: string } | null>(null);
+  // Flat ordered list of all month tokens, e.g. ["Jan-19","Feb-19",...]
+  const allMonths: string[] = Object.keys(VINTAGES_BY_YEAR)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .flatMap(y => VINTAGES_BY_YEAR[y]);
+
+  // Expand a from/to range into every month in between
+  const rangeToSet = (from: string, to: string): Set<string> => {
+    const s = new Set<string>();
+    const fi = allMonths.indexOf(from);
+    const ti = allMonths.indexOf(to);
+    if (fi === -1 || ti === -1) return s;
+    for (let i = Math.min(fi, ti); i <= Math.max(fi, ti); i++) s.add(allMonths[i]);
+    return s;
+  };
+
+  const [selected, setSelected] = useState<Set<string>>(() =>
+    rangeToSet(vintageFrom, vintageTo)
+  );
+  const [aiSuggestion, setAiSuggestion] = useState<string[] | null>(null);
+
+  // Propagate min/max of selected set to parent
+  const propagate = (next: Set<string>) => {
+    if (next.size === 0) { onFromChange(''); onToChange(''); return; }
+    const sorted = allMonths.filter(m => next.has(m));
+    onFromChange(sorted[0]);
+    onToChange(sorted[sorted.length - 1]);
+  };
+
+  const toggle = (token: string) => {
+    const next = new Set(selected);
+    if (next.has(token)) next.delete(token); else next.add(token);
+    setSelected(next);
+    propagate(next);
+  };
+
+  const toggleYear = (year: number) => {
+    const ym = VINTAGES_BY_YEAR[year];
+    const allSel = ym.every(m => selected.has(m));
+    const next = new Set(selected);
+    if (allSel) ym.forEach(m => next.delete(m));
+    else ym.forEach(m => next.add(m));
+    setSelected(next);
+    propagate(next);
+  };
+
+  const selectAll = () => {
+    const next = new Set(allMonths);
+    setSelected(next);
+    propagate(next);
+  };
+
+  const clearAll = () => {
+    setSelected(new Set());
+    onFromChange('');
+    onToChange('');
+  };
 
   const suggestRange = () => {
     const now = new Date();
-    const toDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const fromDate = new Date(toDate.getFullYear(), toDate.getMonth() - 11, 1);
-    const fmt = (d: Date) => `${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`;
-    setAiSuggestion({ from: fmt(fromDate), to: fmt(toDate) });
+    const suggested: string[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1);
+      suggested.push(`${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`);
+    }
+    setAiSuggestion(suggested.filter(m => allMonths.includes(m)));
   };
 
   const acceptSuggestion = () => {
     if (!aiSuggestion) return;
-    onFromChange(aiSuggestion.from);
-    onToChange(aiSuggestion.to);
+    const next = new Set(aiSuggestion);
+    setSelected(next);
+    propagate(next);
     setAiSuggestion(null);
   };
 
-  const inp = `rounded-md px-3 py-2 text-sm border w-full ${
-    isDark ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
-  } focus:outline-none focus:ring-2 focus:ring-blue-500`;
+  const years = Object.keys(VINTAGES_BY_YEAR).map(Number).sort((a, b) => a - b);
+  const sortedSelected = allMonths.filter(m => selected.has(m));
+  const summary =
+    selected.size === 0
+      ? 'No months selected'
+      : selected.size === 1
+      ? sortedSelected[0]
+      : `${sortedSelected[0]} - ${sortedSelected[sortedSelected.length - 1]} (${selected.size} months)`;
 
   return (
     <div>
+      {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <span className={`text-xs font-medium ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          Reference Vintage Range
+          Reference Vintage
         </span>
-        <button
-          type="button"
-          onClick={suggestRange}
-          className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-medium ${isDark ? 'text-purple-300 hover:bg-purple-900/30' : 'text-purple-600 hover:bg-purple-50'}`}
-        >
-          <Brain size={11} /> AI Suggest
-        </button>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>From</label>
-          <input
-            type="text"
-            value={vintageFrom}
-            onChange={e => onFromChange(e.target.value)}
-            placeholder="e.g. Jan-23"
-            className={inp}
-          />
-        </div>
-        <div>
-          <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>To</label>
-          <input
-            type="text"
-            value={vintageTo}
-            onChange={e => onToChange(e.target.value)}
-            placeholder="e.g. Dec-24"
-            className={inp}
-          />
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={clearAll}
+            className={`text-xs px-2 py-0.5 rounded hover:underline ${isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
+            Clear
+          </button>
+          <button type="button" onClick={selectAll}
+            className={`text-xs px-2 py-0.5 rounded hover:underline ${isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
+            All
+          </button>
+          <button type="button" onClick={suggestRange}
+            className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-medium ${isDark ? 'text-purple-300 hover:bg-purple-900/30' : 'text-purple-600 hover:bg-purple-50'}`}>
+            <Brain size={11} /> AI Suggest
+          </button>
         </div>
       </div>
-      {vintageFrom && vintageTo && (
-        <p className={`text-xs mt-1.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-          Range: <strong>{vintageFrom}</strong> to <strong>{vintageTo}</strong>
-        </p>
-      )}
+
+      {/* Year/month grid */}
+      <div className={`rounded-lg border divide-y overflow-hidden ${isDark ? 'border-gray-700 divide-gray-700' : 'border-gray-200 divide-gray-200'}`}>
+        {years.map(year => {
+          const ym = VINTAGES_BY_YEAR[year];
+          const allSel = ym.every(m => selected.has(m));
+          const someSel = !allSel && ym.some(m => selected.has(m));
+          return (
+            <div key={year} className={`px-3 py-2 ${isDark ? 'bg-gray-900/40' : 'bg-white'}`}>
+              {/* Year row */}
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  type="checkbox"
+                  id={`yr-${year}`}
+                  checked={allSel}
+                  ref={el => { if (el) el.indeterminate = someSel; }}
+                  onChange={() => toggleYear(year)}
+                  className="w-3.5 h-3.5 cursor-pointer accent-blue-500"
+                />
+                <label htmlFor={`yr-${year}`}
+                  className={`text-xs font-semibold cursor-pointer select-none ${isDark ? 'text-gray-100' : 'text-gray-800'}`}>
+                  {year}
+                </label>
+                <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                  ({ym.filter(m => selected.has(m)).length}/{ym.length})
+                </span>
+              </div>
+              {/* Month pills */}
+              <div className="flex flex-wrap gap-1">
+                {ym.map(token => {
+                  const isSel = selected.has(token);
+                  return (
+                    <button
+                      key={token}
+                      type="button"
+                      onClick={() => toggle(token)}
+                      className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                        isSel
+                          ? isDark
+                            ? 'bg-blue-600 border-blue-500 text-white'
+                            : 'bg-blue-500 border-blue-500 text-white'
+                          : isDark
+                            ? 'bg-transparent border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200'
+                            : 'bg-white border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600'
+                      }`}
+                    >
+                      {token.split('-')[0]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Summary */}
+      <p className={`text-xs mt-1.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+        Selected: <strong>{summary}</strong>
+      </p>
+
+      {/* AI suggestion banner */}
       {aiSuggestion && (
         <div className={`mt-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs ${isDark ? 'bg-purple-900/30 border border-purple-700/40 text-purple-300' : 'bg-purple-50 border border-purple-200 text-purple-700'}`}>
           <Brain size={11} />
-          <span className="flex-1">AI suggests: <strong>{aiSuggestion.from}</strong> to <strong>{aiSuggestion.to}</strong> (last 12 months)</span>
+          <span className="flex-1">
+            AI suggests: last 12 months ({aiSuggestion[0]} - {aiSuggestion[aiSuggestion.length - 1]})
+          </span>
           <button type="button" onClick={acceptSuggestion} className="font-semibold underline">Accept</button>
           <button type="button" onClick={() => setAiSuggestion(null)} className="opacity-60 hover:opacity-100"><X size={10} /></button>
         </div>
