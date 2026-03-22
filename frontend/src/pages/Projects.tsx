@@ -727,7 +727,6 @@ const KPI_METRICS: KpiMetric[] = [
     id: 'rob',
     label: 'ROB (Rank Order Break)',
     description: 'Tracks rank-order break across score bands — verifies that higher-risk bands consistently exhibit higher bad rates.',
-
     defaultEnabled: true,
     defaultInner: '',
     defaultOuter: '',
@@ -797,27 +796,9 @@ const KPI_METRICS: KpiMetric[] = [
     section: 'standard',
   },
   {
-    id: 'r2',
-    label: 'R² (R-Squared)',
-    description: 'R-Squared coefficient of determination — proportion of variance explained.',
-    defaultEnabled: true,
-    defaultInner: '',
-    defaultOuter: '',
-    section: 'standard',
-  },
-  {
     id: 'adjusted_r2',
     label: 'Adjusted R²',
     description: 'R-Squared adjusted for number of predictors in the model.',
-    defaultEnabled: true,
-    defaultInner: '',
-    defaultOuter: '',
-    section: 'standard',
-  },
-  {
-    id: 'rmse',
-    label: 'RMSE (Root Mean Squared Error)',
-    description: 'Root Mean Squared Error — measures average magnitude of prediction errors.',
     defaultEnabled: true,
     defaultInner: '',
     defaultOuter: '',
@@ -934,6 +915,15 @@ const KPI_METRICS: KpiMetric[] = [
   },
 ];
 
+// Fixed set of metrics shown in the KPI Generation tab (Reference Dataset)
+const KPI_GENERATION_IDS = [
+  'ks', 'auc', 'gini', 'mape',
+  'type1_error', 'type2_error', 'accuracy', 'precision', 'recall', 'f1_score',
+  'hrl',
+  'univariate', 'csi_features', 'iv', 'feature_importance', 'shap', 'wald_chi_sq', 'p_values', 'estimate',
+  'outlier_detection', 'missing_value',
+];
+
 export const ModelMetricsStep: React.FC<{
   workflow: Workflow;
   onComplete: (config: Workflow['modelMetricsConfig']) => void;
@@ -952,6 +942,11 @@ export const ModelMetricsStep: React.FC<{
     : hasAccountDataset ? ACCOUNT_ALLOWED_IDS
     : KPI_METRICS.map(k => k.id);
   const visibleKpis = KPI_METRICS.filter(k => allowedIds.includes(k.id));
+  // Split into reference-dataset KPIs (defaultEnabled: true) and additional monitoring KPIs (defaultEnabled: false)
+  const primaryVisibleKpis = visibleKpis.filter(k => k.defaultEnabled);
+  const additionalVisibleKpis = visibleKpis.filter(k => !k.defaultEnabled);
+
+  const [showAdditionalMetrics, setShowAdditionalMetrics] = useState(false);
 
   const [metrics, setMetrics] = useState<Array<{ id: string; enabled: boolean; isPrimary: boolean; innerThreshold: string; outerThreshold: string }>>(
     KPI_METRICS.map(kpi => {
@@ -1128,8 +1123,26 @@ export const ModelMetricsStep: React.FC<{
           </span>
         </div>
         <div className="space-y-2">
-          {visibleKpis.map(renderMetricRow)}
+          {primaryVisibleKpis.map(renderMetricRow)}
         </div>
+        {additionalVisibleKpis.length > 0 && (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => setShowAdditionalMetrics(v => !v)}
+              className={`flex items-center gap-2 text-xs font-medium py-2 transition-colors ${isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform ${showAdditionalMetrics ? 'rotate-90' : ''}`}><polyline points="9 18 15 12 9 6"/></svg>
+              {showAdditionalMetrics ? 'Hide' : 'Show'} additional monitoring metrics ({additionalVisibleKpis.length})
+              <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>PSI · JSD · ROB · CSI · R² · RMSE</span>
+            </button>
+            {showAdditionalMetrics && (
+              <div className="space-y-2 mt-2">
+                {additionalVisibleKpis.map(renderMetricRow)}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Continue */}
@@ -1179,6 +1192,7 @@ const ModelRepositoryStep: React.FC<{
   const [selectedModel, setSelectedModel] = useState<ModelVersion | null>(null);
   const [activeTab, setActiveTab] = useState<'identity' | 'governance' | 'performance' | 'lineage'>('identity');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [coefficientsFile, setCoefficientsFile] = useState<File | null>(null);
   const [modelFileFormat, setModelFileFormat] = useState<'PMML' | 'ONNX' | 'Pickle' | 'JSON'>('PMML');
   const [appendToExisting, setAppendToExisting] = useState(false);
   const [appendToModelId, setAppendToModelId] = useState('');
@@ -1856,44 +1870,39 @@ const ModelRepositoryStep: React.FC<{
                 <p className={`text-sm font-medium mb-3 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
                   Step 2: Upload Model File <span className={`text-xs font-normal ml-1 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>(Optional — can upload later in Model Repository)</span>
                 </p>
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  {(['PMML', 'ONNX', 'Pickle', 'JSON'] as const).map((format) => (
-                    <button
-                      key={format}
-                      onClick={() => setModelFileFormat(format)}
-                      className={`px-3 py-2 rounded text-sm transition border ${
-                        modelFileFormat === format
-                          ? theme === 'dark'
-                            ? 'bg-blue-600/30 border-blue-500 text-blue-300'
-                            : 'bg-blue-50 border-blue-500 text-blue-700'
-                          : theme === 'dark'
-                          ? 'bg-slate-700/50 border-slate-600 hover:bg-slate-700 text-slate-400'
-                          : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {format}
-                    </button>
-                  ))}
-                </div>
 
-                <label className={`cursor-pointer flex items-center justify-center gap-2 py-6 rounded-lg border-2 border-dashed transition ${
+                {/* PKL file */}
+                <p className={`text-xs font-semibold mb-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Model PKL File (.pkl)</p>
+                <label className={`cursor-pointer flex items-center gap-3 py-4 px-4 rounded-lg border-2 border-dashed mb-4 transition ${
                   theme === 'dark' ? 'border-slate-600 hover:bg-slate-800/50' : 'border-slate-300 hover:bg-slate-100'
                 }`}>
-                  <Upload size={20} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} />
-                  <div className="text-center">
+                  <Upload size={18} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-500'} />
+                  <div>
                     <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                      {uploadedFile ? uploadedFile.name : `Upload ${modelFileFormat} model`}
+                      {uploadedFile ? uploadedFile.name : 'Upload model.pkl'}
                     </p>
                     <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-500'}`}>
-                      {uploadedFile ? 'Click to replace' : 'Click to select file'}
+                      {uploadedFile ? 'Click to replace' : '.pkl or .pickle only'}
                     </p>
                   </div>
-                  <input
-                    type="file"
-                    accept=".pmml,.onnx,.pkl,.pickle,.json"
-                    onChange={(e) => setUploadedFile(e.target.files?.[0] || null)}
-                    className="hidden"
-                  />
+                  <input type="file" accept=".pkl,.pickle" onChange={(e) => setUploadedFile(e.target.files?.[0] || null)} className="hidden" />
+                </label>
+
+                {/* Coefficients Excel file */}
+                <p className={`text-xs font-semibold mb-1 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Coefficients / Variables File (.xlsx, .xls)</p>
+                <label className={`cursor-pointer flex items-center gap-3 py-4 px-4 rounded-lg border-2 border-dashed transition ${
+                  theme === 'dark' ? 'border-slate-600 hover:bg-slate-800/50' : 'border-slate-300 hover:bg-slate-100'
+                }`}>
+                  <Upload size={18} className={theme === 'dark' ? 'text-slate-400' : 'text-slate-500'} />
+                  <div>
+                    <p className={`text-sm font-medium ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                      {coefficientsFile ? coefficientsFile.name : 'Upload coefficients/variables Excel file (.xlsx, .xls)'}
+                    </p>
+                    <p className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-slate-500'}`}>
+                      {coefficientsFile ? 'Click to replace' : '.xlsx or .xls only'}
+                    </p>
+                  </div>
+                  <input type="file" accept=".xlsx,.xls" onChange={(e) => setCoefficientsFile(e.target.files?.[0] || null)} className="hidden" />
                 </label>
               </div>
 
@@ -2508,43 +2517,37 @@ export const DataQualityStep: React.FC<{
   const runDataChecks = (dataset: any, level: 'score' | 'account'): DQCheck[] => {
     const rows = dataset.rows || 1000;
     const cols = (dataset.columnsList?.length || dataset.columns || 10);
-    const seed = rows % 97; // deterministic variation per dataset
-    const missingRate = parseFloat((1.5 + (seed % 30) / 10).toFixed(1));
+    const seed = rows % 97;
+    const badRate = parseFloat((2.8 + (seed % 18) / 10).toFixed(1));
+    const badCount = Math.round(rows * badRate / 100);
     const dupRate = parseFloat((0.2 + (seed % 8) / 10).toFixed(1));
-    const meanShift = parseFloat((0.5 + (seed % 28) / 10).toFixed(1));
-    const stdShift = parseFloat((0.3 + (seed % 14) / 10).toFixed(1));
-    const outlierRate = parseFloat((0.8 + (seed % 14) / 10).toFixed(1));
-    const zeroRate = parseFloat((3.1 + (seed % 18) / 10).toFixed(1));
-    const newCatRate = parseFloat((1.2 + (seed % 24) / 10).toFixed(1));
-    const domCat = 35 + (seed % 38);
-    const rareCat = parseFloat((0.8 + (seed % 18) / 10).toFixed(1));
-    const missingDate = parseFloat(((seed % 8 === 0 ? 0.0 : (seed % 3) / 10)).toFixed(1));
-    const acctOverlap = parseFloat((8 + seed % 14).toFixed(1));
-    const acctRatio = parseFloat((1.1 + (seed % 9) / 10).toFixed(1));
+    const missingRate = parseFloat((1.5 + (seed % 30) / 10).toFixed(1));
+    const catMissingRate = parseFloat((1.2 + (seed % 20) / 10).toFixed(1));
+    const dateMissingRate = parseFloat((seed % 8 === 0 ? 0.0 : (seed % 3) / 10).toFixed(1));
+
+    const sharedChecks: DQCheck[] = [
+      { id: 'volume_bads', group: 'Volume Checks', name: 'Volume => Bads', value: `${rows.toLocaleString()} rows / ${badCount.toLocaleString()} bads (${badRate}%)`, threshold: 'Bad rate 1%–20%', status: badRate >= 1 && badRate <= 20 ? 'pass' : badRate < 1 ? 'warn' : 'fail', detail: 'Total record count and bad event count' },
+      { id: 'score_range', group: 'Score Distribution', name: 'Score Range / Nodes with Description', value: '0–1000 (10 nodes)', threshold: 'Valid range expected', status: 'pass', detail: 'Score bands and node descriptions verified' },
+    ];
+
+    if (level === 'score') return sharedChecks;
+
     return [
-      // Group 1: Dataset Basics
-      { id: 'missing_rate', group: 'Dataset Basics', name: 'Missing Value Rate', value: `${missingRate}%`, threshold: '< 5%', status: missingRate < 5 ? 'pass' : missingRate < 10 ? 'warn' : 'fail', detail: `Missing values across ~${Math.floor(cols * 0.3)} columns` },
-      { id: 'duplicate_rate', group: 'Dataset Basics', name: 'Duplicate Records', value: `${dupRate}%`, threshold: '< 1%', status: dupRate < 1 ? 'pass' : dupRate < 2 ? 'warn' : 'fail', detail: `${Math.floor(rows * dupRate / 100)} duplicate rows` },
-      { id: 'row_count', group: 'Dataset Basics', name: 'Row Count Validation', value: rows.toLocaleString(), threshold: '≥ 1,000', status: rows >= 1000 ? 'pass' : rows >= 500 ? 'warn' : 'fail', detail: 'Minimum rows for reliable analysis' },
-      { id: 'col_count', group: 'Dataset Basics', name: 'Column Count Validation', value: `${cols} cols`, threshold: '≥ 5', status: cols >= 5 ? 'pass' : 'fail', detail: 'Expected feature columns present' },
-      { id: 'target_dist', group: 'Dataset Basics', name: level === 'score' ? 'Event Rate / Class Balance' : 'Target Distribution', value: `${(2.8 + (seed % 18) / 10).toFixed(1)}% event rate`, threshold: '1% – 20%', status: 'pass', detail: 'Event rate within expected bounds' },
-      // Group 2: Numerical Variables
-      { id: 'mean_shift', group: 'Numerical Variables', name: 'Mean Shift', value: `+${meanShift}%`, threshold: '< 10%', status: meanShift < 10 ? 'pass' : meanShift < 20 ? 'warn' : 'fail', detail: 'Avg shift in numerical feature means vs baseline' },
-      { id: 'std_shift', group: 'Numerical Variables', name: 'Std Dev Shift', value: `+${stdShift}%`, threshold: '< 15%', status: stdShift < 15 ? 'pass' : stdShift < 25 ? 'warn' : 'fail', detail: 'Avg shift in numerical feature std deviations' },
-      { id: 'outlier_rate', group: 'Numerical Variables', name: 'Outlier Rate', value: `${outlierRate}%`, threshold: '< 3%', status: outlierRate < 3 ? 'pass' : outlierRate < 6 ? 'warn' : 'fail', detail: 'Records > 3σ from mean' },
-      { id: 'zero_rate', group: 'Numerical Variables', name: 'Zero Value Rate', value: `${zeroRate}%`, threshold: '< 15%', status: zeroRate < 15 ? 'pass' : zeroRate < 25 ? 'warn' : 'fail', detail: '% zeros in numerical columns' },
-      { id: 'negative_rate', group: 'Numerical Variables', name: 'Negative Value Rate', value: '0.0%', threshold: '= 0%', status: 'pass', detail: 'No unexpected negative values' },
-      // Group 3: Categorical Variables
-      { id: 'new_category', group: 'Categorical Variables', name: 'New Category Rate', value: `${newCatRate}%`, threshold: '< 5%', status: newCatRate < 5 ? 'pass' : newCatRate < 10 ? 'warn' : 'fail', detail: 'Categories not seen during model training' },
-      { id: 'dominant_cat', group: 'Categorical Variables', name: 'Dominant Category Concentration', value: `${domCat}%`, threshold: '< 80%', status: domCat < 80 ? 'pass' : 'fail', detail: 'Highest-frequency category share' },
-      { id: 'rare_cat', group: 'Categorical Variables', name: 'Rare Category Rate', value: `${rareCat}%`, threshold: '< 5%', status: rareCat < 5 ? 'pass' : 'warn', detail: 'Categories appearing in < 1% of records' },
-      // Group 4: Date/Time Variables
-      { id: 'date_range', group: 'Date / Time Variables', name: 'Date Range Validity', value: 'Within window', threshold: 'Within model window', status: 'pass', detail: 'All dates within expected observation window' },
-      { id: 'future_date', group: 'Date / Time Variables', name: 'Future Date Rate', value: '0.0%', threshold: '= 0%', status: 'pass', detail: 'No observation dates beyond today' },
-      { id: 'missing_date', group: 'Date / Time Variables', name: 'Missing Date Rate', value: `${missingDate}%`, threshold: '< 1%', status: missingDate < 1 ? 'pass' : 'warn', detail: '% records with null date columns' },
-      // Group 5: Account-Level Checks
-      { id: 'acct_overlap', group: 'Account-Level Checks', name: 'Account Overlap Rate', value: level === 'account' ? `${acctOverlap}%` : 'N/A', threshold: '< 20%', status: level === 'account' ? (acctOverlap < 20 ? 'pass' : 'warn') : 'pass', detail: 'Accounts in both score & account datasets' },
-      { id: 'acct_ratio', group: 'Account-Level Checks', name: 'Account-to-Score Ratio', value: level === 'account' ? `1 : ${acctRatio}` : 'N/A', threshold: '≥ 1:1, ≤ 1:5', status: level === 'account' ? (acctRatio >= 1 && acctRatio <= 5 ? 'pass' : 'warn') : 'pass', detail: 'Ratio of account records to score records' },
+      { id: 'duplicate_rate', group: 'Dataset Basics', name: 'Duplicate Rows at Unique Key', value: `${dupRate}%`, threshold: '< 1%', status: dupRate < 1 ? 'pass' : dupRate < 2 ? 'warn' : 'fail', detail: `${Math.floor(rows * dupRate / 100)} duplicate rows found` },
+      ...sharedChecks,
+      { id: 'format_check', group: 'Format & Structure', name: 'Format Check and Label Correctness', value: 'Pass', threshold: 'All labels valid', status: 'pass', detail: 'Column labels match expected schema' },
+      { id: 'num_variables', group: 'Format & Structure', name: 'Number of Variables', value: `${cols}`, threshold: '≥ 5', status: cols >= 5 ? 'pass' : 'fail', detail: 'Total variable count in dataset' },
+      { id: 'var_names', group: 'Format & Structure', name: 'Variable Names', value: 'Valid', threshold: 'No special chars', status: 'pass', detail: 'All variable names conform to naming convention' },
+      { id: 'var_data_types', group: 'Format & Structure', name: 'Variable Data Types (Numerical, Categorical, Date)', value: 'Valid', threshold: 'Types match schema', status: 'pass', detail: 'Numerical, categorical, and date types validated' },
+      { id: 'num_count', group: 'Numerical Variables', name: 'Count', value: `${Math.round(cols * 0.5)} vars`, threshold: '≥ 1', status: 'pass', detail: 'Number of numerical variables detected' },
+      { id: 'num_missing', group: 'Numerical Variables', name: 'Missing# and Missing%', value: `${missingRate}%`, threshold: '< 5%', status: missingRate < 5 ? 'pass' : missingRate < 10 ? 'warn' : 'fail', detail: 'Missing values across numerical features' },
+      { id: 'num_stats', group: 'Numerical Variables', name: 'Min, Max, Mean, Median, IQR, Std Deviation', value: 'Computed', threshold: 'Within expected range', status: 'pass', detail: 'Statistical summary for all numerical features' },
+      { id: 'cat_count', group: 'Categorical Variables', name: 'Count', value: `${Math.round(cols * 0.3)} vars`, threshold: '≥ 1', status: 'pass', detail: 'Number of categorical variables detected' },
+      { id: 'cat_missing', group: 'Categorical Variables', name: 'Missing# and Missing%', value: `${catMissingRate}%`, threshold: '< 5%', status: catMissingRate < 5 ? 'pass' : catMissingRate < 10 ? 'warn' : 'fail', detail: 'Missing values across categorical features' },
+      { id: 'cat_freq', group: 'Categorical Variables', name: 'Frequency Distribution (per Feature)', value: 'Computed', threshold: 'No unseen categories', status: 'pass', detail: 'Category frequency distribution for each categorical feature' },
+      { id: 'date_count', group: 'Date Variables', name: 'Count', value: `${Math.max(1, Math.round(cols * 0.1))} vars`, threshold: '≥ 0', status: 'pass', detail: 'Number of date variables detected' },
+      { id: 'date_missing', group: 'Date Variables', name: 'Missing# and Missing%', value: `${dateMissingRate}%`, threshold: '< 1%', status: dateMissingRate < 1 ? 'pass' : 'warn', detail: 'Missing date values across date features' },
+      { id: 'date_ranges', group: 'Date Variables', name: 'Date Ranges', value: 'Within window', threshold: 'Within model window', status: 'pass', detail: 'All date values within expected observation window' },
     ];
   };
 
@@ -3045,7 +3048,7 @@ export const DataQualityStep: React.FC<{
             <div className={`p-6 rounded-lg border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                  Comprehensive Data Quality Checks (18 Checks)
+                  Data Quality Checks ({dqLevelTab === 'score' ? 2 : 16} Checks)
                 </h3>
                 <div className={`flex border rounded-lg overflow-hidden ${ isDark ? 'border-slate-600' : 'border-slate-200'}`}>
                   {([...(hasScoreDataset ? ['score' as const] : []), ...(hasAccountDataset ? ['account' as const] : [])]).map(lvl => (
@@ -4486,7 +4489,12 @@ export const KpiGenerationStep: React.FC<{
 
   const projectModels = registryModels.filter(m => m.projectId === project.id);
 
-  const enabledMetrics = (workflow.modelMetricsConfig?.selectedMetrics ?? []).filter(m => m.enabled);
+  const configuredMetrics = workflow.modelMetricsConfig?.selectedMetrics ?? [];
+  const enabledMetrics = KPI_GENERATION_IDS.map(id => {
+    const configured = configuredMetrics.find(m => m.id === id);
+    const kpiDef = KPI_METRICS.find(k => k.id === id)!;
+    return configured ?? { id, enabled: true, isPrimary: false, innerThreshold: kpiDef?.defaultInner ?? '', outerThreshold: kpiDef?.defaultOuter ?? '' };
+  });
 
   // Dummy value generators per metric type
   const generateDummyValue = (id: string): { value: number; unit: string } => {
@@ -4662,9 +4670,15 @@ export const KpiGenerationStep: React.FC<{
     <div className="space-y-6">
       {/* Header */}
       <div className={`p-4 rounded-xl border ${isDark ? 'bg-green-900/20 border-green-700/40' : 'bg-green-50 border-green-200'}`}>
-        <p className={`text-sm font-semibold ${isDark ? 'text-green-300' : 'text-green-700'}`}>KPI Generation</p>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <p className={`text-sm font-semibold ${isDark ? 'text-green-300' : 'text-green-700'}`}>KPI Generation</p>
+          <span className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border ${isDark ? 'bg-blue-900/30 border-blue-600/40 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Reference Dataset Only
+          </span>
+        </div>
         <p className={`text-xs mt-1 ${isDark ? 'text-green-400/70' : 'text-green-600'}`}>
-          Calculate all enabled KPIs against the reference dataset. Results are automatically saved to the Reports section.
+          KPIs below are calculated against the Reference Dataset. Results are automatically saved to the Reports section.
         </p>
       </div>
 
@@ -4759,8 +4773,11 @@ export const KpiGenerationStep: React.FC<{
 
           {/* Results table */}
           <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-gray-700' : 'border-gray-200 shadow-sm'}`}>
-            <div className={`px-4 py-3 ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>
+            <div className={`flex items-center justify-between px-4 py-3 ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}>
               <p className={`text-sm font-semibold ${isDark ? 'text-gray-100' : 'text-gray-800'}`}>KPI Results ({results.length})</p>
+              <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${isDark ? 'bg-blue-900/20 border-blue-700/40 text-blue-400' : 'bg-blue-50 border-blue-200 text-blue-600'}`}>
+                Reference Dataset
+              </span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -5556,6 +5573,8 @@ export default function Projects() {
                               size: 0,
                               type: 'csv',
                             },
+                            parsedRows: level === 'score' ? config.scoreParsedRows : config.accountParsedRows,
+                            detectedColumnTypes: level === 'score' ? config.scoreColumnTypes : config.accountColumnTypes,
                           });
                         });
                         const newSteps = selectedProject.workflow.steps.map((s, idx) => {
@@ -5564,11 +5583,13 @@ export default function Projects() {
                           return s;
                         });
                         createWorkflowLog(createWorkflowLogEntry(selectedProject.id, selectedProject.name, 'Data Ingestion', description));
+                        // Strip large in-memory-only fields before persisting to workflow state
+                        const { scoreParsedRows: _sp, accountParsedRows: _ap, scoreColumnTypes: _sct, accountColumnTypes: _act, ...persistableConfig } = config;
                         updateProjectWorkflow(selectedProject.id, {
                           ...selectedProject.workflow,
                           steps: newSteps,
                           currentStep: 2,
-                          dataIngestionConfig: config,
+                          dataIngestionConfig: persistableConfig,
                           selectedModel: config.modelId,
                         });
                       }}

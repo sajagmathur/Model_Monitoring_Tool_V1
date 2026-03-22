@@ -232,6 +232,7 @@ export default function ModelRegistry() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [modelFile, setModelFile] = useState<File | null>(null);
+  const [coefficientsFile, setCoefficientsFile] = useState<File | null>(null);
   const [modelName, setModelName] = useState('');
   const [modelVersion, setModelVersion] = useState('v1.0');
   const [modelStage, setModelStage] = useState<'dev' | 'staging' | 'production'>('dev');
@@ -259,6 +260,7 @@ export default function ModelRegistry() {
   const closeImportModal = () => {
     setShowImportModal(false);
     setModelFile(null);
+    setCoefficientsFile(null);
     setModelName('');
     setModelVersion('v1.0');
     setSelectedProjectId('');
@@ -846,20 +848,23 @@ export default function ModelRegistry() {
                 {activeDetailTab === 'artifacts' && (
                   <div className="space-y-4">
                     <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Upload <code className={`px-1 rounded text-xs ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>model.pkl</code> for each version.
+                      Upload <code className={`px-1 rounded text-xs ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>model.pkl</code> and/or a Coefficients Excel file for each version.
                     </p>
                     {selectedModel.versions.map(version => {
                       const regModel = registryModels.find(r => r.id === version.id);
                       if (!regModel) return null;
                       return (
-                        <div key={version.id} className={`p-4 rounded-lg border ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
-                          <p className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        <div key={version.id} className={`p-4 rounded-lg border space-y-4 ${isDark ? 'bg-slate-700/30 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                          <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
                             {selectedModel.name} — {version.version}
                             {regModel.model_id && <span className={`ml-2 text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>({regModel.model_id})</span>}
                           </p>
+
+                          {/* PKL Artifact */}
                           <div>
-                              <p className={`text-xs font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model File (.pkl / .onnx / .pmml)</p>
-                              {regModel.modelPklFile ? (
+                            <p className={`text-xs font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Model PKL File (.pkl)</p>
+                            {regModel.modelPklFile ? (
+                              <div className="space-y-2">
                                 <div className={`flex items-center gap-2 p-2.5 rounded border ${isDark ? 'bg-green-900/20 border-green-600/30' : 'bg-green-50 border-green-200'}`}>
                                   <HardDrive size={14} className="text-green-500 flex-shrink-0" />
                                   <div className="flex-1 min-w-0">
@@ -873,16 +878,62 @@ export default function ModelRegistry() {
                                   )}
                                   <label className={`cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-green-600 text-green-300 hover:bg-green-900/30' : 'border-green-400 text-green-700 hover:bg-green-100'}`}>
                                     Replace
-                                    <input type="file" accept=".pkl,.pickle,.onnx,.pmml,.h5,.pt,.pth" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Model file updated`, 'success'); }} />
+                                    <input type="file" accept=".pkl,.pickle" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Model file updated`, 'success'); }} />
                                   </label>
                                 </div>
-                              ) : (
-                                <label className={`cursor-pointer flex items-center gap-2 p-2.5 rounded border-2 border-dashed transition ${isDark ? 'border-slate-600 hover:border-blue-500 hover:bg-blue-500/10' : 'border-slate-300 hover:border-blue-400 hover:bg-blue-50'}`}>
-                                  <Upload size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
-                                  <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload model.pkl / .onnx / .pmml</span>
-                                  <input type="file" accept=".pkl,.pickle,.onnx,.pmml,.h5,.pt,.pth" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Model file uploaded`, 'success'); }} />
+                                {/* Dummy parsed model info panel */}
+                                <div className={`p-3 rounded border text-xs space-y-1 ${isDark ? 'bg-slate-800/60 border-slate-600' : 'bg-white border-slate-200'}`}>
+                                  <p className={`font-semibold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Parsed Model Info <span className={`font-normal ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>(preview)</span></p>
+                                  {[
+                                    ['Model Type', 'Logistic Regression'],
+                                    ['Framework', 'scikit-learn 1.2.0'],
+                                    ['Input Features', '15 variables'],
+                                    ['Output', 'Binary classification (0 / 1)'],
+                                    ['Serialization', 'pickle protocol 5'],
+                                  ].map(([k, v]) => (
+                                    <div key={k} className="flex gap-2">
+                                      <span className={`w-28 flex-shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{k}</span>
+                                      <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>{v}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <label className={`cursor-pointer flex items-center gap-2 p-2.5 rounded border-2 border-dashed transition ${isDark ? 'border-slate-600 hover:border-blue-500 hover:bg-blue-500/10' : 'border-slate-300 hover:border-blue-400 hover:bg-blue-50'}`}>
+                                <Upload size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
+                                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload model.pkl</span>
+                                <input type="file" accept=".pkl,.pickle" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { modelPklFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Model file uploaded`, 'success'); }} />
+                              </label>
+                            )}
+                          </div>
+
+                          {/* Coefficients Excel Artifact */}
+                          <div>
+                            <p className={`text-xs font-medium mb-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Coefficients / Variables File (.xlsx, .xls)</p>
+                            {regModel.coefficientsExcelFile ? (
+                              <div className={`flex items-center gap-2 p-2.5 rounded border ${isDark ? 'bg-blue-900/20 border-blue-600/30' : 'bg-blue-50 border-blue-200'}`}>
+                                <HardDrive size={14} className="text-blue-500 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <p className={`text-xs font-medium truncate ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>{regModel.coefficientsExcelFile.name}</p>
+                                  <p className={`text-xs ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{(regModel.coefficientsExcelFile.size / 1024).toFixed(1)} KB · Parsing deferred</p>
+                                </div>
+                                {regModel.coefficientsExcelFile.dataUrl && (
+                                  <a href={regModel.coefficientsExcelFile.dataUrl} download={regModel.coefficientsExcelFile.name} className={`inline-flex items-center gap-1 cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-blue-600 text-blue-300 hover:bg-blue-900/30' : 'border-blue-400 text-blue-700 hover:bg-blue-100'}`}>
+                                    <Download size={12} />Download
+                                  </a>
+                                )}
+                                <label className={`cursor-pointer text-xs px-2 py-1 rounded border transition ${isDark ? 'border-blue-600 text-blue-300 hover:bg-blue-900/30' : 'border-blue-400 text-blue-700 hover:bg-blue-100'}`}>
+                                  Replace
+                                  <input type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { coefficientsExcelFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Coefficients file updated`, 'success'); }} />
                                 </label>
-                              )}
+                              </div>
+                            ) : (
+                              <label className={`cursor-pointer flex items-center gap-2 p-2.5 rounded border-2 border-dashed transition ${isDark ? 'border-slate-600 hover:border-blue-500 hover:bg-blue-500/10' : 'border-slate-300 hover:border-blue-400 hover:bg-blue-50'}`}>
+                                <Upload size={14} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
+                                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload coefficients/variables Excel file (.xlsx, .xls)</span>
+                                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const dataUrl = URL.createObjectURL(f); updateRegistryModel(regModel.id, { coefficientsExcelFile: { name: f.name, path: `/models/${f.name}`, size: f.size, uploadedAt: new Date().toISOString(), dataUrl } }); showNotification(`Coefficients file uploaded`, 'success'); }} />
+                              </label>
+                            )}
                           </div>
                         </div>
                       );
@@ -890,7 +941,7 @@ export default function ModelRegistry() {
                     {selectedModel.versions.some(v => { const rm = registryModels.find(r => r.id === v.id); return rm && !rm.modelPklFile; }) && (
                       <div className={`flex items-start gap-2 p-3 rounded-lg ${isDark ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-amber-50 border border-amber-200'}`}>
                         <Info size={14} className={`flex-shrink-0 mt-0.5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
-                        <p className={`text-xs ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>Upload artifact files to enable scoring and full monitoring capabilities.</p>
+                        <p className={`text-xs ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>Upload a PKL artifact file to enable scoring and full monitoring capabilities.</p>
                       </div>
                     )}
                   </div>
@@ -1091,12 +1142,21 @@ export default function ModelRegistry() {
                       {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
-                  <div>
-                    <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                      Model File <span className={`text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(Optional — upload later in Artifacts tab)</span>
-                    </label>
-                    <input type="file" accept=".pkl,.pmml,.onnx,.json,.h5" onChange={e => setModelFile(e.target.files?.[0] || null)} className={inputCls} />
-                    {modelFile && <p className={`text-xs mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>✓ {modelFile.name} ({(modelFile.size / 1024).toFixed(1)} KB)</p>}
+                  <div className="space-y-2">
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        Model PKL File <span className={`text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(Optional — .pkl only)</span>
+                      </label>
+                      <input type="file" accept=".pkl,.pickle" onChange={e => setModelFile(e.target.files?.[0] || null)} className={inputCls} />
+                      {modelFile && <p className={`text-xs mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>✓ {modelFile.name} ({(modelFile.size / 1024).toFixed(1)} KB)</p>}
+                    </div>
+                    <div>
+                      <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        Coefficients / Variables File <span className={`text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(Optional — .xlsx, .xls)</span>
+                      </label>
+                      <input type="file" accept=".xlsx,.xls" onChange={e => setCoefficientsFile(e.target.files?.[0] || null)} className={inputCls} />
+                      {coefficientsFile && <p className={`text-xs mt-1 ${isDark ? 'text-green-400' : 'text-green-600'}`}>✓ {coefficientsFile.name} ({(coefficientsFile.size / 1024).toFixed(1)} KB)</p>}
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -1410,6 +1470,7 @@ export default function ModelRegistry() {
                       },
                       inventoryId: importInvId || undefined,
                       ...(modelFile ? { modelPklFile: { name: modelFile.name, path: `/models/${modelFile.name}`, size: modelFile.size, uploadedAt: new Date().toISOString(), dataUrl: URL.createObjectURL(modelFile) } } : {}),
+                      ...(coefficientsFile ? { coefficientsExcelFile: { name: coefficientsFile.name, path: `/models/${coefficientsFile.name}`, size: coefficientsFile.size, uploadedAt: new Date().toISOString(), dataUrl: URL.createObjectURL(coefficientsFile) } } : {}),
                     });
                     closeImportModal();
                     showNotification(`"${modelName} ${modelVersion}" imported successfully`, 'success');

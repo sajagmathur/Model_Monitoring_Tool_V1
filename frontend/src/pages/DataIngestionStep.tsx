@@ -21,6 +21,8 @@ export interface ReferenceDatasetConfig {
   // Score Level
   scoreField: string;
   targetVariable: string;
+  targetEarlyWarning1?: string;
+  targetEarlyWarning2?: string;
   segments: string[];
   /** @deprecated use segments */
   segment?: string;
@@ -65,6 +67,11 @@ export interface DataIngestionConfig {
   scoreLevelConfig?: ReferenceDatasetConfig;
   accountLevelConfig?: ReferenceDatasetConfig;
   trackDatasets?: Record<string, UploadedDataset[]>;
+  // Parsed row data for downstream quality analysis
+  scoreParsedRows?: Record<string, any>[];
+  accountParsedRows?: Record<string, any>[];
+  scoreColumnTypes?: Record<string, 'numerical' | 'categorical' | 'date'>;
+  accountColumnTypes?: Record<string, 'numerical' | 'categorical' | 'date'>;
 }
 
 interface Workflow {
@@ -112,6 +119,23 @@ function generateVintagesByYear(): Record<number, string[]> {
 }
 
 const VINTAGES_BY_YEAR = generateVintagesByYear();
+
+function detectColumnTypes(
+  rows: Record<string, any>[],
+  headers: string[]
+): Record<string, 'numerical' | 'categorical' | 'date'> {
+  const result: Record<string, 'numerical' | 'categorical' | 'date'> = {};
+  for (const col of headers) {
+    const vals = rows.map(r => r[col]).filter(v => v !== null && v !== undefined && v !== '');
+    if (vals.length === 0) { result[col] = 'categorical'; continue; }
+    if (vals.every(v => !isNaN(Number(v)))) { result[col] = 'numerical'; continue; }
+    if (vals.some(v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$|\.\w{3}-\d{2}$/.test(v))) {
+      result[col] = 'date'; continue;
+    }
+    result[col] = 'categorical';
+  }
+  return result;
+}
 
 // CSV parser helper — handles quoted fields, commas inside quotes, BOM
 function parseCSV(text: string): { headers: string[]; rows: Record<string, any>[] } {
@@ -319,8 +343,50 @@ function computeEnhancedSummary(rows: Record<string, any>[], targetCol: string, 
 }
 
 // -----------------------------------------------------------------------------
-// VintageSelector Component
-// -------------------------------------------------------------------------
+// VintageYearBuilder Component
+// -----------------------------------------------------------------------------
+
+// Smart summary formatter
+function formatVintageSummary(selectedByYear: Record<number, Set<number>>): { label: string; count: number } {
+  const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const allPairs: { year: number; m: number }[] = [];
+  Object.keys(selectedByYear)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .forEach(year => {
+      Array.from(selectedByYear[year])
+        .sort((a, b) => a - b)
+        .forEach(m => allPairs.push({ year, m }));
+    });
+  if (allPairs.length === 0) return { label: 'No months selected', count: 0 };
+  const runs: { year: number; start: number; end: number }[] = [];
+  let cur = { year: allPairs[0].year, start: allPairs[0].m, end: allPairs[0].m };
+  for (let i = 1; i < allPairs.length; i++) {
+    const { year, m } = allPairs[i];
+    if (year === cur.year && m === cur.end + 1) {
+      cur.end = m;
+    } else {
+      runs.push({ ...cur });
+      cur = { year, start: m, end: m };
+    }
+  }
+  runs.push({ ...cur });
+  const parts = runs.map(r => {
+    const yy = String(r.year).slice(2);
+    if (r.start === r.end) return MONTH_ABBR[r.start] + "'" + yy;
+    return MONTH_ABBR[r.start] + "'" + yy + '-' + MONTH_ABBR[r.end] + "'" + yy;
+  });
+  return { label: parts.join(','), count: allPairs.length };
+}
+
+const _CURRENT_YEAR = new Date().getFullYear();
+const AVAILABLE_YEARS: number[] = (() => {
+  const ys: number[] = [];
+  for (let y = 2019; y <= _CURRENT_YEAR; y++) ys.push(y);
+  return ys;
+})();
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
 const VintageRangeInput: React.FC<{
   vintageFrom: string;
   vintageTo: string;
@@ -328,185 +394,177 @@ const VintageRangeInput: React.FC<{
   onToChange: (v: string) => void;
   isDark: boolean;
 }> = ({ vintageFrom, vintageTo, onFromChange, onToChange, isDark }) => {
-  // Flat ordered list of all month tokens, e.g. ["Jan-19","Feb-19",...]
-  const allMonths: string[] = Object.keys(VINTAGES_BY_YEAR)
-    .map(Number)
-    .sort((a, b) => a - b)
-    .flatMap(y => VINTAGES_BY_YEAR[y]);
-
-  // Expand a from/to range into every month in between
-  const rangeToSet = (from: string, to: string): Set<string> => {
-    const s = new Set<string>();
-    const fi = allMonths.indexOf(from);
-    const ti = allMonths.indexOf(to);
-    if (fi === -1 || ti === -1) return s;
-    for (let i = Math.min(fi, ti); i <= Math.max(fi, ti); i++) s.add(allMonths[i]);
-    return s;
-  };
-
-  const [selected, setSelected] = useState<Set<string>>(() =>
-    rangeToSet(vintageFrom, vintageTo)
-  );
-  const [aiSuggestion, setAiSuggestion] = useState<string[] | null>(null);
-
-  // Propagate min/max of selected set to parent
-  const propagate = (next: Set<string>) => {
-    if (next.size === 0) { onFromChange(''); onToChange(''); return; }
-    const sorted = allMonths.filter(m => next.has(m));
-    onFromChange(sorted[0]);
-    onToChange(sorted[sorted.length - 1]);
-  };
-
-  const toggle = (token: string) => {
-    const next = new Set(selected);
-    if (next.has(token)) next.delete(token); else next.add(token);
-    setSelected(next);
-    propagate(next);
-  };
-
-  const toggleYear = (year: number) => {
-    const ym = VINTAGES_BY_YEAR[year];
-    const allSel = ym.every(m => selected.has(m));
-    const next = new Set(selected);
-    if (allSel) ym.forEach(m => next.delete(m));
-    else ym.forEach(m => next.add(m));
-    setSelected(next);
-    propagate(next);
-  };
-
-  const selectAll = () => {
-    const next = new Set(allMonths);
-    setSelected(next);
-    propagate(next);
-  };
-
-  const clearAll = () => {
-    setSelected(new Set());
-    onFromChange('');
-    onToChange('');
-  };
-
-  const suggestRange = () => {
-    const now = new Date();
-    const suggested: string[] = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1);
-      suggested.push(`${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`);
+  const [selectedByYear, setSelectedByYear] = useState<Record<number, Set<number>>>(() => {
+    const init: Record<number, Set<number>> = {};
+    if (vintageFrom && vintageTo) {
+      const allMonths: string[] = [];
+      AVAILABLE_YEARS.forEach(y => VINTAGES_BY_YEAR[y]?.forEach((tok: string) => allMonths.push(tok)));
+      const fi = allMonths.indexOf(vintageFrom);
+      const ti = allMonths.indexOf(vintageTo);
+      if (fi !== -1 && ti !== -1) {
+        for (let i = Math.min(fi, ti); i <= Math.max(fi, ti); i++) {
+          const tok = allMonths[i];
+          const [mon, yr] = tok.split('-');
+          const year = 2000 + parseInt(yr, 10);
+          const monthIdx = MONTHS.indexOf(mon);
+          if (!init[year]) init[year] = new Set();
+          init[year].add(monthIdx);
+        }
+      }
     }
-    setAiSuggestion(suggested.filter(m => allMonths.includes(m)));
+    return init;
+  });
+  const [addYearOpen, setAddYearOpen] = useState(false);
+
+  const addedYears = Object.keys(selectedByYear).map(Number).sort((a, b) => a - b);
+  const remainingYears = AVAILABLE_YEARS.filter(y => !addedYears.includes(y));
+
+  const propagate = (next: Record<number, Set<number>>) => {
+    const allPairs: { year: number; m: number }[] = [];
+    Object.keys(next).map(Number).sort((a, b) => a - b).forEach(year => {
+      Array.from(next[year]).sort((a, b) => a - b).forEach(m => allPairs.push({ year, m }));
+    });
+    if (allPairs.length === 0) { onFromChange(''); onToChange(''); return; }
+    const toTok = ({ year, m }: { year: number; m: number }) =>
+      MONTHS[m] + '-' + String(year).slice(2);
+    onFromChange(toTok(allPairs[0]));
+    onToChange(toTok(allPairs[allPairs.length - 1]));
   };
 
-  const acceptSuggestion = () => {
-    if (!aiSuggestion) return;
-    const next = new Set(aiSuggestion);
-    setSelected(next);
+  const toggleMonth = (year: number, mIdx: number) => {
+    const next: Record<number, Set<number>> = { ...selectedByYear };
+    next[year] = new Set(selectedByYear[year] ?? []);
+    if (next[year].has(mIdx)) next[year].delete(mIdx); else next[year].add(mIdx);
+    setSelectedByYear(next);
     propagate(next);
-    setAiSuggestion(null);
   };
 
-  const years = Object.keys(VINTAGES_BY_YEAR).map(Number).sort((a, b) => a - b);
-  const sortedSelected = allMonths.filter(m => selected.has(m));
-  const summary =
-    selected.size === 0
-      ? 'No months selected'
-      : selected.size === 1
-      ? sortedSelected[0]
-      : `${sortedSelected[0]} - ${sortedSelected[sortedSelected.length - 1]} (${selected.size} months)`;
+  const toggleAllMonthsInYear = (year: number, selectAll: boolean) => {
+    const maxM = year === _CURRENT_YEAR ? new Date().getMonth() : 11;
+    const next: Record<number, Set<number>> = { ...selectedByYear };
+    next[year] = selectAll ? new Set(Array.from({ length: maxM + 1 }, (_, i) => i)) : new Set();
+    setSelectedByYear(next);
+    propagate(next);
+  };
+
+  const removeYear = (year: number) => {
+    const next: Record<number, Set<number>> = { ...selectedByYear };
+    delete next[year];
+    setSelectedByYear(next);
+    propagate(next);
+  };
+
+  const addYear = (year: number) => {
+    const next: Record<number, Set<number>> = { ...selectedByYear, [year]: new Set<number>() };
+    setSelectedByYear(next);
+    setAddYearOpen(false);
+    propagate(next);
+  };
+
+  const { label: summaryLabel, count: summaryCount } = formatVintageSummary(selectedByYear);
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <span className={`text-xs font-medium ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          Reference Vintage
-        </span>
-        <div className="flex items-center gap-1">
-          <button type="button" onClick={clearAll}
-            className={`text-xs px-2 py-0.5 rounded hover:underline ${isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
-            Clear
-          </button>
-          <button type="button" onClick={selectAll}
-            className={`text-xs px-2 py-0.5 rounded hover:underline ${isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
-            All
-          </button>
-          <button type="button" onClick={suggestRange}
-            className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-medium ${isDark ? 'text-purple-300 hover:bg-purple-900/30' : 'text-purple-600 hover:bg-purple-50'}`}>
-            <Brain size={11} /> AI Suggest
-          </button>
-        </div>
-      </div>
-
-      {/* Year/month grid */}
-      <div className={`rounded-lg border divide-y overflow-hidden ${isDark ? 'border-gray-700 divide-gray-700' : 'border-gray-200 divide-gray-200'}`}>
-        {years.map(year => {
-          const ym = VINTAGES_BY_YEAR[year];
-          const allSel = ym.every(m => selected.has(m));
-          const someSel = !allSel && ym.some(m => selected.has(m));
-          return (
-            <div key={year} className={`px-3 py-2 ${isDark ? 'bg-gray-900/40' : 'bg-white'}`}>
-              {/* Year row */}
-              <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="checkbox"
-                  id={`yr-${year}`}
-                  checked={allSel}
-                  ref={el => { if (el) el.indeterminate = someSel; }}
-                  onChange={() => toggleYear(year)}
-                  className="w-3.5 h-3.5 cursor-pointer accent-blue-500"
-                />
-                <label htmlFor={`yr-${year}`}
-                  className={`text-xs font-semibold cursor-pointer select-none ${isDark ? 'text-gray-100' : 'text-gray-800'}`}>
-                  {year}
+    <div className="space-y-3">
+      {addedYears.map(year => {
+        const sel = selectedByYear[year] ?? new Set<number>();
+        const maxM = year === _CURRENT_YEAR ? new Date().getMonth() : 11;
+        const availableMonths = Array.from({ length: maxM + 1 }, (_, i) => i);
+        const allSelected = availableMonths.length > 0 && availableMonths.every(m => sel.has(m));
+        return (
+          <div key={year} className={`rounded-xl border ${isDark ? 'bg-gray-900/40 border-gray-700' : 'bg-white border-gray-200 shadow-sm'}`}>
+            <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
+              <span className={`text-sm font-bold ${isDark ? 'text-gray-100' : 'text-gray-800'}`}>{year}</span>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={e => toggleAllMonthsInYear(year, e.target.checked)}
+                    className="w-3.5 h-3.5 accent-blue-500 cursor-pointer"
+                  />
+                  <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Select All</span>
                 </label>
-                <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                  ({ym.filter(m => selected.has(m)).length}/{ym.length})
-                </span>
-              </div>
-              {/* Month pills */}
-              <div className="flex flex-wrap gap-1">
-                {ym.map(token => {
-                  const isSel = selected.has(token);
-                  return (
-                    <button
-                      key={token}
-                      type="button"
-                      onClick={() => toggle(token)}
-                      className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                        isSel
-                          ? isDark
-                            ? 'bg-blue-600 border-blue-500 text-white'
-                            : 'bg-blue-500 border-blue-500 text-white'
-                          : isDark
-                            ? 'bg-transparent border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200'
-                            : 'bg-white border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600'
-                      }`}
-                    >
-                      {token.split('-')[0]}
-                    </button>
-                  );
-                })}
+                <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>({sel.size}/{availableMonths.length})</span>
+                <button
+                  type="button"
+                  onClick={() => removeYear(year)}
+                  className={`text-xs px-1.5 py-0.5 rounded transition ${isDark ? 'text-red-400 hover:bg-red-900/30' : 'text-red-500 hover:bg-red-50'}`}
+                  title="Remove year"
+                >
+                  <X size={12} />
+                </button>
               </div>
             </div>
-          );
-        })}
-      </div>
+            <div className="flex flex-wrap gap-1.5 px-4 py-3">
+              {MONTH_NAMES.map((name, mIdx) => {
+                if (mIdx > maxM) return null;
+                const isSel = sel.has(mIdx);
+                return (
+                  <button
+                    key={mIdx}
+                    type="button"
+                    onClick={() => toggleMonth(year, mIdx)}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                      isSel
+                        ? isDark
+                          ? 'bg-blue-600 border-blue-500 text-white'
+                          : 'bg-blue-500 border-blue-500 text-white'
+                        : isDark
+                          ? 'bg-transparent border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200'
+                          : 'bg-white border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600'
+                    }`}
+                  >
+                    {name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
 
-      {/* Summary */}
-      <p className={`text-xs mt-1.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-        Selected: <strong>{summary}</strong>
-      </p>
-
-      {/* AI suggestion banner */}
-      {aiSuggestion && (
-        <div className={`mt-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs ${isDark ? 'bg-purple-900/30 border border-purple-700/40 text-purple-300' : 'bg-purple-50 border border-purple-200 text-purple-700'}`}>
-          <Brain size={11} />
-          <span className="flex-1">
-            AI suggests: last 12 months ({aiSuggestion[0]} - {aiSuggestion[aiSuggestion.length - 1]})
-          </span>
-          <button type="button" onClick={acceptSuggestion} className="font-semibold underline">Accept</button>
-          <button type="button" onClick={() => setAiSuggestion(null)} className="opacity-60 hover:opacity-100"><X size={10} /></button>
+      {remainingYears.length > 0 && (
+        <div className="relative">
+          {addYearOpen ? (
+            <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-gray-700 bg-gray-900' : 'border-gray-200 bg-white shadow-md'}`}>
+              <div className={`px-3 py-2 text-xs font-semibold border-b ${isDark ? 'border-gray-700 text-gray-400' : 'border-gray-100 text-gray-500'}`}>
+                Select year to add
+              </div>
+              <div className="flex flex-wrap gap-1.5 p-3">
+                {remainingYears.map(y => (
+                  <button
+                    key={y}
+                    type="button"
+                    onClick={() => addYear(y)}
+                    className={`text-sm px-3 py-1.5 rounded-lg border transition ${isDark ? 'border-gray-600 text-gray-300 hover:bg-blue-600 hover:border-blue-500 hover:text-white' : 'border-gray-300 text-gray-700 hover:bg-blue-500 hover:border-blue-500 hover:text-white'}`}
+                  >
+                    {y}
+                  </button>
+                ))}
+              </div>
+              <div className="px-3 pb-2">
+                <button type="button" onClick={() => setAddYearOpen(false)} className={`text-xs ${isDark ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAddYearOpen(true)}
+              className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl border-2 border-dashed transition w-full justify-center ${isDark ? 'border-gray-700 text-gray-400 hover:border-blue-500 hover:text-blue-400' : 'border-gray-300 text-gray-500 hover:border-blue-400 hover:text-blue-600'}`}
+            >
+              <span className="text-lg leading-none">+</span> Add Year
+            </button>
+          )}
         </div>
       )}
+
+      <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+        Selected:{' '}
+        <strong className={isDark ? 'text-gray-300' : 'text-gray-700'}>{summaryLabel}</strong>
+        {summaryCount > 0 && (
+          <span className={`ml-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>({summaryCount} month{summaryCount !== 1 ? 's' : ''})</span>
+        )}
+      </p>
     </div>
   );
 };
@@ -554,7 +612,6 @@ const FileDropZone: React.FC<{
   );
 };
 
-// -----------------------------------------------------------------------------
 // AISuggestBadge
 // -----------------------------------------------------------------------------
 const AISuggestBadge: React.FC<{
@@ -586,6 +643,8 @@ export const DataIngestionStepComponent: React.FC<{
   const [scoreLevelDataset, setScoreLevelDataset] = useState<UploadedDataset | null>(null);
   const [scoreParsedRows, setScoreParsedRows] = useState<Record<string, any>[]>([]);
   const [accountParsedRows, setAccountParsedRows] = useState<Record<string, any>[]>([]);
+  const [scoreColumnTypes, setScoreColumnTypes] = useState<Record<string, 'numerical' | 'categorical' | 'date'>>({});
+  const [accountColumnTypes, setAccountColumnTypes] = useState<Record<string, 'numerical' | 'categorical' | 'date'>>({});
   const [accountLevelDataset, setAccountLevelDataset] = useState<UploadedDataset | null>(null);
 
   // -- Score level config --------------------------------------------------
@@ -660,6 +719,7 @@ export const DataIngestionStepComponent: React.FC<{
       };
       setScoreLevelDataset(ds);
       setScoreParsedRows(rows);
+      setScoreColumnTypes(detectColumnTypes(rows, headers));
       setScoreConfig(prev => ({
         ...prev,
         targetVariable: findColumn(headers, TARGET_HEURISTICS),
@@ -690,6 +750,7 @@ export const DataIngestionStepComponent: React.FC<{
       };
       setAccountLevelDataset(ds);
       setAccountParsedRows(rows);
+      setAccountColumnTypes(detectColumnTypes(rows, headers));
       setAccountConfig(prev => ({
         ...prev,
         uniqueKey: findColumn(headers, KEY_HEURISTICS),
@@ -793,6 +854,10 @@ export const DataIngestionStepComponent: React.FC<{
       scoreLevelConfig: scoreLevelDataset ? (scoreConfig as ReferenceDatasetConfig) : undefined,
       accountLevelConfig: accountLevelDataset ? (accountConfig as ReferenceDatasetConfig) : undefined,
       trackDatasets,
+      scoreParsedRows: scoreParsedRows.length > 0 ? scoreParsedRows : undefined,
+      accountParsedRows: accountParsedRows.length > 0 ? accountParsedRows : undefined,
+      scoreColumnTypes: Object.keys(scoreColumnTypes).length > 0 ? scoreColumnTypes : undefined,
+      accountColumnTypes: Object.keys(accountColumnTypes).length > 0 ? accountColumnTypes : undefined,
     });
   };
 
@@ -889,6 +954,7 @@ export const DataIngestionStepComponent: React.FC<{
               if (datasetType === 'account') {
                 setAccountLevelDataset(null);
                 setAccountParsedRows([]);
+                setAccountColumnTypes({});
                 setConfigSaved(false);
               }
               setDatasetType('score');
@@ -920,6 +986,7 @@ export const DataIngestionStepComponent: React.FC<{
               if (datasetType === 'score') {
                 setScoreLevelDataset(null);
                 setScoreParsedRows([]);
+                setScoreColumnTypes({});
                 setConfigSaved(false);
               }
               setDatasetType('account');
@@ -955,7 +1022,7 @@ export const DataIngestionStepComponent: React.FC<{
             <FileDropZone
               dataset={scoreLevelDataset}
               onFile={handleScoreFile}
-              onClear={() => { setScoreLevelDataset(null); setScoreParsedRows([]); setConfigSaved(false); }}
+              onClear={() => { setScoreLevelDataset(null); setScoreParsedRows([]); setScoreColumnTypes({}); setConfigSaved(false); }}
               inputId="score-csv-input"
               description="One row per scored account / observation"
               isDark={isDark}
@@ -985,7 +1052,7 @@ export const DataIngestionStepComponent: React.FC<{
             <FileDropZone
               dataset={accountLevelDataset}
               onFile={handleAccountFile}
-              onClear={() => { setAccountLevelDataset(null); setAccountParsedRows([]); setConfigSaved(false); }}
+              onClear={() => { setAccountLevelDataset(null); setAccountParsedRows([]); setAccountColumnTypes({}); setConfigSaved(false); }}
               inputId="account-csv-input"
               description="One row per account with feature values"
               isDark={isDark}
@@ -1209,6 +1276,23 @@ export const DataIngestionStepComponent: React.FC<{
                 )}
               </div>
             </div>
+            {/* Early Warning Targets */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className={lbl}>Target Early Warning 1</label>
+                <select className={sel} value={scoreConfig.targetEarlyWarning1 ?? ''} onChange={e => updateScore({ targetEarlyWarning1: e.target.value })}>
+                  <option value="">Select column (optional)</option>
+                  {scoreColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={lbl}>Target Early Warning 2</label>
+                <select className={sel} value={scoreConfig.targetEarlyWarning2 ?? ''} onChange={e => updateScore({ targetEarlyWarning2: e.target.value })}>
+                  <option value="">Select column (optional)</option>
+                  {scoreColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
             {/* Segment Variables — multiple */}
             <div className="mb-4">
               <div className="flex items-center justify-between mb-1.5">
@@ -1320,6 +1404,23 @@ export const DataIngestionStepComponent: React.FC<{
                     isDark={isDark}
                   />
                 )}
+              </div>
+            </div>
+            {/* Early Warning Targets */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className={lbl}>Target Early Warning 1</label>
+                <select className={sel} value={accountConfig.targetEarlyWarning1 ?? ''} onChange={e => updateAccount({ targetEarlyWarning1: e.target.value })}>
+                  <option value="">Select column (optional)</option>
+                  {accountColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={lbl}>Target Early Warning 2</label>
+                <select className={sel} value={accountConfig.targetEarlyWarning2 ?? ''} onChange={e => updateAccount({ targetEarlyWarning2: e.target.value })}>
+                  <option value="">Select column (optional)</option>
+                  {accountColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
               </div>
             </div>
             {/* Segment Variables — multiple */}

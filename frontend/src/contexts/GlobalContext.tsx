@@ -77,6 +77,9 @@ export interface IngestionJob {
   resolvedIssuesCount?: number; // Number of issues resolved
   // Dataset granularity level
   level?: 'score' | 'account';
+  // Parsed data for in-browser analysis
+  parsedRows?: Record<string, any>[];
+  detectedColumnTypes?: Record<string, 'numerical' | 'categorical' | 'date'>;
 }
 
 export interface PreparationJob {
@@ -121,6 +124,7 @@ export interface RegistryModel {
   // Artifact file uploads (model.pkl / metrics.json)
   modelPklFile?: { name: string; path: string; size: number; uploadedAt: string; dataUrl?: string; };
   metricsJsonFile?: { name: string; path: string; size: number; uploadedAt: string; dataUrl?: string; };
+  coefficientsExcelFile?: { name: string; path: string; size: number; uploadedAt: string; dataUrl?: string; };
   // Inventory assignment
   inventoryId?: string;
 }
@@ -1151,8 +1155,18 @@ export const GlobalProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, []);
 
   // Save to localStorage on state change
+  // Strip large in-memory-only fields (parsedRows, detectedColumnTypes) to avoid
+  // exceeding the ~5 MB localStorage quota.
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const stateToSave = {
+      ...state,
+      ingestionJobs: state.ingestionJobs.map(({ parsedRows: _pr, detectedColumnTypes: _ct, ...rest }) => rest),
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+    } catch (e) {
+      console.warn('[GlobalContext] localStorage quota exceeded — persisted without parsedRows:', e);
+    }
   }, [state]);
 
   // Projects
